@@ -1,0 +1,23 @@
+[Unit]
+Description=Neural Chat Next.js service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=neural-chat
+Group=neural-chat
+WorkingDirectory=/opt/neural-chat
+Environment=NODE_ENV=production
+Environment=NEURAL_CHAT_DATA_DIR=/var/lib/neural-chat
+EnvironmentFile=-/etc/neural-chat.env
+ExecStart=/usr/bin/node scripts/start-server.mjs start
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/neural-chat
+
+[Install]
+WantedBy=multi-user.target
