@@ -44,7 +44,7 @@ export function toolDefinitions(enabled: EnabledWebTools) {
     type: "function",
     function: {
       name: "ask_multiple_choice",
-      description: "Ask the user up to 3 concise questions using selectable options. Use for ambiguous preferences, not for already-clear or emotional conversational questions. The tool pauses the turn until the user submits choices.",
+      description: "Ask the user up to 3 concise questions using selectable options. Choose single_select when exactly one answer is appropriate, multi_select when several answers may be chosen, or rank_priorities when order matters. Use for ambiguous preferences, not for already-clear or emotional conversational questions. The tool pauses the turn until the user answers each question.",
       parameters: {
         type: "object",
         properties: {

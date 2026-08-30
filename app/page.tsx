@@ -16,6 +16,7 @@ import type {
 } from "@/lib/types";
 import { advertisedContextWindowTokens, effectiveContextWindowTokens } from "@/lib/model-context";
 import { createClientId } from "@/lib/client-id";
+import { multipleChoiceAnswers, pendingMultipleChoiceEvent, removeUserMessagePair } from "@/lib/conversation-messages";
 import { formatReasoningForDisplay, getToolGroupLabel, getToolGroupState, getToolStatusLabel } from "@/lib/tool-presentation";
 import { APP_VERSION } from "@/lib/version";
 
@@ -51,7 +52,7 @@ const translations = {
     messagePlaceholder: "Message your model…", reasoningPreset: "Reasoning preset", native: "Native", template: "Template", default: "default",
     sendPriorReasoning: "Send prior reasoning", sendPriorReasoningDesc: "Include reasoning_content in the next request",
     disclaimer: "Responses may be inaccurate. Verify important information.", stop: "Stop generating", send: "Send message", addToQueue: "Add to queue", queuedMessages: "Queued messages", removeQueuedMessage: "Remove queued message",
-    cancel: "Cancel", forkSend: "Fork & send", editBranch: "Edit and branch", reasoning: "Reasoning", copy: "Copy", regenerate: "Regenerate response", regenerateRequest: "Regenerate from this message", deleteMessage: "Delete message", confirmDeleteMessage: "Delete this message?", previousRevision: "Previous revision", nextRevision: "Next revision",
+    cancel: "Cancel", forkSend: "Fork & send", editBranch: "Edit and branch", reasoning: "Reasoning", copy: "Copy", regenerate: "Regenerate response", regenerateRequest: "Regenerate from this message", deleteMessage: "Delete message", confirmDeleteMessage: "Delete this message and its connected model response?", previousRevision: "Previous revision", nextRevision: "Next revision",
     exportConversation: "Export conversation", exportDescription: "Export every branch as JSON, or the selected branch as Markdown.",
     includeReasoning: "Include reasoning", includeReasoningDesc: "Include model reasoning content in the export.", allBranches: "all branches",
     workspace: "Workspace", settings: "Settings", connection: "Connection", models: "Models", saveChanges: "Save changes", saving: "Saving…",
@@ -71,7 +72,7 @@ const translations = {
     attachImages: "Attach images", uploadingImages: "Creating thumbnails and uploading…", removeImage: "Remove image", loadEarlier: "Load earlier messages",
     imagesAttached: "images attached", imageChat: "Image chat", imageUploadFailed: "Image upload failed.", maxImages: "You can attach up to 12 images.",
     thinking: "Thinking…", editResponse: "Edit response", saveEdit: "Save", thoughtFor: "Thought for", useWrapping: "Use wrapping", copied: "Copied",
-    addMenu: "Add", tools: "Tools", internetSearch: "Internet search", internetSearchDesc: "Let the model search DuckDuckGo", pageVisit: "Visit pages", pageVisitDesc: "Let the model read public web pages", currentTime: "Current time", currentTimeDesc: "Provide local time and time zone to the model", locationTool: "Current location", locationToolDesc: "Use browser location and detailed reverse geocoding", multipleChoice: "Multiple choice", multipleChoiceDesc: "Let the model ask up to three selectable questions", usingTool: "Using a tool…", toolCall: "Tool call", toolResult: "Tool result", submitChoices: "Submit choices", otherChoice: "Other (optional)", locationPermission: "Waiting for browser location permission…",
+    addMenu: "Add", tools: "Tools", internetSearch: "Internet search", internetSearchDesc: "Let the model search DuckDuckGo", pageVisit: "Visit pages", pageVisitDesc: "Let the model read public web pages", currentTime: "Current time", currentTimeDesc: "Provide local time and time zone to the model", locationTool: "Current location", locationToolDesc: "Use browser location and detailed reverse geocoding", multipleChoice: "Multiple choice", multipleChoiceDesc: "Let the model ask up to three selectable questions", usingTool: "Using a tool…", toolCall: "Tool call", toolResult: "Tool result", submitChoices: "Submit answers", otherChoice: "Or type a direct answer…", choiceNext: "Next", choiceBack: "Previous question", choiceProgress: "Question", choiceWaiting: "Answer the question above to continue", locationPermission: "Waiting for browser location permission…",
     account: "Account", users: "Users", signOut: "Sign out", changePassword: "Change password", currentPassword: "Current password", newPassword: "New password", passwordChanged: "Password changed. Please sign in again.",
     userManagement: "User management", userManagementDesc: "Administrators can create accounts, change display names and roles, and delete accounts.", username: "Username", password: "Password", role: "Role", standardUser: "User", administrator: "Administrator", addUser: "Add user", saveDisplayName: "Save user changes", deleteUser: "Delete user", confirmDeleteUser: "Permanently delete this user and all of their data?", userDeleted: "User deleted.", publicModel: "Public custom model", publicModelDesc: "Allow every user to use this custom model.",
     contextWindow: "Context window", contextWindowHelp: "Set a per-model fallback limit. When the API also advertises a limit, the smaller value is used.", aliasContextWindowHelp: "Leave empty to inherit the base model. A value here overrides the base model setting while respecting the server limit.", inheritedContextWindow: "Inherited from base model", apiContextWindow: "API-detected context", effectiveContextWindow: "Effective maximum", contextUsed: "context tokens used", contextUnavailable: "Set this model's context window in Settings.",
@@ -84,7 +85,7 @@ const translations = {
     messagePlaceholder: "모델에게 메시지 보내기…", reasoningPreset: "Reasoning 프리셋", native: "내장", template: "템플릿", default: "기본값",
     sendPriorReasoning: "이전 Reasoning 전송", sendPriorReasoningDesc: "다음 요청에 reasoning_content를 포함합니다",
     disclaimer: "응답이 부정확할 수 있습니다. 중요한 정보는 확인해 주세요.", stop: "생성 중단", send: "메시지 전송", addToQueue: "대기열에 추가", queuedMessages: "대기 중인 메시지", removeQueuedMessage: "대기열에서 제거",
-    cancel: "취소", forkSend: "분기 후 전송", editBranch: "편집 후 분기", reasoning: "Reasoning", copy: "복사", regenerate: "응답 재생성", regenerateRequest: "이 메시지부터 재생성", deleteMessage: "메시지 삭제", confirmDeleteMessage: "이 메시지를 삭제할까요?", previousRevision: "이전 수정본", nextRevision: "다음 수정본",
+    cancel: "취소", forkSend: "분기 후 전송", editBranch: "편집 후 분기", reasoning: "Reasoning", copy: "복사", regenerate: "응답 재생성", regenerateRequest: "이 메시지부터 재생성", deleteMessage: "메시지 삭제", confirmDeleteMessage: "이 메시지와 연결된 모델 응답을 함께 삭제할까요?", previousRevision: "이전 수정본", nextRevision: "다음 수정본",
     exportConversation: "대화 내보내기", exportDescription: "모든 브랜치를 JSON으로, 선택한 브랜치를 Markdown으로 내보냅니다.",
     includeReasoning: "Reasoning 포함", includeReasoningDesc: "내보내기에 모델의 reasoning 내용을 포함합니다.", allBranches: "모든 브랜치",
     workspace: "워크스페이스", settings: "설정", connection: "연결", models: "모델", saveChanges: "변경사항 저장", saving: "저장 중…",
@@ -104,7 +105,7 @@ const translations = {
     attachImages: "이미지 첨부", uploadingImages: "썸네일 생성 및 업로드 중…", removeImage: "이미지 제거", loadEarlier: "이전 메시지 불러오기",
     imagesAttached: "개 이미지 첨부", imageChat: "이미지 대화", imageUploadFailed: "이미지 업로드에 실패했습니다.", maxImages: "이미지는 최대 12장까지 첨부할 수 있습니다.",
     thinking: "생각 중…", editResponse: "응답 편집", saveEdit: "저장", thoughtFor: "동안 생각함", useWrapping: "줄 바꿈 사용", copied: "복사됨",
-    addMenu: "추가", tools: "도구", internetSearch: "인터넷 검색", internetSearchDesc: "모델이 DuckDuckGo를 검색하도록 허용", pageVisit: "페이지 방문", pageVisitDesc: "모델이 공개 웹 페이지를 읽도록 허용", currentTime: "현재 시간", currentTimeDesc: "현지 시간과 시간대를 모델에 제공", locationTool: "현재 위치", locationToolDesc: "브라우저 위치와 상세 역지오코딩 사용", multipleChoice: "다중 선택", multipleChoiceDesc: "모델이 선택형 질문을 최대 3개까지 요청", usingTool: "도구 사용 중…", toolCall: "도구 호출", toolResult: "도구 결과", submitChoices: "선택 제출", otherChoice: "기타 (선택 사항)", locationPermission: "브라우저 위치 권한을 기다리는 중…",
+    addMenu: "추가", tools: "도구", internetSearch: "인터넷 검색", internetSearchDesc: "모델이 DuckDuckGo를 검색하도록 허용", pageVisit: "페이지 방문", pageVisitDesc: "모델이 공개 웹 페이지를 읽도록 허용", currentTime: "현재 시간", currentTimeDesc: "현지 시간과 시간대를 모델에 제공", locationTool: "현재 위치", locationToolDesc: "브라우저 위치와 상세 역지오코딩 사용", multipleChoice: "다중 선택", multipleChoiceDesc: "모델이 선택형 질문을 최대 3개까지 요청", usingTool: "도구 사용 중…", toolCall: "도구 호출", toolResult: "도구 결과", submitChoices: "답변 제출", otherChoice: "또는 직접 답변…", choiceNext: "다음", choiceBack: "이전 질문", choiceProgress: "질문", choiceWaiting: "위 질문에 답하면 모델이 계속 응답합니다", locationPermission: "브라우저 위치 권한을 기다리는 중…",
     account: "계정", users: "사용자", signOut: "로그아웃", changePassword: "비밀번호 변경", currentPassword: "현재 비밀번호", newPassword: "새 비밀번호", passwordChanged: "비밀번호를 변경했습니다. 다시 로그인해 주세요.",
     userManagement: "사용자 관리", userManagementDesc: "관리자는 계정을 만들고, 다른 사용자의 표시 이름과 권한을 변경하거나 계정을 삭제할 수 있습니다.", username: "사용자 이름", password: "비밀번호", role: "역할", standardUser: "일반 사용자", administrator: "관리자", addUser: "사용자 추가", saveDisplayName: "사용자 변경 저장", deleteUser: "사용자 삭제", confirmDeleteUser: "이 사용자와 모든 데이터를 영구적으로 삭제할까요?", userDeleted: "사용자를 삭제했습니다.", publicModel: "커스텀 모델 공개", publicModelDesc: "모든 사용자가 이 커스텀 모델을 사용할 수 있습니다.",
     contextWindow: "컨텍스트 윈도우", contextWindowHelp: "모델별 대체 한도를 설정합니다. API도 한도를 반환하면 둘 중 작은 값을 사용합니다.", aliasContextWindowHelp: "비워 두면 기반 모델 값을 상속합니다. 값을 입력하면 서버 한도 안에서 기반 모델 설정을 오버라이드합니다.", inheritedContextWindow: "기반 모델에서 상속", apiContextWindow: "API 감지 컨텍스트", effectiveContextWindow: "적용 최대값", contextUsed: "컨텍스트 토큰 사용", contextUnavailable: "설정에서 이 모델의 컨텍스트 윈도우를 지정해 주세요.",
@@ -324,6 +325,7 @@ export default function Home() {
   const selectedModel = visibleModels.find((model) => model.id === selectedModelId) || visibleModels[0];
   const selectedPreset = selectedModel?.reasoningPresets.find((preset) => preset.id === selectedPresetId) || selectedModel?.reasoningPresets[0];
   const activeBranch = conversation?.branches.find((branch) => branch.id === conversation.activeBranchId);
+  const pendingChoice = pendingMultipleChoiceEvent(messages);
   const contextUsedTokens = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       if (messages[index].totalTokens !== undefined) return messages[index].totalTokens;
@@ -462,10 +464,15 @@ export default function Home() {
   }
 
   async function submitToolInput(toolCallId: string, value: unknown) {
-    if (!conversation?.id && !pendingConversationIdRef.current) return;
+    if (!conversation?.id && !pendingConversationIdRef.current) return false;
     const conversationId = conversation?.id || pendingConversationIdRef.current;
-    const response = await fetch(`/api/chat/${conversationId}/input`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toolCallId, value }) });
-    if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.error || "도구 입력을 전달하지 못했습니다."); }
+    try {
+      const response = await fetch(`/api/chat/${conversationId}/input`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toolCallId, value }) });
+      if (!response.ok) { const body = await response.json().catch(() => ({})); setError(body.error || "도구 입력을 전달하지 못했습니다."); return false; }
+      return true;
+    } catch {
+      setError("도구 입력을 전달하지 못했습니다."); return false;
+    }
   }
 
   function provideBrowserLocation(conversationId: string, toolCallId: string) {
@@ -665,7 +672,7 @@ export default function Home() {
     if (!conversation || isGenerating || !window.confirm(c.confirmDeleteMessage)) return;
     const source = activeBranch || conversation.branches[0]; if (!source) return;
     const message = source.messages.find((item) => item.id === messageId); if (message?.role !== "user") return;
-    const stamp = now(); const nextMessages = source.messages.filter((item) => item.id !== messageId);
+    const stamp = now(); const nextMessages = removeUserMessagePair(source.messages, messageId);
     const next: Conversation = { ...conversation, updatedAt: stamp, branches: conversation.branches.map((branch) => branch.id === source.id ? { ...branch, messages: nextMessages, updatedAt: stamp } : branch) };
     setMessages(nextMessages); await persist(next);
   }
@@ -740,12 +747,12 @@ export default function Home() {
         </div>
 
         <div className="conversation-stage">
-          {!messages.length ? <div className="idle-center"><div className="welcome"><div className="welcome-mark"><Sparkles size={19} /></div><h1>{greeting}</h1><p>{c.welcome}</p></div><Composer c={c} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} /></div> : <>
+          {!messages.length ? <div className="idle-center"><div className="welcome"><div className="welcome-mark"><Sparkles size={19} /></div><h1>{greeting}</h1><p>{c.welcome}</p></div><Composer c={c} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} /></div> : <>
             <div className="thread" ref={threadRef} aria-live="polite">
               {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
-              {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} onToolInput={submitToolInput} />)}
+              {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
             </div>
-            <Composer c={c} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} />
+            <Composer c={c} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} />
           </>}
         </div>
       </section>
@@ -788,8 +795,8 @@ function ContextWindowIndicator({ c, locale, model, models, usedTokens }: { c: C
   </div>;
 }
 
-function Composer(props: { c: CopySet; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextUsedTokens?: number; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; sendReasoning: boolean; toggleSendReasoning: (value: boolean) => void; error: string; clearError: () => void; attachments: StoredAttachment[]; uploadingImages: boolean; onFiles: (files: File[]) => void; onRemoveAttachment: (attachment: StoredAttachment) => void; internetSearchEnabled: boolean; setInternetSearchEnabled: (value: boolean) => void; pageVisitEnabled: boolean; setPageVisitEnabled: (value: boolean) => void; currentTimeEnabled: boolean; setCurrentTimeEnabled: (value: boolean) => void; locationEnabled: boolean; setLocationEnabled: (value: boolean) => void; multipleChoiceEnabled: boolean; setMultipleChoiceEnabled: (value: boolean) => void }) {
-  const { c, draft, setDraft, sendMessage, keyDown, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextUsedTokens, presetOpen, setPresetOpen, setPreset, sendReasoning, toggleSendReasoning, error, clearError, attachments, uploadingImages, onFiles, onRemoveAttachment, internetSearchEnabled, setInternetSearchEnabled, pageVisitEnabled, setPageVisitEnabled, currentTimeEnabled, setCurrentTimeEnabled, locationEnabled, setLocationEnabled, multipleChoiceEnabled, setMultipleChoiceEnabled } = props;
+function Composer(props: { c: CopySet; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextUsedTokens?: number; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; sendReasoning: boolean; toggleSendReasoning: (value: boolean) => void; error: string; clearError: () => void; attachments: StoredAttachment[]; uploadingImages: boolean; onFiles: (files: File[]) => void; onRemoveAttachment: (attachment: StoredAttachment) => void; internetSearchEnabled: boolean; setInternetSearchEnabled: (value: boolean) => void; pageVisitEnabled: boolean; setPageVisitEnabled: (value: boolean) => void; currentTimeEnabled: boolean; setCurrentTimeEnabled: (value: boolean) => void; locationEnabled: boolean; setLocationEnabled: (value: boolean) => void; multipleChoiceEnabled: boolean; setMultipleChoiceEnabled: (value: boolean) => void; pendingChoice?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean> }) {
+  const { c, draft, setDraft, sendMessage, keyDown, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextUsedTokens, presetOpen, setPresetOpen, setPreset, sendReasoning, toggleSendReasoning, error, clearError, attachments, uploadingImages, onFiles, onRemoveAttachment, internetSearchEnabled, setInternetSearchEnabled, pageVisitEnabled, setPageVisitEnabled, currentTimeEnabled, setCurrentTimeEnabled, locationEnabled, setLocationEnabled, multipleChoiceEnabled, setMultipleChoiceEnabled, pendingChoice, onChoiceSubmit } = props;
   const fileRef = useRef<HTMLInputElement>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -805,12 +812,13 @@ function Composer(props: { c: CopySet; draft: string; setDraft: (value: string) 
   const showStop = isGenerating && !hasDraftMessage;
   return <div className="composer-wrap">
     {error && <div className="error-toast"><span>{error}</span><button onClick={clearError}><X size={15} /></button></div>}
+    {pendingChoice && <MultipleChoiceComposer key={pendingChoice.id} c={c} event={pendingChoice} onSubmit={(value) => onChoiceSubmit(pendingChoice.id, value)} />}
     <form className="composer" onSubmit={sendMessage}>
       <input ref={fileRef} className="visually-hidden" type="file" accept="image/*" multiple onChange={(event) => { onFiles(Array.from(event.target.files || [])); event.target.value = ""; }} />
       {queuedPrompts.length > 0 && <div className="queued-prompts"><p><span>{c.queuedMessages}</span><b>{queuedPrompts.length}</b></p>{queuedPrompts.map((prompt, index) => <div key={prompt.id}><b>{index + 1}</b><span><strong>{prompt.content || c.imageChat}</strong>{prompt.attachments.length > 0 && <small>{prompt.attachments.length} {c.imagesAttached}</small>}</span><button type="button" title={c.removeQueuedMessage} aria-label={c.removeQueuedMessage} onClick={() => onRemoveQueuedPrompt(prompt.id)}><X size={13} /></button></div>)}</div>}
       {attachments.length > 0 && <div className="draft-attachments">{attachments.map((attachment) => <div className="draft-image" key={attachment.id}><img src={attachment.thumbnailUrl} alt={attachment.name} loading="lazy" decoding="async" /><button type="button" title={c.removeImage} onClick={() => onRemoveAttachment(attachment)}><X size={13} /></button></div>)}</div>}
       {uploadingImages && <div className="uploading-images"><LoaderCircle size={14} />{c.uploadingImages}</div>}
-      <textarea aria-label={c.messagePlaceholder} rows={draft ? 2 : 1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} placeholder={c.messagePlaceholder} />
+      <textarea aria-label={pendingChoice ? c.choiceWaiting : c.messagePlaceholder} rows={draft ? 2 : 1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} placeholder={pendingChoice ? c.choiceWaiting : c.messagePlaceholder} disabled={Boolean(pendingChoice)} />
       <div className="composer-actions">
         <div className="add-menu-wrap" ref={addMenuRef}>
           <button type="button" className={`icon-button ${addMenuOpen ? "active" : ""}`} title={c.addMenu} onClick={() => setAddMenuOpen((value) => !value)}><Plus size={20} /></button>
@@ -829,7 +837,7 @@ function Composer(props: { c: CopySet; draft: string; setDraft: (value: string) 
         <span className="composer-spacer" />
         <ContextWindowIndicator c={c} locale={c === translations.ko ? "ko" : "en"} model={selectedModel} models={models} usedTokens={contextUsedTokens} />
         <div className="preset-switcher"><button type="button" className="preset-trigger" disabled={!selectedModel?.reasoningPresets.length} onClick={() => setPresetOpen(!presetOpen)}><BrainCircuit size={16} /><span>{selectedPreset?.name || c.default}</span><ChevronDown size={14} /></button>{presetOpen && <div className="popover preset-popover"><p>{c.reasoningPreset}</p>{selectedModel?.reasoningPresets.map((preset) => <button type="button" key={preset.id} onClick={() => { setPreset(preset.id); setPresetOpen(false); }}><span className="selection-dot">{preset.id === selectedPreset?.id && <Check size={12} />}</span><span>{preset.name}<small>{preset.kind === "builtin" ? `${c.native} · ${preset.effort || c.default}` : `${c.template}${preset.effort ? ` · ${preset.effort}` : ""}`}</small></span></button>)}<div className="reasoning-send-toggle"><span><strong>{c.sendPriorReasoning}</strong><small>{c.sendPriorReasoningDesc}</small></span><button type="button" role="switch" aria-checked={sendReasoning} className={`toggle ${sendReasoning ? "on" : ""}`} onClick={() => toggleSendReasoning(!sendReasoning)}><i /></button></div></div>}</div>
-        <button className={`send-button ${showStop ? "stopping" : ""}`} type="submit" disabled={uploadingImages} aria-label={showStop ? c.stop : isGenerating ? c.addToQueue : c.send}>{showStop ? <Square size={14} fill="currentColor" /> : <ArrowUp size={20} />}</button>
+        <button className={`send-button ${showStop ? "stopping" : ""}`} type="submit" disabled={uploadingImages || Boolean(pendingChoice)} aria-label={pendingChoice ? c.choiceWaiting : showStop ? c.stop : isGenerating ? c.addToQueue : c.send}>{showStop ? <Square size={14} fill="currentColor" /> : <ArrowUp size={20} />}</button>
       </div>
     </form>
     <p className="composer-note">{c.disclaimer}</p>
@@ -910,30 +918,70 @@ function StructuredJson({ value }: { value: unknown }) {
   return <pre className="structured-json"><code>{JSON.stringify(value ?? {}, null, 2)}</code></pre>;
 }
 
-function MultipleChoicePanel({ c, event, onSubmit }: { c: CopySet; event: ToolEvent; onSubmit: (value: unknown) => void }) {
+function MultipleChoiceComposer({ c, event, onSubmit }: { c: CopySet; event: ToolEvent; onSubmit: (value: unknown) => Promise<boolean> }) {
   const args = event.arguments && typeof event.arguments === "object" ? event.arguments as { questions?: MultipleChoiceQuestion[] } : {};
   const questions = args.questions || [];
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [other, setOther] = useState<Record<string, string>>({});
-  const [submitted, setSubmitted] = useState(false);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [direction, setDirection] = useState<"forward" | "back">("forward");
+  const [advancing, setAdvancing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const keyFor = (question: MultipleChoiceQuestion, index: number) => question.id || `question-${index + 1}`;
-  function choose(question: MultipleChoiceQuestion, index: number, option: string) {
-    const key = keyFor(question, index); const current = answers[key] || [];
-    if (question.type === "single_select") setAnswers((value) => ({ ...value, [key]: [option] }));
-    else setAnswers((value) => ({ ...value, [key]: current.includes(option) ? current.filter((item) => item !== option) : [...current, option] }));
+  const question = questions[currentIndex];
+  if (!question) return null;
+  const currentKey = keyFor(question, currentIndex);
+  const selected = answers[currentKey] || [];
+  const directAnswer = other[currentKey] || "";
+  const hasAnswer = selected.length > 0 || Boolean(directAnswer.trim());
+
+  function payload(answerValues = answers, otherValues = other) {
+    return { answers: questions.map((item, index) => { const key = keyFor(item, index); return { question: item.question, type: item.type, selections: answerValues[key] || [], ...(otherValues[key]?.trim() ? { other: otherValues[key].trim() } : {}) }; }) };
   }
-  function submit() {
-    const value = { answers: questions.map((question, index) => { const key = keyFor(question, index); return { question: question.question, type: question.type, selections: answers[key] || [], ...(other[key]?.trim() ? { other: other[key].trim() } : {}) }; }) };
-    setSubmitted(true); onSubmit(value);
+  async function submit(answerValues = answers, otherValues = other) {
+    setSubmitting(true);
+    if (!await onSubmit(payload(answerValues, otherValues))) setSubmitting(false);
   }
-  return <section className="multiple-choice-panel" aria-label={c.multipleChoice}>
-    {questions.map((question, index) => { const key = keyFor(question, index); const selected = answers[key] || []; return <fieldset key={key} disabled={submitted}>
-      <legend><b>{index + 1}</b><span>{question.question}</span></legend>
-      <div className="choice-options">{question.options.map((option) => { const rank = selected.indexOf(option); return <button type="button" key={option} className={rank >= 0 ? "selected" : ""} onClick={() => choose(question, index, option)}><i>{question.type === "rank_priorities" && rank >= 0 ? rank + 1 : rank >= 0 ? <Check size={13} /> : ""}</i><span>{option}</span></button>; })}</div>
-      <label className="choice-other"><Pencil size={14} /><input value={other[key] || ""} onChange={(e) => setOther((value) => ({ ...value, [key]: e.target.value }))} placeholder={c.otherChoice} /></label>
-    </fieldset>; })}
-    <button type="button" className="choice-submit" disabled={submitted} onClick={submit}>{submitted ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}{c.submitChoices}</button>
+  function moveForward(answerValues = answers, otherValues = other) {
+    const values = answerValues[currentKey] || [];
+    if (!values.length && !otherValues[currentKey]?.trim()) return;
+    if (currentIndex === questions.length - 1) { void submit(answerValues, otherValues); return; }
+    setDirection("forward"); setCurrentIndex((value) => value + 1);
+  }
+  function choose(option: string) {
+    const current = answers[currentKey] || [];
+    const nextSelections = question.type === "single_select" ? [option] : current.includes(option) ? current.filter((item) => item !== option) : [...current, option];
+    const nextAnswers = { ...answers, [currentKey]: nextSelections };
+    setAnswers(nextAnswers);
+    if (question.type === "single_select") {
+      if (currentIndex === questions.length - 1) { void submit(nextAnswers, other); return; }
+      setAdvancing(true);
+      window.setTimeout(() => { setDirection("forward"); setCurrentIndex((value) => value + 1); setAdvancing(false); }, 160);
+    }
+  }
+  return <section className="choice-composer-card" aria-label={c.multipleChoice}>
+    <header>
+      <button type="button" aria-label={c.choiceBack} disabled={currentIndex === 0 || submitting} onClick={() => { setDirection("back"); setCurrentIndex((value) => Math.max(0, value - 1)); }}><ChevronLeft size={18} /></button>
+      <span>{c.choiceProgress} {currentIndex + 1} / {questions.length}</span>
+      <div className="choice-progress" aria-hidden="true">{questions.map((_, index) => <i className={index === currentIndex ? "active" : index < currentIndex ? "done" : ""} key={index} />)}</div>
+    </header>
+    <fieldset className={`choice-slide slide-${direction}`} key={currentKey} disabled={submitting || advancing}>
+      <legend>{question.question}</legend>
+      <div className="choice-options">{question.options.map((option, optionIndex) => { const rank = selected.indexOf(option); return <button type="button" key={option} className={rank >= 0 ? "selected" : ""} onClick={() => choose(option)}><i>{rank >= 0 ? question.type === "rank_priorities" ? rank + 1 : <Check size={14} /> : optionIndex + 1}</i><span>{option}</span>{question.type === "single_select" && <ChevronRight size={16} />}</button>; })}</div>
+      <label className="choice-other"><Pencil size={15} /><input value={directAnswer} onChange={(changeEvent) => setOther((value) => ({ ...value, [currentKey]: changeEvent.target.value }))} onKeyDown={(keyEvent) => { if (keyEvent.key === "Enter" && !keyEvent.shiftKey) { keyEvent.preventDefault(); moveForward(); } }} placeholder={c.otherChoice} /></label>
+    </fieldset>
+    <footer><button type="button" className="choice-submit" disabled={!hasAnswer || submitting || advancing} onClick={() => moveForward()}>{submitting ? <LoaderCircle className="spin" size={15} /> : currentIndex === questions.length - 1 ? <Check size={15} /> : <ChevronRight size={16} />}{currentIndex === questions.length - 1 ? c.submitChoices : c.choiceNext}</button></footer>
   </section>;
+}
+
+function MultipleChoiceResponse({ event }: { event: ToolEvent }) {
+  const answers = multipleChoiceAnswers(event);
+  if (!answers.length) return null;
+  return <div className="choice-response-row"><div className="choice-response-bubble">{answers.map((answer, index) => {
+    const selections = answer.type === "rank_priorities" ? answer.selections.map((selection, rank) => `${rank + 1}. ${selection}`) : answer.selections;
+    const response = [...selections, ...(answer.other ? [answer.other] : [])].join(" · ") || "—";
+    return <div key={`${answer.question}-${index}`}><small>{answer.question}</small><strong>{response}</strong></div>;
+  })}</div></div>;
 }
 
 function ToolEventIcon({ name, size = 15 }: { name: string; size?: number }) {
@@ -941,7 +989,7 @@ function ToolEventIcon({ name, size = 15 }: { name: string; size?: number }) {
   return <Icon size={size} />;
 }
 
-function ToolActivity({ c, locale, event, onInput }: { c: CopySet; locale: Locale; event: ToolEvent; onInput: (id: string, value: unknown) => void }) {
+function ToolActivity({ c, locale, event }: { c: CopySet; locale: Locale; event: ToolEvent }) {
   const active = event.status === "calling" || event.status === "waiting";
   return <details className={`tool-activity ${event.status}`} open={active}>
     <summary className="tool-activity-summary">
@@ -953,13 +1001,12 @@ function ToolActivity({ c, locale, event, onInput }: { c: CopySet; locale: Local
     <div className="tool-activity-body">
       <details open><summary>{c.toolCall}</summary><StructuredJson value={event.arguments} /></details>
       {event.status === "waiting" && event.name === "get_current_location" && <p className="location-wait"><LoaderCircle className="spin" size={14} />{c.locationPermission}</p>}
-      {event.status === "waiting" && event.name === "ask_multiple_choice" && <MultipleChoicePanel c={c} event={event} onSubmit={(value) => onInput(event.id, value)} />}
       {event.result !== undefined && <details open><summary>{c.toolResult}</summary><StructuredJson value={event.result} /></details>}
     </div>
   </details>;
 }
 
-function ToolActivityGroup({ c, locale, events, onInput }: { c: CopySet; locale: Locale; events: ToolEvent[]; onInput: (id: string, value: unknown) => void }) {
+function ToolActivityGroup({ c, locale, events }: { c: CopySet; locale: Locale; events: ToolEvent[] }) {
   const state = getToolGroupState(events);
   const label = getToolGroupLabel(events, locale);
   return <details className={`tool-activity-group ${state}`}>
@@ -969,12 +1016,12 @@ function ToolActivityGroup({ c, locale, events, onInput }: { c: CopySet; locale:
       <ChevronDown size={14} className="tool-group-chevron" />
     </summary>
     <div className="tool-activity-list" aria-label={locale === "ko" ? "도구 호출 목록" : "Tool call list"}>
-      {events.map((event) => <ToolActivity key={event.id} c={c} locale={locale} event={event} onInput={onInput} />)}
+      {events.map((event) => <ToolActivity key={event.id} c={c} locale={locale} event={event} />)}
     </div>
   </details>;
 }
 
-function Message({ c, locale, message, pending, revisions, onFork, onEditAssistant, onRegenerate, onRegenerateUser, onDeleteUser, onRevision, onToolInput }: { c: CopySet; locale: Locale; message: StoredMessage; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void; onToolInput: (id: string, value: unknown) => void }) {
+function Message({ c, locale, message, pending, revisions, onFork, onEditAssistant, onRegenerate, onRegenerateUser, onDeleteUser, onRevision }: { c: CopySet; locale: Locale; message: StoredMessage; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
   const [thoughtOpen, setThoughtOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(message.content);
@@ -982,6 +1029,9 @@ function Message({ c, locale, message, pending, revisions, onFork, onEditAssista
   const reasoningRef = useRef<HTMLDivElement>(null);
   const isThinking = pending && Boolean(message.reasoning) && message.reasoningDurationSeconds === undefined;
   const displayedReasoning = formatReasoningForDisplay(message.reasoning || "", message.toolEvents || [], locale);
+  const visibleToolEvents = (message.toolEvents || []).filter((event) => event.name !== "ask_multiple_choice");
+  const choiceResponses = (message.toolEvents || []).filter((event) => event.name === "ask_multiple_choice" && event.status === "completed");
+  const waitingForChoice = (message.toolEvents || []).some((event) => event.name === "ask_multiple_choice" && event.status === "waiting");
   const longPress = useLongPress(() => setMobileActionsOpen(true), pending || editing);
   useEffect(() => { if (!editing) setText(message.content); }, [editing, message.content]);
   useEffect(() => { if (isThinking && reasoningRef.current) reasoningRef.current.scrollTop = reasoningRef.current.scrollHeight; }, [isThinking, message.reasoning]);
@@ -996,8 +1046,9 @@ function Message({ c, locale, message, pending, revisions, onFork, onEditAssista
   const showThought = isThinking || thoughtOpen;
   return <div className="message-row assistant-message long-press-target" {...longPress}>
     {message.reasoning && <div className={`thinking-block ${isThinking ? "streaming" : ""}`}><button onClick={() => !isThinking && setThoughtOpen((value) => !value)} aria-expanded={showThought}><BrainCircuit size={15} /> {isThinking ? c.thinking : formatThoughtDuration(message.reasoningDurationSeconds || 1, locale)} {!isThinking && <ChevronDown size={14} className={thoughtOpen ? "rotate" : ""} />}</button>{showThought && <div ref={reasoningRef} className={`thinking-preview ${isThinking ? "live" : ""}`}>{displayedReasoning}</div>}</div>}
-    {message.toolEvents?.length ? <ToolActivityGroup c={c} locale={locale} events={message.toolEvents} onInput={onToolInput} /> : null}
-    {editing ? <div className="assistant-edit"><textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => { setText(message.content); setEditing(false); }}>{c.cancel}</button><button className="save-response" onClick={() => { if (text.trim()) onEditAssistant(message.id, text); setEditing(false); }}><Check size={13} /> {c.saveEdit}</button></div></div> : <div className="assistant-copy markdown-body">{message.content ? <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: (props) => <a {...props} target="_blank" rel="noreferrer" />, pre: ({ children }) => <CodeSnippet c={c}>{children}</CodeSnippet> }}>{message.content}</ReactMarkdown> : pending ? <span className="typing"><i /><i /><i /></span> : ""}</div>}
+    {visibleToolEvents.length ? <ToolActivityGroup c={c} locale={locale} events={visibleToolEvents} /> : null}
+    {choiceResponses.map((event) => <MultipleChoiceResponse key={event.id} event={event} />)}
+    {editing ? <div className="assistant-edit"><textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => { setText(message.content); setEditing(false); }}>{c.cancel}</button><button className="save-response" onClick={() => { if (text.trim()) onEditAssistant(message.id, text); setEditing(false); }}><Check size={13} /> {c.saveEdit}</button></div></div> : <div className="assistant-copy markdown-body">{message.content ? <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: (props) => <a {...props} target="_blank" rel="noreferrer" />, pre: ({ children }) => <CodeSnippet c={c}>{children}</CodeSnippet> }}>{message.content}</ReactMarkdown> : pending && !waitingForChoice ? <span className="typing"><i /><i /><i /></span> : ""}</div>}
     {!pending && !editing && <div className="assistant-footer"><div className="assistant-actions"><button className="message-action-button" title={c.regenerate} aria-label={c.regenerate} onClick={() => onRegenerate(message.id)}><RefreshCw size={14} /></button>{message.content && <button className="message-action-button" title={c.copy} aria-label={c.copy} onClick={() => navigator.clipboard.writeText(message.content)}><Copy size={14} /></button>}<button className="message-action-button" title={c.editResponse} aria-label={c.editResponse} onClick={() => setEditing(true)}><Pencil size={14} /></button></div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /><MessageTokenStats c={c} locale={locale} message={message} /></div>}
     {actions}
   </div>;

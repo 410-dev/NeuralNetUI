@@ -52,7 +52,7 @@ chmod +x host-linux.sh
 
 ## Windows MSI 설치
 
-`installer/output/NeuralNetUI-1.4.0-x64.msi`는 Node.js, 앱 런타임, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
+`installer/output/NeuralNetUI-1.5.0-x64.msi`는 Node.js, 앱 런타임, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
 
 트레이 아이콘을 두 번 누르면 Web UI를 다시 열 수 있습니다. 우클릭 메뉴에는 **설정 파일 수정**, **재시작**, **종료하기**가 있으며, 종료는 서비스와 트레이 앱을 함께 중지합니다. 시작 메뉴의 **NeuralNetUI**를 누르면 중지된 서비스를 다시 시작하고 Web UI를 호스팅하며 트레이 아이콘도 복원합니다. 서비스 제어와 보호된 설정 파일 편집에는 Windows 관리자 권한 확인이 표시될 수 있습니다.
 
@@ -61,7 +61,7 @@ chmod +x host-linux.sh
 무인 설치에서도 같은 공개 MSI 속성을 사용할 수 있습니다.
 
 ```powershell
-msiexec /i NeuralNetUI-1.4.0-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
+msiexec /i NeuralNetUI-1.5.0-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
 ```
 
 MSI를 다시 빌드하려면 Node.js, .NET 8 SDK가 있는 Windows x64 개발 환경에서 다음을 실행합니다. WiX 5 도구는 처음 빌드할 때 `installer/.tools`에 로컬 설치됩니다.
@@ -165,6 +165,10 @@ cp -a /var/lib/neural-chat/uploads /backup/uploads
 입력창의 `+` 메뉴에서 **인터넷 검색**과 **페이지 방문**을 각각 켤 수 있습니다. 활성화된 도구만 OpenAI 호환 `tools` 정의로 모델에 전달되고, 모델이 호출하면 서버가 결과를 실행해 같은 요청 흐름 안에서 모델에 돌려줍니다. 검색은 Python `ddgs` 패키지를 사용합니다. 페이지 방문은 공개 HTTP(S) 주소만 허용하며 localhost와 사설 IP 대역을 차단합니다.
 
 한 응답에서 발생한 도구 호출은 렌치 아이콘이 있는 하나의 **도구 사용 중/도구 사용함** 폴딩에 모입니다. 각 호출은 **인터넷 검색 도구 사용 중**, **페이지 방문 도구 사용함**처럼 이름과 상태를 표시하는 하위 폴딩이며, 펼치면 도구 호출 인자와 결과를 확인할 수 있습니다. 진행 중인 호출은 자동으로 펼쳐지고 완료된 호출은 접힌 상태로 정리됩니다.
+
+다중 선택 도구의 질문은 기술적인 도구 폴딩 대신 입력창 위의 전용 카드에 한 번에 하나씩 표시됩니다. 모델은 질문별로 단일 선택, 복수 선택, 우선순위 정렬 방식을 지정할 수 있으며, 답변 후에는 다음 질문으로 슬라이드 전환됩니다. 제출한 질문·답변 쌍은 사용자 메시지 형태로 대화에 표시되고 모델 응답이 이어집니다.
+
+사용자 메시지를 삭제하면 같은 브랜치에서 바로 연결된 모델 응답도 함께 삭제됩니다.
 
 직접 실행하는 경우 아래 의존성도 설치할 수 있습니다. `host-windows.bat`와 `host-linux.sh`, Docker 이미지는 이를 자동 처리합니다.
 

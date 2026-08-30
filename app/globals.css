@@ -129,17 +129,40 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .tool-activity-body > details > summary { padding: 7px 11px; color: var(--muted); cursor: pointer; font-family: inherit; font-size: 12.5px; font-weight: 400; line-height: 1.65; }
 .structured-json { max-height: 210px; margin: 0; padding: 10px 12px; overflow: auto; color: #87918c; background: rgba(8,11,16,.48); white-space: pre; font-family: inherit; font-size: 12.5px; font-weight: 400; line-height: 1.65; }
 .location-wait { display: flex; align-items: center; gap: 7px; margin: 0; padding: 11px 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 10px; }
-.multiple-choice-panel { display: grid; gap: 10px; padding: 10px; border-top: 1px solid var(--border); }
-.multiple-choice-panel fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
-.multiple-choice-panel legend { width: 100%; display: grid; grid-template-columns: 22px minmax(0,1fr); align-items: start; gap: 7px; margin-bottom: 7px; color: #e2e8f5; font-size: 11px; }
-.multiple-choice-panel legend b { width: 21px; height: 21px; display: grid; place-items: center; border-radius: 7px; color: var(--accent-bright); background: var(--accent-soft); font-size: 9px; }
-.choice-options { display: grid; gap: 4px; }
-.choice-options button { min-height: 38px; display: grid; grid-template-columns: 25px minmax(0,1fr); align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid transparent; border-radius: 9px; color: #cbd3e2; background: rgba(255,255,255,.025); text-align: left; font-size: 11px; }
-.choice-options button:hover, .choice-options button.selected { border-color: rgba(112,160,255,.23); background: rgba(112,160,255,.09); }
-.choice-options button i { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 7px; color: var(--accent-bright); background: rgba(255,255,255,.05); font-size: 9px; font-style: normal; }
-.choice-other { min-height: 36px; display: grid; grid-template-columns: 23px minmax(0,1fr); align-items: center; gap: 6px; margin-top: 5px; padding: 0 8px; border-radius: 9px; color: var(--dim); background: rgba(255,255,255,.02); }
-.choice-other input { min-width: 0; height: 34px; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 10.5px; }
-.choice-submit { min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 9px; color: white; background: var(--accent); font-size: 10.5px; }
+.choice-composer-card { width: min(720px, 100%); margin: 0 auto 9px; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 22px; background: rgba(28,32,30,.985); box-shadow: 0 18px 44px rgba(0,0,0,.34); animation: choice-card-in .24s cubic-bezier(.2,.8,.25,1) both; }
+@keyframes choice-card-in { from { opacity: 0; transform: translateY(18px) scale(.985); } to { opacity: 1; transform: none; } }
+.choice-composer-card > header { min-height: 48px; display: grid; grid-template-columns: 34px auto minmax(80px,1fr); align-items: center; gap: 8px; padding: 7px 13px; border-bottom: 1px solid var(--border); color: var(--muted); }
+.choice-composer-card > header > button { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; color: var(--muted); background: transparent; }
+.choice-composer-card > header > button:hover:not(:disabled) { color: white; background: rgba(255,255,255,.06); }
+.choice-composer-card > header > button:disabled { opacity: .22; }
+.choice-composer-card > header > span { font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.choice-progress { justify-self: end; display: flex; align-items: center; gap: 5px; }
+.choice-progress i { width: 20px; height: 3px; border-radius: 99px; background: rgba(255,255,255,.1); transition: background .18s, width .18s; }
+.choice-progress i.active { width: 34px; background: var(--accent-bright); }
+.choice-progress i.done { background: rgba(112,160,255,.38); }
+.choice-slide { min-width: 0; margin: 0; padding: 17px 18px 10px; border: 0; animation: choice-forward .2s cubic-bezier(.2,.8,.25,1) both; }
+.choice-slide.slide-back { animation-name: choice-back; }
+@keyframes choice-forward { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+@keyframes choice-back { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
+.choice-slide legend { width: 100%; margin-bottom: 14px; color: #eef2ef; font-size: 17px; font-weight: 520; line-height: 1.45; }
+.choice-options { display: grid; gap: 6px; }
+.choice-options button { min-height: 47px; display: grid; grid-template-columns: 31px minmax(0,1fr) 20px; align-items: center; gap: 9px; padding: 6px 10px; border: 1px solid transparent; border-radius: 13px; color: #d5dcd7; background: rgba(255,255,255,.032); text-align: left; font-size: 13px; transition: border-color .14s, background .14s, transform .12s; }
+.choice-options button:hover, .choice-options button.selected { border-color: rgba(112,160,255,.3); background: rgba(112,160,255,.1); }
+.choice-options button:active { transform: scale(.992); }
+.choice-options button > svg { justify-self: end; color: var(--dim); }
+.choice-options button i { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: var(--accent-bright); background: rgba(255,255,255,.055); font-size: 11px; font-style: normal; }
+.choice-options button.selected i { color: white; background: var(--accent); }
+.choice-other { min-height: 43px; display: grid; grid-template-columns: 25px minmax(0,1fr); align-items: center; gap: 7px; margin-top: 7px; padding: 0 11px; border: 1px solid transparent; border-radius: 12px; color: var(--dim); background: rgba(255,255,255,.025); }
+.choice-other:focus-within { border-color: rgba(112,160,255,.27); background: rgba(112,160,255,.06); }
+.choice-other input { min-width: 0; height: 40px; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 12.5px; }
+.choice-composer-card > footer { min-height: 51px; display: flex; justify-content: flex-end; align-items: center; padding: 6px 18px 10px; }
+.choice-submit { min-width: 96px; min-height: 36px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 13px; border-radius: 10px; color: white; background: var(--accent); font-size: 11.5px; }
+.choice-submit:disabled { color: var(--dim); background: rgba(255,255,255,.05); }
+.choice-response-row { width: 100%; display: flex; justify-content: flex-end; margin: 3px 0 18px; }
+.choice-response-bubble { max-width: 75%; display: grid; gap: 10px; padding: 12px 17px; border: 1px solid rgba(255,255,255,.035); border-radius: 20px 20px 5px 20px; color: var(--text); background: #252a27; white-space: normal; }
+.choice-response-bubble small, .choice-response-bubble strong { display: block; }
+.choice-response-bubble small { margin-bottom: 3px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.choice-response-bubble strong { font-size: 13px; font-weight: 500; line-height: 1.5; }
 .markdown-body { white-space: normal; overflow-wrap: anywhere; }
 .markdown-body > :first-child { margin-top: 0; }
 .markdown-body > :last-child { margin-bottom: 0; }
@@ -215,6 +238,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .composer:focus-within { border-color: rgba(112,160,255,.3); }
 .composer textarea { display: block; width: 100%; max-height: 180px; resize: none; outline: 0; border: 0; background: transparent; padding: 2px 4px 12px; line-height: 1.45; font-size: 15px; }
 .composer textarea::placeholder { color: #79827d; }
+.composer textarea:disabled { cursor: default; color: var(--dim); opacity: .72; }
 .composer-actions { display: flex; align-items: center; gap: 8px; }
 .composer-spacer { flex: 1; }
 .icon-button { width: 32px; height: 32px; display: grid; place-items: center; color: var(--muted); border-radius: 50%; background: transparent; }
@@ -241,6 +265,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .send-button { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: white; transition: background .15s, transform .12s; }
 .send-button:hover { background: var(--accent-bright); }.send-button:active { transform: scale(.93); }
 .send-button.stopping { background: #4b524e; }
+.send-button:disabled { cursor: default; opacity: .45; }
 .composer-note { text-align: center; color: #59615c; margin: 7px 0 0; font-size: 9.5px; }
 .error-toast { width: min(620px, 100%); margin: 0 auto 8px; min-height: 34px; border: 1px solid rgba(210,123,120,.25); background: rgba(89,42,41,.34); color: #e4a6a3; border-radius: 11px; padding: 7px 10px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
 .error-toast button { background: transparent; color: inherit; }
@@ -517,6 +542,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .message-token-stats { width: 100%; margin-left: 0; padding-left: 2px; }
   .tool-activity-list { margin-left: 9px; padding-left: 9px; }
   .tool-activity-body { margin-left: 25px; margin-right: 0; }
-  .multiple-choice-panel { padding: 8px; }
-  .choice-options button { min-height: 42px; }
+  .choice-composer-card { border-radius: 18px; }
+  .choice-composer-card > header { padding-left: 9px; padding-right: 11px; }
+  .choice-slide { padding: 14px 11px 8px; }
+  .choice-slide legend { font-size: 15px; }
+  .choice-options button { min-height: 46px; }
+  .choice-composer-card > footer { padding-right: 11px; }
+  .choice-response-bubble { max-width: 84vw; }
 }
