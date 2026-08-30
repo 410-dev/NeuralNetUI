@@ -15,6 +15,20 @@ if errorlevel 1 (
   exit /b 1
 )
 
+where python >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] Python 3 is required for DDGS internet search.
+  exit /b 1
+)
+if not exist ".python\Scripts\python.exe" (
+  echo Preparing the DDGS Python environment...
+  python -m venv ".python"
+  if errorlevel 1 exit /b 1
+)
+".python\Scripts\python.exe" -m pip install -q -r requirements.txt
+if errorlevel 1 exit /b 1
+set "NEURAL_CHAT_PYTHON=%CD%\.python\Scripts\python.exe"
+
 set "NEEDS_BUILD=0"
 if /I "%~1"=="--rebuild" set "NEEDS_BUILD=1"
 if not exist "node_modules\.package-lock.json" set "NEEDS_BUILD=1"

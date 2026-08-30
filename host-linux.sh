@@ -14,6 +14,17 @@ if ! node -e "process.exit(Number(process.versions.node.split('.')[0])>=22?0:1)"
   exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "[ERROR] Python 3 is required for DDGS internet search." >&2
+  exit 1
+fi
+if [ ! -x ".python/bin/python" ]; then
+  echo "Preparing the DDGS Python environment..."
+  python3 -m venv .python
+fi
+.python/bin/python -m pip install -q -r requirements.txt
+export NEURAL_CHAT_PYTHON="$APP_ROOT/.python/bin/python"
+
 NEEDS_BUILD=0
 if [ "${1:-}" = "--rebuild" ]; then NEEDS_BUILD=1; fi
 if [ ! -f "node_modules/.package-lock.json" ]; then NEEDS_BUILD=1; fi
