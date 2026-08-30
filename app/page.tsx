@@ -15,7 +15,7 @@ import type {
   ReasoningPreset, StoredAttachment, StoredMessage, Locale, AccountInfo, UserSummary, EnabledTools, ToolEvent, MultipleChoiceQuestion,
 } from "@/lib/types";
 import { advertisedContextWindowTokens, effectiveContextWindowTokens } from "@/lib/model-context";
-import { getToolGroupLabel, getToolGroupState, getToolStatusLabel } from "@/lib/tool-presentation";
+import { formatReasoningForDisplay, getToolGroupLabel, getToolGroupState, getToolStatusLabel } from "@/lib/tool-presentation";
 import { APP_VERSION } from "@/lib/version";
 
 type SettingsTab = "general" | "connection" | "models" | "reasoning" | "users" | "account";
@@ -958,12 +958,11 @@ function ToolActivity({ c, locale, event, onInput }: { c: CopySet; locale: Local
 
 function ToolActivityGroup({ c, locale, events, onInput }: { c: CopySet; locale: Locale; events: ToolEvent[]; onInput: (id: string, value: unknown) => void }) {
   const state = getToolGroupState(events);
-  const label = getToolGroupLabel(state, locale);
-  return <details className={`tool-activity-group ${state}`} open>
+  const label = getToolGroupLabel(events, locale);
+  return <details className={`tool-activity-group ${state}`}>
     <summary aria-label={label}>
       <span className="tool-group-icon"><Wrench size={16} /></span>
       <strong>{label}</strong>
-      <span className="tool-count">{events.length}</span>
       <ChevronDown size={14} className="tool-group-chevron" />
     </summary>
     <div className="tool-activity-list" aria-label={locale === "ko" ? "도구 호출 목록" : "Tool call list"}>
@@ -979,6 +978,7 @@ function Message({ c, locale, message, pending, revisions, onFork, onEditAssista
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const reasoningRef = useRef<HTMLDivElement>(null);
   const isThinking = pending && Boolean(message.reasoning) && message.reasoningDurationSeconds === undefined;
+  const displayedReasoning = formatReasoningForDisplay(message.reasoning || "", message.toolEvents || [], locale);
   const longPress = useLongPress(() => setMobileActionsOpen(true), pending || editing);
   useEffect(() => { if (!editing) setText(message.content); }, [editing, message.content]);
   useEffect(() => { if (isThinking && reasoningRef.current) reasoningRef.current.scrollTop = reasoningRef.current.scrollHeight; }, [isThinking, message.reasoning]);
@@ -992,7 +992,7 @@ function Message({ c, locale, message, pending, revisions, onFork, onEditAssista
   if (message.role === "user") return <div className="message-row user-message"><div className="user-message-actions">{editing ? <div className="message-edit">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}<textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => setEditing(false)}>{c.cancel}</button><button onClick={() => { if (text.trim() !== message.content) onFork(message.id, text); setEditing(false); }}><GitBranch size={13} /> {c.forkSend}</button></div></div> : <><div className="user-message-toolbar"><button title={c.regenerateRequest} aria-label={c.regenerateRequest} onClick={() => onRegenerateUser(message.id)}><RefreshCw size={13} /></button>{message.content && <button title={c.copy} aria-label={c.copy} onClick={() => navigator.clipboard.writeText(message.content)}><Copy size={13} /></button>}<button title={c.editBranch} aria-label={c.editBranch} onClick={() => setEditing(true)}><Pencil size={13} /></button><button className="delete" title={c.deleteMessage} aria-label={c.deleteMessage} onClick={() => onDeleteUser(message.id)}><Trash2 size={13} /></button></div><div className="user-message-stack long-press-target" {...longPress}><div className="user-message-content">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}{message.content && <div className="message-bubble">{message.content}</div>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /></div></>}</div>{actions}</div>;
   const showThought = isThinking || thoughtOpen;
   return <div className="message-row assistant-message long-press-target" {...longPress}>
-    {message.reasoning && <div className={`thinking-block ${isThinking ? "streaming" : ""}`}><button onClick={() => !isThinking && setThoughtOpen((value) => !value)} aria-expanded={showThought}><BrainCircuit size={15} /> {isThinking ? c.thinking : formatThoughtDuration(message.reasoningDurationSeconds || 1, locale)} {!isThinking && <ChevronDown size={14} className={thoughtOpen ? "rotate" : ""} />}</button>{showThought && <div ref={reasoningRef} className={`thinking-preview ${isThinking ? "live" : ""}`}>{message.reasoning}</div>}</div>}
+    {message.reasoning && <div className={`thinking-block ${isThinking ? "streaming" : ""}`}><button onClick={() => !isThinking && setThoughtOpen((value) => !value)} aria-expanded={showThought}><BrainCircuit size={15} /> {isThinking ? c.thinking : formatThoughtDuration(message.reasoningDurationSeconds || 1, locale)} {!isThinking && <ChevronDown size={14} className={thoughtOpen ? "rotate" : ""} />}</button>{showThought && <div ref={reasoningRef} className={`thinking-preview ${isThinking ? "live" : ""}`}>{displayedReasoning}</div>}</div>}
     {message.toolEvents?.length ? <ToolActivityGroup c={c} locale={locale} events={message.toolEvents} onInput={onToolInput} /> : null}
     {editing ? <div className="assistant-edit"><textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => { setText(message.content); setEditing(false); }}>{c.cancel}</button><button className="save-response" onClick={() => { if (text.trim()) onEditAssistant(message.id, text); setEditing(false); }}><Check size={13} /> {c.saveEdit}</button></div></div> : <div className="assistant-copy markdown-body">{message.content ? <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: (props) => <a {...props} target="_blank" rel="noreferrer" />, pre: ({ children }) => <CodeSnippet c={c}>{children}</CodeSnippet> }}>{message.content}</ReactMarkdown> : pending ? <span className="typing"><i /><i /><i /></span> : ""}</div>}
     {!pending && !editing && <div className="assistant-footer"><div className="assistant-actions"><button className="message-action-button" title={c.regenerate} aria-label={c.regenerate} onClick={() => onRegenerate(message.id)}><RefreshCw size={14} /></button>{message.content && <button className="message-action-button" title={c.copy} aria-label={c.copy} onClick={() => navigator.clipboard.writeText(message.content)}><Copy size={14} /></button>}<button className="message-action-button" title={c.editResponse} aria-label={c.editResponse} onClick={() => setEditing(true)}><Pencil size={14} /></button></div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /><MessageTokenStats c={c} locale={locale} message={message} /></div>}

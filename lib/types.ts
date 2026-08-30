@@ -86,6 +86,7 @@ export interface ToolEvent {
   id: string;
   name: string;
   status: ToolEventStatus;
+  reasoningOffset?: number;
   arguments?: unknown;
   result?: unknown;
   startedAt: string;

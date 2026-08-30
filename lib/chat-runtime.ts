@@ -186,7 +186,14 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
 }
 
 function addToolEvent(job: ChatJob, call: ToolCall): ToolEvent {
-  const event: ToolEvent = { id: call.id, name: call.function.name, status: "calling", arguments: parseArguments(call.function.arguments), startedAt: new Date().toISOString() };
+  const event: ToolEvent = {
+    id: call.id,
+    name: call.function.name,
+    status: "calling",
+    reasoningOffset: job.message.reasoning?.length || 0,
+    arguments: parseArguments(call.function.arguments),
+    startedAt: new Date().toISOString(),
+  };
   job.message = { ...job.message, toolEvents: [...(job.message.toolEvents || []), event] }; broadcast(job, true); return event;
 }
 

@@ -35,7 +35,48 @@ export function getToolGroupState(events: ReadonlyArray<{ status: ToolEventStatu
   return "completed";
 }
 
-export function getToolGroupLabel(state: ToolGroupState, locale: Locale) {
-  if (locale === "ko") return state === "active" ? "도구 사용 중" : state === "error" ? "도구 사용 오류" : "도구 사용함";
-  return state === "active" ? "Using tools" : state === "error" ? "Tool use finished with errors" : "Used tools";
+type ToolSummaryEvent = { name: string; status: ToolEventStatus };
+
+export function getToolGroupLabel(events: ReadonlyArray<ToolSummaryEvent>, locale: Locale) {
+  const activeNames = [...new Set(events
+    .filter((event) => event.status === "calling" || event.status === "waiting")
+    .map((event) => getToolDisplayName(event.name, locale)))];
+  if (activeNames.length) return locale === "ko"
+    ? `도구 사용 중: ${activeNames.join(", ")}`
+    : `Using tools: ${activeNames.join(", ")}`;
+
+  const failed = events.filter((event) => event.status === "error").length;
+  if (locale === "ko") return `${events.length}개의 도구 사용함${failed ? ` (${failed}개 실패)` : ""}`;
+  const toolCount = `${events.length} ${events.length === 1 ? "tool" : "tools"}`;
+  const failedCount = failed ? ` (${failed} failed)` : "";
+  return `Used ${toolCount}${failedCount}`;
+}
+
+export function formatReasoningForDisplay(
+  reasoning: string,
+  events: ReadonlyArray<{ name: string; reasoningOffset?: number }>,
+  locale: Locale,
+) {
+  if (!events.length) return reasoning;
+  const calls = events.map((event, index) => ({
+    index,
+    offset: Math.max(0, Math.min(reasoning.length, event.reasoningOffset ?? reasoning.length)),
+    label: locale === "ko"
+      ? `[${getToolDisplayName(event.name, locale)} 도구 호출함]`
+      : `[Called ${getToolDisplayName(event.name, locale).toLowerCase()} tool]`,
+  })).sort((left, right) => left.offset - right.offset || left.index - right.index);
+
+  let cursor = 0;
+  let displayed = "";
+  for (let callIndex = 0; callIndex < calls.length;) {
+    const offset = calls[callIndex].offset;
+    const labels: string[] = [];
+    while (callIndex < calls.length && calls[callIndex].offset === offset) labels.push(calls[callIndex++].label);
+    displayed += reasoning.slice(cursor, offset);
+    if (displayed && !displayed.endsWith("\n")) displayed += "\n";
+    displayed += labels.join("\n");
+    if (offset < reasoning.length && reasoning[offset] !== "\n") displayed += "\n";
+    cursor = offset;
+  }
+  return displayed + reasoning.slice(cursor);
 }

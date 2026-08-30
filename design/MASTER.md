@@ -11,5 +11,7 @@
 
 - Group all tool calls from one assistant message under one top-level disclosure with a wrench icon and aggregate state.
 - Show every call as a subordinate disclosure with a tool-specific icon and localized active, completed, or error wording.
-- Keep the currently active call expanded. Completed calls remain collapsed until requested, while their call and result sections are available inside.
+- Keep the top-level group collapsed by default. When the user opens it, keep the currently active call expanded and completed calls collapsed until requested.
+- Match tool headings to the reasoning heading typography: unboxed icons, regular weight, and the same font sizing.
+- Show localized tool-call markers only in the rendered reasoning view; never mix those markers into stored or upstream reasoning content.
 - Use motion only for active status indicators; completed and failed states must remain legible without animation.

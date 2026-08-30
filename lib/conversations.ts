@@ -22,6 +22,7 @@ const messageSchema = z.object({
     id: z.string().min(1),
     name: z.string().min(1),
     status: z.enum(["calling", "waiting", "completed", "error"]),
+    reasoningOffset: z.number().int().nonnegative().optional(),
     arguments: z.unknown().optional(),
     result: z.unknown().optional(),
     startedAt: z.string(),
