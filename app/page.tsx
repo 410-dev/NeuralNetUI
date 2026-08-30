@@ -15,6 +15,7 @@ import type {
   ReasoningPreset, StoredAttachment, StoredMessage, Locale, AccountInfo, UserSummary, EnabledTools, ToolEvent, MultipleChoiceQuestion,
 } from "@/lib/types";
 import { advertisedContextWindowTokens, effectiveContextWindowTokens } from "@/lib/model-context";
+import { createClientId } from "@/lib/client-id";
 import { formatReasoningForDisplay, getToolGroupLabel, getToolGroupState, getToolStatusLabel } from "@/lib/tool-presentation";
 import { APP_VERSION } from "@/lib/version";
 
@@ -38,7 +39,7 @@ const emptyConfig: PublicConfig = {
   preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true },
   models: [],
 };
-const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const uid = createClientId;
 const now = () => new Date().toISOString();
 const titleFrom = (text: string) => text.trim().split(/\s+/).slice(0, 7).join(" ").slice(0, 58) || "New chat";
 
@@ -375,7 +376,7 @@ export default function Home() {
     abandonRef.current = true; abortRef.current?.abort();
     clearQueuedPrompts();
     draftAttachments.forEach((attachment) => fetch(`/api/uploads/${attachment.id}`, { method: "DELETE" }).catch(() => undefined));
-    const id = crypto.randomUUID(); pendingConversationIdRef.current = id; navigateToChat(id, replaceUrl);
+    const id = uid("conversation"); pendingConversationIdRef.current = id; navigateToChat(id, replaceUrl);
     setDraftAttachments([]); setRenderedMessageCount(60); setIsGenerating(false); setConversation(null); setMessages([]); setDraft(""); setError(""); setMobileOpen(false);
   }
 
@@ -435,7 +436,7 @@ export default function Home() {
   function createConversation(firstMessage: StoredMessage, model: ModelConfig, preset?: ReasoningPreset): Conversation {
     const stamp = now(); const branchId = uid("branch");
     return {
-      id: pendingConversationIdRef.current || crypto.randomUUID(), title: firstMessage.content.trim() ? titleFrom(firstMessage.content) : c.imageChat, modelId: model.id,
+      id: pendingConversationIdRef.current || uid("conversation"), title: firstMessage.content.trim() ? titleFrom(firstMessage.content) : c.imageChat, modelId: model.id,
       reasoningPresetId: preset?.id, activeBranchId: branchId, createdAt: stamp, updatedAt: stamp,
       branches: [{ id: branchId, name: "Main", messages: [firstMessage], createdAt: stamp, updatedAt: stamp }],
     };
@@ -586,12 +587,14 @@ export default function Home() {
         if (id) await fetch(`/api/chat/${id}`, { method: "DELETE" }).catch(() => undefined);
         return;
       }
-      if (!requestModel || uploadingImages) return;
+      if (!requestModel) { setError(c.noModel); return; }
+      if (uploadingImages) return;
       const queued: QueuedPrompt = { id: uid("user"), content: text, attachments: draftAttachments, modelId: requestModel.id, reasoningPresetId: requestPreset?.id, sendReasoning,
         tools: { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled } };
       replaceQueue([...queuedPromptsRef.current, queued]); setDraft(""); setDraftAttachments([]); return;
     }
-    if (!hasMessage || !requestModel || uploadingImages) return;
+    if (!hasMessage || uploadingImages) return;
+    if (!requestModel) { setError(c.noModel); return; }
     const attachments = draftAttachments;
     const userMessage: StoredMessage = { id: uid("user"), role: "user", content: text, attachments, createdAt: now() }; setDraft(""); setDraftAttachments([]);
     const options: CompletionOptions = { modelId: requestModel.id, reasoningPresetId: requestPreset?.id, sendReasoning,
