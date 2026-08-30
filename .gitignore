@@ -1,5 +1,6 @@
 node_modules
 .next
+.python/
 .env
 data/config.json
 data/*.sqlite3
@@ -7,3 +8,10 @@ data/*.sqlite3-shm
 data/*.sqlite3-wal
 data/uploads/
 npm-debug.log*
+*.tsbuildinfo
+installer/.tools/
+installer/build/
+installer/output/
+installer/*/bin/
+installer/*/obj/
+.wix/

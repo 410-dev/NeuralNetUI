@@ -1,0 +1,8 @@
+.gradle/
+local.properties
+app/build/manual/
+app/build/
+app/build/outputs/apk/debug/*.idsig
+app/build/outputs/apk/debug/native-*
+app/build/outputs/apk/debug/web-*
+app/build/outputs/apk/debug/chrome.*
