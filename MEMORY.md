@@ -5,8 +5,11 @@
 - Selectable questions appear one at a time above the composer, support model-chosen single/multiple/ranked modes, and render persisted tool answers as user-style question/answer bubbles.
 - Deleting a user message also deletes the immediately connected assistant response from that branch.
 - DDGS subprocess JSON I/O is explicitly UTF-8 to avoid Windows code-page corruption and partial JSON responses.
+- Page visits support bounded text/JSON/XML, safe raster images, and temporary PDF processing; archives and unsupported binaries are rejected.
+- Image and PDF uploads share the attachment pipeline. PDF originals and bounded extraction caches live under `data/uploads`; scanned-page renders and URL downloads are temporary and are removed after use.
+- Admins configure tool rounds, attachment/download limits, PDF processing limits, timeouts, and orphan-upload retention in the Tools settings tab.
 - Client-side IDs use Web Crypto when available and a collision-resistant fallback on non-secure LAN/Tailscale HTTP origins where browsers hide Web Crypto.
 - Frontend design guidance lives in `design/MASTER.md`.
 - Unit tests run with `npm test`; type checking uses `npx tsc --noEmit`; the production build uses `npm run build`.
-- Windows x64 MSI packaging is driven by `installer/build-msi.ps1` and bundles the standalone Next.js app, Node.js, embedded Python search dependencies, service host, and tray host.
+- Windows x64 MSI packaging is driven by `installer/build-msi.ps1` and bundles the standalone Next.js app, Node.js, embedded Python search/PDF dependencies, service host, and tray host.
 - Current release version: 1.5.0.

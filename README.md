@@ -120,6 +120,7 @@ cp -a .next/static /opt/neural-chat/.next/static
 mkdir -p /opt/neural-chat/scripts
 cp scripts/start-server.mjs /opt/neural-chat/scripts/
 cp scripts/ddgs-search.py /opt/neural-chat/scripts/
+cp scripts/process-pdf.py /opt/neural-chat/scripts/
 cp requirements.txt /opt/neural-chat/
 cp app-config.json /opt/neural-chat/
 ```
@@ -135,7 +136,9 @@ systemctl enable --now neural-chat
 
 SQLite는 WAL 모드, 외래키 검사, 5초 busy timeout을 사용하며 대화의 모든 브랜치와 메시지는 한 트랜잭션으로 저장됩니다. 사용자 메시지 편집, 모델 응답 편집, 응답 재생성은 모두 기존 경로를 보존한 새 브랜치를 생성합니다. 수정본이 있는 각 메시지 아래의 `< m / n >` 탐색기로 해당 메시지의 이전·다음 수정본과 연결된 채팅 기록을 즉시 전환할 수 있습니다. 내보내기는 선택 브랜치의 Markdown 또는 모든 브랜치가 포함된 JSON을 지원합니다.
 
-이미지는 한 메시지에 최대 12장, 장당 20MB까지 첨부할 수 있습니다. 이미지 메타데이터와 메시지 연결은 SQLite에 저장하고, DB 비대화를 막기 위해 원본과 브라우저에서 생성한 경량 썸네일은 `data/uploads`에 분리 저장합니다. 모델 요청에는 원본이 data URL로 전달됩니다. 채팅 화면에서는 썸네일만 지연 로딩하고 클릭할 때 원본을 엽니다.
+이미지와 PDF를 메시지에 함께 첨부할 수 있습니다. 이미지 메타데이터와 메시지 연결은 SQLite에 저장하고, DB 비대화를 막기 위해 원본과 브라우저에서 생성한 경량 썸네일은 `data/uploads`에 분리 저장합니다. PDF는 원본과 제한된 텍스트 추출 캐시만 보관하며, 텍스트가 없는 스캔 PDF는 모델 요청 시 제한된 페이지를 임시 이미지로 렌더링한 뒤 즉시 삭제합니다. 대화에서 참조되지 않은 업로드는 설정된 보관 시간이 지난 뒤 다음 업로드 요청에서 정리됩니다.
+
+페이지 방문 도구는 HTML뿐 아니라 JSON, XML, CSV 등 텍스트 응답을 읽습니다. PDF URL은 임시 파일로 처리하고 즉시 삭제하며, 안전한 래스터 이미지는 비전 입력으로 전달합니다. 압축 파일과 실행 파일을 포함한 기타 바이너리는 열지 않습니다. 설정의 **Tools** 탭에서 최대 도구 호출 라운드, 메시지당 첨부 수, 텍스트·이미지·PDF 용량, PDF 페이지·추출 글자·비전 페이지 수, 처리 제한 시간과 미첨부 업로드 보관 시간을 변경할 수 있습니다. 관리자가 입력한 값은 서버 안전 범위 안에서 검증됩니다.
 
 기존 `data/config.json`, `data/conversations/*.json`, `data/uploads/*.json`은 최초 실행 때 한 번 자동으로 SQLite에 이전됩니다. 이전이 끝난 원본 파일은 안전을 위해 삭제하지 않으며 이후에는 SQLite 데이터가 기준이 됩니다. 구버전 `app-config.json`에 앱 설정을 보관했다면 업데이트 전에 해당 파일을 `data/config.json`으로 복사하면 같은 이관 경로를 사용할 수 있습니다.
 

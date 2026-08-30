@@ -187,6 +187,37 @@ function openDatabase() {
     })();
   }
 
+  const documentUploadsVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (documentUploadsVersion.version < 6) {
+    connection.pragma("foreign_keys = OFF");
+    try {
+      connection.transaction(() => {
+        connection.exec(`
+          CREATE TABLE uploads_v6 (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            mime_type TEXT NOT NULL CHECK (mime_type LIKE 'image/%' OR mime_type = 'application/pdf'),
+            size INTEGER NOT NULL CHECK (size >= 0),
+            width INTEGER CHECK (width IS NULL OR width > 0),
+            height INTEGER CHECK (height IS NULL OR height > 0),
+            created_at TEXT NOT NULL,
+            user_id TEXT REFERENCES users(id) ON DELETE CASCADE
+          );
+          INSERT INTO uploads_v6(id, name, mime_type, size, width, height, created_at, user_id)
+            SELECT id, name, mime_type, size, width, height, created_at, user_id FROM uploads;
+          DROP TABLE uploads;
+          ALTER TABLE uploads_v6 RENAME TO uploads;
+          CREATE INDEX uploads_user_idx ON uploads(user_id);
+        `);
+        connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(6, new Date().toISOString());
+      })();
+    } finally {
+      connection.pragma("foreign_keys = ON");
+    }
+    const violations = connection.pragma("foreign_key_check") as unknown[];
+    if (violations.length) throw new Error("Database migration 6 left invalid attachment references.");
+  }
+
   return connection;
 }
 

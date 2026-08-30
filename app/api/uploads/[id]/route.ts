@@ -11,7 +11,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const { id } = await context.params;
     const user = requireUser(request);
     const { metadata, paths } = await readUpload(id, user.id);
-    const thumbnail = new URL(request.url).searchParams.get("variant") === "thumbnail";
+    const thumbnail = new URL(request.url).searchParams.get("variant") === "thumbnail" && metadata.mimeType.startsWith("image/");
     const stream = Readable.toWeb(createReadStream(thumbnail ? paths.thumbnail : paths.original)) as ReadableStream;
     return new Response(stream, { headers: {
       "Content-Type": thumbnail ? "image/jpeg" : metadata.mimeType,
@@ -19,10 +19,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       "Cache-Control": "private, max-age=31536000, immutable",
       "X-Content-Type-Options": "nosniff",
     } });
-  } catch { return Response.json({ error: "Image not found." }, { status: 404 }); }
+  } catch { return Response.json({ error: "Attachment not found." }, { status: 404 }); }
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   try { const { id } = await context.params; const user = requireUser(request); await deleteUpload(id, user.id); return new Response(null, { status: 204 }); }
-  catch { return Response.json({ error: "Image deletion failed." }, { status: 400 }); }
+  catch { return Response.json({ error: "Attachment deletion failed." }, { status: 400 }); }
 }

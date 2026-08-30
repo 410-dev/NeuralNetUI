@@ -55,6 +55,7 @@ try {
     if (Test-Path -LiteralPath "public") { Copy-Item -Path "public" -Destination (Join-Path $stageRoot "app\public") -Recurse -Force }
     New-Item -ItemType Directory -Path (Join-Path $stageRoot "app\scripts") -Force | Out-Null
     Copy-Item -LiteralPath "scripts\ddgs-search.py" -Destination (Join-Path $stageRoot "app\scripts\ddgs-search.py") -Force
+    Copy-Item -LiteralPath "scripts\process-pdf.py" -Destination (Join-Path $stageRoot "app\scripts\process-pdf.py") -Force
     Copy-Item -LiteralPath "requirements.txt" -Destination (Join-Path $stageRoot "app\requirements.txt") -Force
 
     $python = (Get-Command python -ErrorAction SilentlyContinue).Source

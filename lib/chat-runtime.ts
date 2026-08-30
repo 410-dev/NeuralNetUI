@@ -1,8 +1,9 @@
 import { canUseModel, readConfig } from "./config";
 import { readConversation, writeConversation } from "./conversations";
-import { readUploadDataUrl } from "./uploads";
+import { readUploadModelContent } from "./uploads";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
-import type { Conversation, StoredMessage, ToolEvent } from "./types";
+import type { Conversation, StoredMessage, ToolEvent, ToolSettings } from "./types";
+import type { ModelContentPart } from "./document-processing";
 
 type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; attachments?: Array<{ id: string }> };
 type UpstreamMessage = { role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string };
@@ -119,12 +120,12 @@ function finishSubscribers(job: ChatJob) {
   job.subscribers.clear();
 }
 
-async function upstreamMessages(input: StartChatJobInput, userId: string, systemPrompt: string): Promise<UpstreamMessage[]> {
+async function upstreamMessages(input: StartChatJobInput, userId: string, systemPrompt: string, settings: ToolSettings): Promise<UpstreamMessage[]> {
   const converted = await Promise.all(input.messages.filter((message) => message.content || message.attachments?.length).map(async (message) => {
     const attachments = message.role === "user" ? message.attachments || [] : [];
     const content = attachments.length ? [
       ...(message.content ? [{ type: "text", text: message.content }] : []),
-      ...(await Promise.all(attachments.map(async ({ id }) => ({ type: "image_url", image_url: { url: await readUploadDataUrl(id, userId) } })))),
+      ...(await Promise.all(attachments.map(({ id }) => readUploadModelContent(id, userId, settings)))).flat(),
     ] : message.content;
     return { role: message.role, content, ...(input.sendReasoning && message.role === "assistant" && message.reasoning_content ? { reasoning_content: message.reasoning_content } : {}) };
   }));
@@ -222,33 +223,36 @@ function validateQuestions(value: unknown) {
   }) };
 }
 
-async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools) {
+type ToolExecution = { result: unknown; content?: ModelContentPart[] };
+
+async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings): Promise<ToolExecution> {
   const args = parseArguments(call.function.arguments);
-  if (call.function.name === "get_current_time" && enabled.currentTime) return currentTime(job.input.clientContext?.timeZone, job.input.clientContext?.locale || "en-US");
+  if (call.function.name === "get_current_time" && enabled.currentTime) return { result: currentTime(job.input.clientContext?.timeZone, job.input.clientContext?.locale || "en-US") };
   if (call.function.name === "get_current_location" && enabled.location) {
     const browserResult = await waitForBrowser(job, call);
     const value = browserResult && typeof browserResult === "object" ? browserResult as Record<string, unknown> : {};
-    if (value.error) return { error: String(value.error) };
-    return reverseGeocode(Number(value.latitude), Number(value.longitude), Number(value.accuracy));
+    if (value.error) return { result: { error: String(value.error) } };
+    return { result: await reverseGeocode(Number(value.latitude), Number(value.longitude), Number(value.accuracy)) };
   }
   if (call.function.name === "ask_multiple_choice" && enabled.multipleChoice) {
     const normalized = validateQuestions(args); updateToolEvent(job, call.id, { arguments: normalized });
-    return waitForBrowser(job, call);
+    return { result: await waitForBrowser(job, call) };
   }
-  return executeWebTool(call.function.name, call.function.arguments, enabled);
+  return executeWebTool(call.function.name, call.function.arguments, enabled, settings);
 }
 
 async function run(job: ChatJob) {
   const requestStartedAt = performance.now(); let reasoningSeconds = 0;
   try {
     const config = await readConfig();
+    if (job.input.messages.some((message) => (message.attachments?.length || 0) > config.toolSettings.maxAttachmentsPerMessage)) throw new Error(`A message exceeds the configured ${config.toolSettings.maxAttachmentsPerMessage}-attachment limit.`);
     const model = config.models.find((item) => item.id === job.input.modelId);
     if (!model || !canUseModel(model, { id: job.userId } as never)) throw new Error("The selected model is unavailable.");
     const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId);
     const modelPrompt = model.systemPrompt?.trim() || ""; const presetPrompt = preset?.kind === "custom" ? preset.systemPrompt?.trim() || "" : "";
     let systemPrompt = modelPrompt;
     if (presetPrompt) systemPrompt = preset?.systemPromptMode === "replace" ? presetPrompt : preset?.systemPromptMode === "prepend" ? [presetPrompt, modelPrompt].filter(Boolean).join("\n\n") : [modelPrompt, presetPrompt].filter(Boolean).join("\n\n");
-    let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt);
+    let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt, config.toolSettings);
     const apiKey = config.server.apiKey || process.env.OPENAI_API_KEY || "";
     const headers = { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) };
     if (config.preferences.onDemand) {
@@ -265,7 +269,7 @@ async function run(job: ChatJob) {
       currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
     };
     const tools = toolDefinitions(enabled);
-    for (let turn = 0; turn < 8; turn += 1) {
+    for (let turn = 0; turn < config.toolSettings.maxToolRounds; turn += 1) {
       const body: Record<string, unknown> = { _baseUrl: config.server.baseUrl, model: model.sourceModel, messages, stream: true, stream_options: { include_usage: true }, ...(preset?.effort ? { reasoning_effort: preset.effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
       const result = await streamTurn(job, body, headers); reasoningSeconds += result.reasoningDurationSeconds;
       if (!result.calls.length) {
@@ -275,16 +279,21 @@ async function run(job: ChatJob) {
         job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
       }
       messages.push({ role: "assistant", content: result.content, ...(result.reasoning ? { reasoning_content: result.reasoning } : {}), tool_calls: result.calls });
+      const visualToolContent: ModelContentPart[] = [];
       for (const call of result.calls) {
-        addToolEvent(job, call); let toolResult: unknown;
-        try { toolResult = await executeTool(job, call, enabled); updateToolEvent(job, call.id, { status: "completed", result: toolResult, completedAt: new Date().toISOString() }); }
+        addToolEvent(job, call); let execution: ToolExecution;
+        try { execution = await executeTool(job, call, enabled, config.toolSettings); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
         catch (error) {
           if ((error as Error).name === "AbortError") throw error;
-          toolResult = { error: error instanceof Error ? error.message : "Tool execution failed." };
-          updateToolEvent(job, call.id, { status: "error", result: toolResult, completedAt: new Date().toISOString() });
+          execution = { result: { error: error instanceof Error ? error.message : "Tool execution failed." } };
+          updateToolEvent(job, call.id, { status: "error", result: execution.result, completedAt: new Date().toISOString() });
         }
-        messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: JSON.stringify(toolResult) });
+        const textContent = execution.content?.filter((part): part is Extract<ModelContentPart, { type: "text" }> => part.type === "text").map((part) => part.text).join("\n\n");
+        messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: textContent || JSON.stringify(execution.result) });
+        const images = execution.content?.filter((part): part is Extract<ModelContentPart, { type: "image_url" }> => part.type === "image_url") || [];
+        if (images.length) visualToolContent.push({ type: "text", text: `Visual content returned by the ${call.function.name} tool:` }, ...images);
       }
+      if (visualToolContent.length) messages.push({ role: "user", content: visualToolContent });
     }
     throw new Error("The model repeated tool calls too many times.");
   } catch (error) {

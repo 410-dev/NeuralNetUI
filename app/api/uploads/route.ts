@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { saveUpload } from "@/lib/uploads";
+import { cleanupOrphanedUploads, deleteUpload, saveUpload } from "@/lib/uploads";
 import { authErrorResponse, requireUser } from "@/lib/auth";
+import { readConfig } from "@/lib/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,19 +9,28 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     const user = requireUser(request);
+    const settings = (await readConfig()).toolSettings;
     const form = await request.formData();
     const files = form.getAll("files").filter((value): value is File => value instanceof File);
-    const thumbnails = form.getAll("thumbnails").filter((value): value is File => value instanceof File);
-    const dimensions = form.getAll("dimensions").map((value) => {
-      try { return JSON.parse(String(value)) as { width?: number; height?: number }; } catch { return {}; }
-    });
-    if (!files.length) return NextResponse.json({ error: "No images were selected." }, { status: 400 });
-    if (files.length > 12) return NextResponse.json({ error: "You can attach up to 12 images at once." }, { status: 400 });
-    if (files.length !== thumbnails.length) return NextResponse.json({ error: "Thumbnail count does not match." }, { status: 400 });
-    const attachments = await Promise.all(files.map((file, index) => saveUpload(file, thumbnails[index], user.id, dimensions[index])));
+    if (!files.length) return NextResponse.json({ error: "No files were selected." }, { status: 400 });
+    if (files.length > settings.maxAttachmentsPerMessage) return NextResponse.json({ error: `You can attach up to ${settings.maxAttachmentsPerMessage} files at once.` }, { status: 400 });
+    await cleanupOrphanedUploads(settings);
+    const attachments = [];
+    try {
+      for (const [index, file] of files.entries()) {
+        const thumbnailValue = form.get(`thumbnail-${index}`);
+        const thumbnail = thumbnailValue instanceof File && thumbnailValue.size ? thumbnailValue : undefined;
+        let dimensions: { width?: number; height?: number } = {};
+        try { dimensions = JSON.parse(String(form.get(`dimensions-${index}`) || "{}")); } catch { /* Use empty dimensions. */ }
+        attachments.push(await saveUpload(file, thumbnail, user.id, settings, dimensions));
+      }
+    } catch (error) {
+      await Promise.all(attachments.map((attachment) => deleteUpload(attachment.id, user.id).catch(() => undefined)));
+      throw error;
+    }
     return NextResponse.json({ attachments }, { status: 201 });
   } catch (error) {
     if (error && typeof error === "object" && "status" in error) return authErrorResponse(error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Image upload failed." }, { status: 400 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "File upload failed." }, { status: 400 });
   }
 }

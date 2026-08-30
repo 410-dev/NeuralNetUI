@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import type { AppConfig, ModelConfig, PublicConfig, ReasoningPreset } from "./types";
+import type { AppConfig, ModelConfig, PublicConfig, ReasoningPreset, ToolSettings } from "./types";
 import type { AuthUser } from "./auth";
 import { updateUserPreferences } from "./auth";
 import { dataDir, db } from "./database";
@@ -34,6 +34,38 @@ const modelSchema = z.object({
   isPublic: z.boolean().optional(),
 });
 
+export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
+  maxToolRounds: 8,
+  maxAttachmentsPerMessage: 12,
+  textDownloadLimitMb: 1,
+  textCharacterLimit: 24_000,
+  imageDownloadLimitMb: 10,
+  imageUploadLimitMb: 20,
+  pdfSizeLimitMb: 25,
+  pdfPageLimit: 100,
+  pdfTextCharacterLimit: 100_000,
+  pdfVisionPageLimit: 6,
+  pdfProcessingTimeoutSeconds: 30,
+  temporaryFileTtlMinutes: 60,
+  orphanUploadTtlHours: 24,
+};
+
+const toolSettingsSchema = z.object({
+  maxToolRounds: z.number().int().min(1).max(32),
+  maxAttachmentsPerMessage: z.number().int().min(1).max(50),
+  textDownloadLimitMb: z.number().min(0.0625).max(10),
+  textCharacterLimit: z.number().int().min(1_000).max(1_000_000),
+  imageDownloadLimitMb: z.number().min(1).max(50),
+  imageUploadLimitMb: z.number().min(1).max(50),
+  pdfSizeLimitMb: z.number().min(1).max(100),
+  pdfPageLimit: z.number().int().min(1).max(500),
+  pdfTextCharacterLimit: z.number().int().min(1_000).max(1_000_000),
+  pdfVisionPageLimit: z.number().int().min(0).max(20),
+  pdfProcessingTimeoutSeconds: z.number().int().min(5).max(120),
+  temporaryFileTtlMinutes: z.number().int().min(5).max(1_440),
+  orphanUploadTtlHours: z.number().min(1).max(168),
+}).default(DEFAULT_TOOL_SETTINGS);
+
 export const configSchema = z.object({
   server: z.object({
     baseUrl: z.string().url(),
@@ -47,6 +79,7 @@ export const configSchema = z.object({
     onDemand: z.boolean().default(false),
     showModelIdentifiers: z.boolean().default(true),
   }).default({ sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true }),
+  toolSettings: toolSettingsSchema,
   models: z.array(modelSchema),
 });
 
@@ -54,6 +87,7 @@ const defaults: AppConfig = {
   server: { baseUrl: "http://localhost:8888/v1", apiKey: "" },
   profile: { name: "User" },
   preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true },
+  toolSettings: DEFAULT_TOOL_SETTINGS,
   models: [],
 };
 
@@ -215,6 +249,7 @@ export async function writeConfigForUser(input: unknown, user: AuthUser): Promis
     server: admin ? { ...incoming.server, apiKey: incoming.server.apiKey || current.server.apiKey } : current.server,
     profile: current.profile,
     preferences: admin ? preferences : current.preferences,
+    toolSettings: admin ? incoming.toolSettings : current.toolSettings,
     models,
   });
 }

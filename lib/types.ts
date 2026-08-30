@@ -59,7 +59,24 @@ export interface AppConfig {
     onDemand: boolean;
     showModelIdentifiers: boolean;
   };
+  toolSettings: ToolSettings;
   models: ModelConfig[];
+}
+
+export interface ToolSettings {
+  maxToolRounds: number;
+  maxAttachmentsPerMessage: number;
+  textDownloadLimitMb: number;
+  textCharacterLimit: number;
+  imageDownloadLimitMb: number;
+  imageUploadLimitMb: number;
+  pdfSizeLimitMb: number;
+  pdfPageLimit: number;
+  pdfTextCharacterLimit: number;
+  pdfVisionPageLimit: number;
+  pdfProcessingTimeoutSeconds: number;
+  temporaryFileTtlMinutes: number;
+  orphanUploadTtlHours: number;
 }
 
 export interface StoredMessage {
@@ -118,7 +135,7 @@ export interface StoredAttachment {
   width?: number;
   height?: number;
   url: string;
-  thumbnailUrl: string;
+  thumbnailUrl?: string;
 }
 
 export interface ChatBranch {

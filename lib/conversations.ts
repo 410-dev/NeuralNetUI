@@ -31,12 +31,12 @@ const messageSchema = z.object({
   attachments: z.array(z.object({
     id: z.string().regex(/^[a-zA-Z0-9_-]+$/),
     name: z.string(),
-    mimeType: z.string().startsWith("image/"),
+    mimeType: z.string().refine((value) => value.startsWith("image/") || value === "application/pdf", "Unsupported attachment type"),
     size: z.number().nonnegative(),
     width: z.number().positive().optional(),
     height: z.number().positive().optional(),
     url: z.string(),
-    thumbnailUrl: z.string(),
+    thumbnailUrl: z.string().optional(),
   })).optional(),
   createdAt: z.string(),
 });
@@ -243,7 +243,7 @@ export async function readConversation(id: string, userId: string): Promise<Conv
     values.push({
       id: row.id, name: row.name, mimeType: row.mime_type, size: row.size,
       width: row.width ?? undefined, height: row.height ?? undefined,
-      url: `/api/uploads/${row.id}`, thumbnailUrl: `/api/uploads/${row.id}?variant=thumbnail`,
+      url: `/api/uploads/${row.id}`, ...(row.mime_type.startsWith("image/") ? { thumbnailUrl: `/api/uploads/${row.id}?variant=thumbnail` } : {}),
     });
     attachments.set(row.message_id, values);
   }
@@ -295,7 +295,7 @@ export async function writeConversation(input: unknown, userId: string): Promise
   const parsed = conversationSchema.parse(input);
   const attachmentIds = parsed.branches.flatMap((branch) => branch.messages.flatMap((message) => message.attachments?.map((attachment) => attachment.id) || []));
   for (const uploadId of new Set(attachmentIds)) {
-    if (!db.prepare("SELECT 1 FROM uploads WHERE id = ? AND user_id = ?").get(uploadId, userId)) throw new Error("Conversation contains an inaccessible image.");
+    if (!db.prepare("SELECT 1 FROM uploads WHERE id = ? AND user_id = ?").get(uploadId, userId)) throw new Error("Conversation contains an inaccessible attachment.");
   }
   storeConversation(parsed, userId);
   return parsed;

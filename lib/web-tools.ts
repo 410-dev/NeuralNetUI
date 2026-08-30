@@ -2,9 +2,13 @@ import { spawn } from "node:child_process";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
+import os from "node:os";
+import { classifyDocument, cleanupTemporaryDocuments, decodeTextDocument, pdfModelContent, sniffDocument, sniffRasterMimeType, type ModelContentPart } from "./document-processing";
+import type { ToolSettings } from "./types";
 
 export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; currentTime?: boolean; location?: boolean; multipleChoice?: boolean };
+export type WebToolExecution = { result: unknown; content?: ModelContentPart[] };
 
 export function toolDefinitions(enabled: EnabledWebTools) {
   const tools: Array<Record<string, unknown>> = [];
@@ -87,26 +91,32 @@ async function assertPublicUrl(raw: string) {
   return url;
 }
 
-async function limitedText(response: Response, limit = 1_000_000) {
-  if (!response.body) return "";
+async function limitedBuffer(response: Response, limit: number, allowTruncation: boolean) {
+  const declared = Number(response.headers.get("content-length"));
+  if (!allowTruncation && Number.isFinite(declared) && declared > limit) throw new Error(`The file exceeds the configured ${Math.round(limit / 1024 / 1024 * 100) / 100} MB limit.`);
+  if (!response.body) return { buffer: Buffer.alloc(0), truncated: false };
   const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
+  let truncated = false;
   while (true) {
     const { done, value } = await reader.read(); if (done) break;
-    size += value.byteLength;
-    if (size > limit) { await reader.cancel(); break; }
-    chunks.push(value);
+    if (size + value.byteLength > limit) {
+      if (!allowTruncation) { await reader.cancel(); throw new Error(`The file exceeds the configured ${Math.round(limit / 1024 / 1024 * 100) / 100} MB limit.`); }
+      const remaining = Math.max(0, limit - size); if (remaining) chunks.push(value.subarray(0, remaining)); size += remaining; truncated = true; await reader.cancel(); break;
+    }
+    size += value.byteLength; chunks.push(value);
   }
   const joined = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)); let offset = 0;
   for (const chunk of chunks) { joined.set(chunk, offset); offset += chunk.byteLength; }
-  return new TextDecoder().decode(joined);
+  return { buffer: Buffer.from(joined), truncated };
 }
 
-function cleanHtml(html: string) {
+function cleanHtml(html: string, characterLimit: number) {
   const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "";
   const withoutNoise = html.replace(/<(script|style|noscript|svg|canvas|template)[^>]*>[\s\S]*?<\/\1>/gi, " ")
     .replace(/<!--([\s\S]*?)-->/g, " ").replace(/<[^>]+>/g, " ");
   const decode = (value: string) => value.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
-  return { title: decode(title).replace(/\s+/g, " ").trim(), text: decode(withoutNoise).replace(/\s+/g, " ").trim().slice(0, 24_000) };
+  const text = decode(withoutNoise).replace(/\s+/g, " ").trim();
+  return { title: decode(title).replace(/\s+/g, " ").trim(), text: text.slice(0, characterLimit), truncated: text.length > characterLimit };
 }
 
 export async function internetSearch(query: string, maxResults = 5) {
@@ -134,26 +144,84 @@ export async function internetSearch(query: string, maxResults = 5) {
   });
 }
 
-export async function visitPage(rawUrl: string) {
+function responseFilename(response: Response, url: URL) {
+  const disposition = response.headers.get("content-disposition") || "";
+  const encoded = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  const plain = /filename\s*=\s*["']?([^;"']+)/i.exec(disposition)?.[1];
+  try { return decodeURIComponent(encoded || plain || path.basename(url.pathname)); } catch { return path.basename(url.pathname); }
+}
+
+async function downloadPdf(response: Response, limit: number) {
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "neural-chat-download-"));
+  const target = path.join(workDir, "document.pdf");
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) { await fs.rm(workDir, { recursive: true, force: true }); throw new Error(`The PDF exceeds the configured ${Math.round(limit / 1024 / 1024 * 100) / 100} MB limit.`); }
+  const file = await fs.open(target, "wx", 0o600); let size = 0;
+  try {
+    if (!response.body) throw new Error("The server returned no PDF body.");
+    const reader = response.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      size += value.byteLength;
+      if (size > limit) { await reader.cancel(); throw new Error(`The PDF exceeds the configured ${Math.round(limit / 1024 / 1024 * 100) / 100} MB limit.`); }
+      await file.write(value);
+    }
+  } catch (error) {
+    await file.close().catch(() => undefined); await fs.rm(workDir, { recursive: true, force: true }).catch(() => undefined); throw error;
+  }
+  await file.close();
+  const signatureFile = await fs.open(target, "r"); const signature = Buffer.alloc(16);
+  try { await signatureFile.read(signature, 0, signature.length, 0); } finally { await signatureFile.close(); }
+  if (sniffDocument(signature, "application/pdf") !== "pdf") { await fs.rm(workDir, { recursive: true, force: true }); throw new Error("The URL did not return a valid PDF file."); }
+  return { workDir, target, size };
+}
+
+export async function visitPage(rawUrl: string, settings: ToolSettings): Promise<WebToolExecution> {
+  await cleanupTemporaryDocuments(settings);
   let url = await assertPublicUrl(rawUrl); let response: Response | undefined;
   for (let redirects = 0; redirects <= 4; redirects += 1) {
-    response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(15_000), headers: { "User-Agent": "NeuralChat/1.0 (+local page reader)", Accept: "text/html, text/plain;q=0.9" } });
+    response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(15_000), headers: { "User-Agent": "NeuralChat/1.0 (+local page reader)", Accept: "text/html,text/plain,application/json,application/pdf,image/avif,image/webp,image/png,image/jpeg,*/*;q=0.5" } });
     if (![301, 302, 303, 307, 308].includes(response.status)) break;
     const location = response.headers.get("location"); if (!location) break;
     url = await assertPublicUrl(new URL(location, url).toString());
   }
   if (!response?.ok) throw new Error(`Page responded with ${response?.status || "an error"}.`);
   const contentType = response.headers.get("content-type") || "";
-  if (!/text\/(html|plain)|application\/xhtml\+xml/i.test(contentType)) throw new Error("This page is not readable text or HTML.");
-  const raw = await limitedText(response); const page = contentType.includes("html") || contentType.includes("xhtml") ? cleanHtml(raw) : { title: "", text: raw.slice(0, 24_000) };
-  return { url: url.toString(), ...page };
+  const filename = responseFilename(response, url);
+  const kind = classifyDocument(contentType, filename);
+  if (kind === "archive") throw new Error("Archive files are not opened by the page visit tool.");
+  if (kind === "pdf") {
+    const downloaded = await downloadPdf(response, settings.pdfSizeLimitMb * 1024 * 1024);
+    try {
+      const processed = await pdfModelContent(downloaded.target, filename || "document.pdf", settings);
+      return { result: { url: url.toString(), contentType, size: downloaded.size, ...processed.result }, content: processed.content };
+    } finally { await fs.rm(downloaded.workDir, { recursive: true, force: true }).catch(() => undefined); }
+  }
+  if (kind === "image") {
+    const downloaded = await limitedBuffer(response, settings.imageDownloadLimitMb * 1024 * 1024, false);
+    const detectedMimeType = sniffRasterMimeType(downloaded.buffer);
+    if (!detectedMimeType) throw new Error("The URL did not return a valid raster image.");
+    const mimeType = detectedMimeType;
+    return {
+      result: { url: url.toString(), type: "image", contentType: mimeType, size: downloaded.buffer.length },
+      content: [{ type: "text", text: `[Image loaded from ${url.toString()}]` }, { type: "image_url", image_url: { url: `data:${mimeType};base64,${downloaded.buffer.toString("base64")}` } }],
+    };
+  }
+  const downloaded = await limitedBuffer(response, settings.textDownloadLimitMb * 1024 * 1024, true);
+  const sniffed = sniffDocument(downloaded.buffer, contentType, filename);
+  if (sniffed !== "text") throw new Error("This URL returned an unsupported binary file.");
+  const html = /text\/html|application\/xhtml\+xml/i.test(contentType);
+  const decoded = decodeTextDocument(downloaded.buffer, contentType, html ? Number.MAX_SAFE_INTEGER : settings.textCharacterLimit);
+  const page = html ? cleanHtml(decoded.text, settings.textCharacterLimit) : { title: "", text: decoded.text, truncated: decoded.truncated };
+  const result = { url: url.toString(), contentType, ...page, truncated: downloaded.truncated || page.truncated };
+  return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
 }
 
-export async function executeWebTool(name: string, rawArguments: string, enabled: EnabledWebTools) {
+export async function executeWebTool(name: string, rawArguments: string, enabled: EnabledWebTools, settings: ToolSettings): Promise<WebToolExecution> {
   let args: Record<string, unknown> = {};
   try { args = JSON.parse(rawArguments || "{}"); } catch { throw new Error("Tool arguments were not valid JSON."); }
-  if (name === "internet_search" && enabled.internetSearch) return internetSearch(String(args.query || ""), Number(args.max_results || 5));
-  if (name === "visit_page" && enabled.pageVisit) return visitPage(String(args.url || ""));
+  if (name === "internet_search" && enabled.internetSearch) return { result: await internetSearch(String(args.query || ""), Number(args.max_results || 5)) };
+  if (name === "visit_page" && enabled.pageVisit) return visitPage(String(args.url || ""), settings);
   throw new Error(`Tool ${name} is not enabled.`);
 }
 

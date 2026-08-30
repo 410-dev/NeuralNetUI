@@ -30,6 +30,7 @@ COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/requirements.txt ./requirements.txt
 COPY --from=builder --chown=node:node /app/scripts/ddgs-search.py ./scripts/ddgs-search.py
+COPY --from=builder --chown=node:node /app/scripts/process-pdf.py ./scripts/process-pdf.py
 
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
