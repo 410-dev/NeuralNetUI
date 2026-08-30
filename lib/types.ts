@@ -9,6 +9,7 @@ export interface ReasoningPreset {
   effort?: string;
   systemPrompt?: string;
   systemPromptMode?: SystemPromptMode;
+  ownerId?: string;
 }
 
 export interface ModelConfig {
@@ -22,6 +23,25 @@ export interface ModelConfig {
   reasoningSupported: boolean;
   reasoningEfforts?: string[];
   reasoningPresets: ReasoningPreset[];
+  /** User-configured limit. Kept separately so API discovery never overwrites it. */
+  contextWindowTokens?: number;
+  /** Context limit advertised by the OpenAI-compatible model API. */
+  apiContextWindowTokens?: number;
+  ownerId?: string;
+  isPublic?: boolean;
+}
+
+export type UserRole = "superadmin" | "admin" | "user";
+
+export interface AccountInfo {
+  id: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+}
+
+export interface UserSummary extends AccountInfo {
+  createdAt: string;
 }
 
 export interface AppConfig {
@@ -36,6 +56,8 @@ export interface AppConfig {
     sendReasoningToModel: boolean;
     exportReasoning: boolean;
     language: Locale;
+    onDemand: boolean;
+    showModelIdentifiers: boolean;
   };
   models: ModelConfig[];
 }
@@ -47,8 +69,44 @@ export interface StoredMessage {
   content: string;
   reasoning?: string;
   reasoningDurationSeconds?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+  totalTokens?: number;
+  completionDurationSeconds?: number;
+  timeToFirstTokenSeconds?: number;
+  toolEvents?: ToolEvent[];
   attachments?: StoredAttachment[];
   createdAt: string;
+}
+
+export type ToolEventStatus = "calling" | "waiting" | "completed" | "error";
+
+export interface ToolEvent {
+  id: string;
+  name: string;
+  status: ToolEventStatus;
+  arguments?: unknown;
+  result?: unknown;
+  startedAt: string;
+  completedAt?: string;
+}
+
+export type MultipleChoiceKind = "single_select" | "multi_select" | "rank_priorities";
+
+export interface MultipleChoiceQuestion {
+  id?: string;
+  question: string;
+  type: MultipleChoiceKind;
+  options: string[];
+}
+
+export interface EnabledTools {
+  internetSearch: boolean;
+  pageVisit: boolean;
+  currentTime: boolean;
+  location: boolean;
+  multipleChoice: boolean;
 }
 
 export interface StoredAttachment {
@@ -93,4 +151,5 @@ export interface ConversationSummary {
 
 export type PublicConfig = Omit<AppConfig, "server"> & {
   server: AppConfig["server"] & { apiKey: string; hasApiKey: boolean };
+  account?: AccountInfo;
 };

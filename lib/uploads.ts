@@ -48,12 +48,13 @@ export async function ensureLegacyUploadsMigrated() {
   legacyMigration ??= (async () => {
     await fs.mkdir(uploadsDir, { recursive: true });
     const files = (await fs.readdir(uploadsDir)).filter((file) => file.endsWith(".json"));
+    const legacyOwner = db.prepare("SELECT id FROM users WHERE role = 'superadmin' ORDER BY created_at LIMIT 1").get() as { id: string } | undefined;
     const insert = db.prepare(`
-      INSERT OR IGNORE INTO uploads(id, name, mime_type, size, width, height, created_at)
-      VALUES (@id, @name, @mimeType, @size, @width, @height, @createdAt)
+      INSERT OR IGNORE INTO uploads(id, name, mime_type, size, width, height, created_at, user_id)
+      VALUES (@id, @name, @mimeType, @size, @width, @height, @createdAt, @userId)
     `);
     const migrate = db.transaction((records: Array<StoredAttachment & { createdAt: string }>) => {
-      for (const record of records) insert.run(record);
+      for (const record of records) insert.run({ ...record, userId: legacyOwner?.id ?? null });
       completeStorageMigration(legacyMigrationName);
     });
     const records: Array<StoredAttachment & { createdAt: string }> = [];
@@ -72,7 +73,7 @@ export async function ensureLegacyUploadsMigrated() {
   await legacyMigration;
 }
 
-export async function saveUpload(file: File, thumbnail: File, dimensions?: { width?: number; height?: number }): Promise<StoredAttachment> {
+export async function saveUpload(file: File, thumbnail: File, userId: string, dimensions?: { width?: number; height?: number }): Promise<StoredAttachment> {
   await ensureLegacyUploadsMigrated();
   if (!file.type.startsWith("image/")) throw new Error("Only image uploads are supported.");
   if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name} exceeds the 20 MB limit.`);
@@ -91,9 +92,9 @@ export async function saveUpload(file: File, thumbnail: File, dimensions?: { wid
       fs.writeFile(paths.thumbnail, Buffer.from(await thumbnail.arrayBuffer()), { mode: 0o600 }),
     ]);
     db.prepare(`
-      INSERT INTO uploads(id, name, mime_type, size, width, height, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, metadata.name, metadata.mimeType, metadata.size, metadata.width ?? null, metadata.height ?? null, new Date().toISOString());
+      INSERT INTO uploads(id, name, mime_type, size, width, height, created_at, user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, metadata.name, metadata.mimeType, metadata.size, metadata.width ?? null, metadata.height ?? null, new Date().toISOString(), userId);
     return metadata;
   } catch (error) {
     await Promise.all([paths.original, paths.thumbnail].map((target) => fs.unlink(target).catch(() => undefined)));
@@ -101,26 +102,28 @@ export async function saveUpload(file: File, thumbnail: File, dimensions?: { wid
   }
 }
 
-export async function readUpload(id: string) {
+export async function readUpload(id: string, userId: string) {
   await ensureLegacyUploadsMigrated();
   assertId(id);
-  const row = db.prepare("SELECT id, name, mime_type, size, width, height FROM uploads WHERE id = ?").get(id) as UploadRow | undefined;
+  const row = db.prepare("SELECT id, name, mime_type, size, width, height FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) as UploadRow | undefined;
   if (!row) throw Object.assign(new Error("Image not found."), { code: "ENOENT" });
   return { metadata: toAttachment(row), paths: pathsFor(id) };
 }
 
-export async function readUploadDataUrl(id: string) {
-  const { metadata, paths } = await readUpload(id);
+export async function readUploadDataUrl(id: string, userId: string) {
+  const { metadata, paths } = await readUpload(id, userId);
   const data = await fs.readFile(/* turbopackIgnore: true */ paths.original);
   return `data:${metadata.mimeType};base64,${data.toString("base64")}`;
 }
 
-export async function deleteUpload(id: string) {
+export async function deleteUpload(id: string, userId: string) {
   await ensureLegacyUploadsMigrated();
   assertId(id);
+  const owned = db.prepare("SELECT 1 FROM uploads WHERE id = ? AND user_id = ?").get(id, userId);
+  if (!owned) throw Object.assign(new Error("Image not found."), { code: "ENOENT" });
   const references = db.prepare("SELECT COUNT(*) AS count FROM message_attachments WHERE upload_id = ?").get(id) as { count: number };
   if (references.count) throw new Error("This image is attached to a saved conversation.");
-  db.prepare("DELETE FROM uploads WHERE id = ?").run(id);
+  db.prepare("DELETE FROM uploads WHERE id = ? AND user_id = ?").run(id, userId);
   await deleteUploadFiles(id);
 }
 

@@ -116,6 +116,77 @@ function openDatabase() {
     })();
   }
 
+  const currentVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (currentVersion.version < 2) {
+    connection.transaction(() => {
+      connection.exec(`
+        CREATE TABLE users (
+          id TEXT PRIMARY KEY,
+          username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+          display_name TEXT NOT NULL,
+          password_hash TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('superadmin', 'admin', 'user')),
+          preferences TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token_hash TEXT NOT NULL UNIQUE,
+          expires_at TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+
+        ALTER TABLE conversations ADD COLUMN user_id TEXT REFERENCES users(id) ON DELETE CASCADE;
+        ALTER TABLE uploads ADD COLUMN user_id TEXT REFERENCES users(id) ON DELETE CASCADE;
+
+        CREATE INDEX conversations_user_updated_idx ON conversations(user_id, updated_at DESC);
+        CREATE INDEX uploads_user_idx ON uploads(user_id);
+        CREATE INDEX sessions_token_idx ON sessions(token_hash);
+        CREATE INDEX sessions_expiry_idx ON sessions(expires_at);
+      `);
+      connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(2, new Date().toISOString());
+    })();
+  }
+
+  const tokenUsageVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (tokenUsageVersion.version < 3) {
+    connection.transaction(() => {
+      connection.exec(`
+        ALTER TABLE messages ADD COLUMN input_tokens INTEGER CHECK (input_tokens IS NULL OR input_tokens >= 0);
+        ALTER TABLE messages ADD COLUMN output_tokens INTEGER CHECK (output_tokens IS NULL OR output_tokens >= 0);
+        ALTER TABLE messages ADD COLUMN reasoning_tokens INTEGER CHECK (reasoning_tokens IS NULL OR reasoning_tokens >= 0);
+        ALTER TABLE messages ADD COLUMN total_tokens INTEGER CHECK (total_tokens IS NULL OR total_tokens >= 0);
+        ALTER TABLE messages ADD COLUMN completion_duration_seconds REAL CHECK (completion_duration_seconds IS NULL OR completion_duration_seconds >= 0);
+      `);
+      connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(3, new Date().toISOString());
+    })();
+  }
+
+  const streamTimingVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (streamTimingVersion.version < 4) {
+    connection.transaction(() => {
+      connection.exec(`
+        ALTER TABLE messages ADD COLUMN time_to_first_token_seconds REAL
+          CHECK (time_to_first_token_seconds IS NULL OR time_to_first_token_seconds >= 0);
+      `);
+      connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(4, new Date().toISOString());
+    })();
+  }
+
+  const toolEventsVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (toolEventsVersion.version < 5) {
+    connection.transaction(() => {
+      connection.exec(`
+        ALTER TABLE messages ADD COLUMN tool_events TEXT
+          CHECK (tool_events IS NULL OR json_valid(tool_events));
+      `);
+      connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(5, new Date().toISOString());
+    })();
+  }
+
   return connection;
 }
 

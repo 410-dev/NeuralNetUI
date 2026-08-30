@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
 import { deleteUpload, readUpload } from "@/lib/uploads";
+import { requireUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,7 +9,8 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params;
-    const { metadata, paths } = await readUpload(id);
+    const user = requireUser(request);
+    const { metadata, paths } = await readUpload(id, user.id);
     const thumbnail = new URL(request.url).searchParams.get("variant") === "thumbnail";
     const stream = Readable.toWeb(createReadStream(thumbnail ? paths.thumbnail : paths.original)) as ReadableStream;
     return new Response(stream, { headers: {
@@ -20,7 +22,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   } catch { return Response.json({ error: "Image not found." }, { status: 404 }); }
 }
 
-export async function DELETE(_: Request, context: { params: Promise<{ id: string }> }) {
-  try { const { id } = await context.params; await deleteUpload(id); return new Response(null, { status: 204 }); }
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  try { const { id } = await context.params; const user = requireUser(request); await deleteUpload(id, user.id); return new Response(null, { status: 204 }); }
   catch { return Response.json({ error: "Image deletion failed." }, { status: 400 }); }
 }

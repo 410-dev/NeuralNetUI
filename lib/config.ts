@@ -1,8 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import type { AppConfig, ModelConfig, PublicConfig } from "./types";
+import type { AppConfig, ModelConfig, PublicConfig, ReasoningPreset } from "./types";
+import type { AuthUser } from "./auth";
+import { updateUserPreferences } from "./auth";
 import { dataDir, db } from "./database";
+import { inferApiContextWindowTokens } from "./model-context";
 
 const presetSchema = z.object({
   id: z.string().min(1),
@@ -11,6 +14,7 @@ const presetSchema = z.object({
   effort: z.string().optional(),
   systemPrompt: z.string().optional(),
   systemPromptMode: z.enum(["replace", "prepend", "append"]).default("append"),
+  ownerId: z.string().optional(),
 });
 
 const modelSchema = z.object({
@@ -24,6 +28,10 @@ const modelSchema = z.object({
   reasoningSupported: z.boolean(),
   reasoningEfforts: z.array(z.string()).optional(),
   reasoningPresets: z.array(presetSchema),
+  contextWindowTokens: z.number().int().positive().optional(),
+  apiContextWindowTokens: z.number().int().positive().optional(),
+  ownerId: z.string().optional(),
+  isPublic: z.boolean().optional(),
 });
 
 export const configSchema = z.object({
@@ -36,18 +44,33 @@ export const configSchema = z.object({
     sendReasoningToModel: z.boolean(),
     exportReasoning: z.boolean(),
     language: z.enum(["en", "ko"]).default("en"),
-  }).default({ sendReasoningToModel: false, exportReasoning: true, language: "en" }),
+    onDemand: z.boolean().default(false),
+    showModelIdentifiers: z.boolean().default(true),
+  }).default({ sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true }),
   models: z.array(modelSchema),
 });
 
 const defaults: AppConfig = {
   server: { baseUrl: "http://localhost:8888/v1", apiKey: "" },
   profile: { name: "User" },
-  preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en" },
+  preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true },
   models: [],
 };
 
 const configPath = path.join(dataDir, "config.json");
+
+function claimLegacyCustomizations(config: AppConfig) {
+  const owner = db.prepare("SELECT id FROM users WHERE role = 'superadmin' ORDER BY created_at LIMIT 1").get() as { id: string } | undefined;
+  if (!owner) return { config, changed: false };
+  let changed = false;
+  for (const model of config.models) {
+    if (model.isAlias && !model.ownerId) { model.ownerId = owner.id; model.isPublic = false; changed = true; }
+    for (const preset of model.reasoningPresets) {
+      if (preset.kind === "custom" && !preset.ownerId) { preset.ownerId = owner.id; changed = true; }
+    }
+  }
+  return { config, changed };
+}
 
 async function readLegacyConfig(filePath: string) {
   try {
@@ -66,7 +89,11 @@ async function readLegacyConfig(filePath: string) {
 export async function readConfig(): Promise<AppConfig> {
   const stored = db.prepare("SELECT value FROM app_config WHERE id = 1").get() as { value: string } | undefined;
   if (stored) {
-    try { return configSchema.parse(JSON.parse(stored.value)); }
+    try {
+      const claimed = claimLegacyCustomizations(configSchema.parse(JSON.parse(stored.value)));
+      if (claimed.changed) db.prepare("UPDATE app_config SET value = ?, updated_at = ? WHERE id = 1").run(JSON.stringify(claimed.config), new Date().toISOString());
+      return claimed.config;
+    }
     catch (error) { console.error("Invalid SQLite config, recovering from configured defaults", error); }
   }
 
@@ -81,7 +108,7 @@ export async function readConfig(): Promise<AppConfig> {
       profile: config.profile,
     };
   }
-  return writeConfig(config);
+  return writeConfig(claimLegacyCustomizations(config).config);
 }
 
 export async function writeConfig(input: unknown): Promise<AppConfig> {
@@ -93,15 +120,103 @@ export async function writeConfig(input: unknown): Promise<AppConfig> {
   return parsed;
 }
 
-export function publicConfig(config: AppConfig): PublicConfig {
+function isAdmin(user: AuthUser) { return user.role === "admin" || user.role === "superadmin"; }
+
+export function canUseModel(model: ModelConfig, user: AuthUser) {
+  return !model.isAlias || !model.ownerId || model.ownerId === user.id || model.isPublic === true;
+}
+
+function visiblePreset(preset: ReasoningPreset, user: AuthUser) {
+  return preset.kind === "builtin" || !preset.ownerId || preset.ownerId === user.id;
+}
+
+export function publicConfig(config: AppConfig, user: AuthUser): PublicConfig {
+  const preferences: AppConfig["preferences"] = {
+    ...config.preferences,
+    sendReasoningToModel: typeof user.preferences.sendReasoningToModel === "boolean" ? user.preferences.sendReasoningToModel : config.preferences.sendReasoningToModel,
+    exportReasoning: typeof user.preferences.exportReasoning === "boolean" ? user.preferences.exportReasoning : config.preferences.exportReasoning,
+    language: user.preferences.language === "ko" || user.preferences.language === "en" ? user.preferences.language : config.preferences.language,
+  };
   return {
     ...config,
+    profile: { name: user.displayName },
+    preferences,
+    models: config.models.filter((model) => canUseModel(model, user)).map((model) => ({
+      ...model,
+      reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)),
+    })),
     server: {
       ...config.server,
       apiKey: "",
       hasApiKey: Boolean(config.server.apiKey || process.env.OPENAI_API_KEY),
     },
+    account: { id: user.id, username: user.username, displayName: user.displayName, role: user.role },
   };
+}
+
+function mergePresets(current: ReasoningPreset[], incoming: ReasoningPreset[], user: AuthUser, ownsModel: boolean) {
+  const admin = isAdmin(user);
+  const currentById = new Map(current.map((preset) => [preset.id, preset]));
+  const result: ReasoningPreset[] = [];
+  for (const candidate of incoming) {
+    const existing = currentById.get(candidate.id);
+    if (candidate.kind === "builtin") {
+      if (ownsModel || admin) result.push({ ...candidate, ownerId: undefined });
+      else if (existing) result.push(existing);
+      continue;
+    }
+    if (!existing || existing.ownerId === user.id || (ownsModel && (!existing.ownerId || existing.ownerId === user.id))) {
+      result.push({ ...candidate, ownerId: user.id });
+    } else result.push(existing);
+  }
+  for (const preset of current) {
+    const editable = preset.kind === "builtin" ? ownsModel || admin : preset.ownerId === user.id || (ownsModel && !preset.ownerId);
+    if (!editable && !result.some((item) => item.id === preset.id)) result.push(preset);
+  }
+  return result;
+}
+
+export async function writeConfigForUser(input: unknown, user: AuthUser): Promise<AppConfig> {
+  const incoming = configSchema.parse(input);
+  const current = await readConfig(); const admin = isAdmin(user);
+  const currentById = new Map(current.models.map((model) => [model.id, model]));
+  const models: ModelConfig[] = [];
+
+  for (const candidate of incoming.models) {
+    const existing = currentById.get(candidate.id);
+    if (!existing) {
+      if (candidate.isAlias) models.push({ ...candidate, ownerId: user.id, isPublic: candidate.isPublic === true,
+        reasoningPresets: candidate.reasoningPresets.map((preset) => preset.kind === "custom" ? { ...preset, ownerId: user.id } : preset) });
+      else if (admin) models.push(candidate);
+      continue;
+    }
+    if (existing.isAlias) {
+      const owns = existing.ownerId === user.id || (!existing.ownerId && admin);
+      models.push(owns ? { ...candidate, ownerId: existing.ownerId || user.id, reasoningPresets: mergePresets(existing.reasoningPresets, candidate.reasoningPresets, user, true) } : existing);
+    } else {
+      const base = admin ? { ...candidate, ownerId: undefined, isPublic: undefined } : existing;
+      models.push({ ...base, reasoningPresets: mergePresets(existing.reasoningPresets, candidate.reasoningPresets, user, false) });
+    }
+  }
+  for (const existing of current.models) {
+    const accessible = canUseModel(existing, user);
+    const mayDelete = existing.isAlias ? existing.ownerId === user.id || (!existing.ownerId && admin) : admin;
+    if ((!accessible || !mayDelete) && !models.some((model) => model.id === existing.id)) models.push(existing);
+  }
+
+  const preferences = { ...current.preferences, ...incoming.preferences };
+  const userPreferences = {
+    sendReasoningToModel: incoming.preferences.sendReasoningToModel,
+    exportReasoning: incoming.preferences.exportReasoning,
+    language: incoming.preferences.language,
+  };
+  updateUserPreferences(user.id, admin ? incoming.profile.name : user.displayName, userPreferences);
+  return writeConfig({
+    server: admin ? { ...incoming.server, apiKey: incoming.server.apiKey || current.server.apiKey } : current.server,
+    profile: current.profile,
+    preferences: admin ? preferences : current.preferences,
+    models,
+  });
 }
 
 export function inferModel(input: string | Record<string, unknown>): ModelConfig {
@@ -121,6 +236,7 @@ export function inferModel(input: string | Record<string, unknown>): ModelConfig
     ? `${modelId}:Qwen3.8-27B-NVFP4-MTP-HIGH`
     : knownGemma && record.quant ? `${modelId}:${String(record.quant)}` : modelId;
   const normalizedEfforts = efforts.length ? efforts : reasoningSupported ? ["low", "medium", "high"] : [];
+  const apiContextWindowTokens = inferApiContextWindowTokens(record);
   return {
     id: modelId,
     name: friendlyName,
@@ -130,6 +246,7 @@ export function inferModel(input: string | Record<string, unknown>): ModelConfig
     visible: true,
     reasoningSupported,
     reasoningEfforts: normalizedEfforts,
+    apiContextWindowTokens,
     reasoningPresets: normalizedEfforts.length
       ? normalizedEfforts.map((effort) => ({ id: effort.replaceAll("_", "-"), name: effort === "xhigh" ? "Extra High" : effort.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase()), kind: "builtin" as const, effort }))
       : [{ id: "default", name: "Default", kind: "custom" as const }],
