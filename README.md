@@ -13,7 +13,7 @@ npm run dev
 
 ## 간편 호스팅
 
-Node.js 22 이상만 설치되어 있으면 운영체제별 스크립트가 의존성 설치, 프로덕션 빌드, standalone 정적 파일 준비와 서버 시작을 처리합니다. 최초 실행 시 앱 기본값을 `data/neural-chat.sqlite3`에 저장하며 이후 프로필, API 연결, 모델, 화면 환경설정은 모두 SQLite에서만 읽고 씁니다.
+Node.js 22 이상과 Python 3가 설치되어 있으면 운영체제별 스크립트가 Node 의존성 및 DDGS용 격리 Python 환경 설치, 프로덕션 빌드, standalone 정적 파일 준비와 서버 시작을 처리합니다. 최초 실행 시 앱 기본값을 `data/neural-chat.sqlite3`에 저장하며 이후 사용자, 세션, API 연결, 모델, 화면 환경설정은 모두 SQLite에서만 읽고 씁니다.
 
 Windows:
 
@@ -34,17 +34,77 @@ chmod +x host-linux.sh
 {
   "server": {
     "host": "0.0.0.0",
-    "port": 3000
+    "port": 3000,
+    "accessMode": "lan-and-tailscale"
   }
 }
 ```
 
 `PORT`와 `NEURAL_CHAT_HOST` 환경 변수는 파일 값보다 우선합니다. `NEURAL_CHAT_DATA_DIR` 또는 `NEURAL_CHAT_DB_PATH`로 저장 위치를, `NEURAL_CHAT_SERVER_CONFIG`로 서버 설정 파일 경로를 따로 지정할 수 있습니다.
 
+`server.accessMode`는 Windows MSI 서비스의 원격 접속 범위를 정합니다. 허용값은 `lan`, `tailscale`, `lan-and-tailscale`입니다. 로컬 루프백 접속은 항상 허용되며, 그 외 인터넷 주소는 거부됩니다.
+
 실제로 서버를 시작하지 않고 설치와 빌드 상태만 준비·확인하려면 `--check`를 사용합니다.
 
 ```bash
 ./host-linux.sh --check
+```
+
+## Windows MSI 설치
+
+`installer/output/NeuralNetUI-1.3.3-x64.msi`는 Node.js, 앱 런타임, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
+
+트레이 아이콘을 두 번 누르면 Web UI를 다시 열 수 있습니다. 우클릭 메뉴에는 **설정 파일 수정**, **재시작**, **종료하기**가 있으며, 종료는 서비스와 트레이 앱을 함께 중지합니다. 시작 메뉴의 **NeuralNetUI**를 누르면 중지된 서비스를 다시 시작하고 Web UI를 호스팅하며 트레이 아이콘도 복원합니다. 서비스 제어와 보호된 설정 파일 편집에는 Windows 관리자 권한 확인이 표시될 수 있습니다.
+
+설치된 호스팅 설정은 `%ProgramData%\Neural Chat\app-config.json`에 있습니다. 파일에서 `server.port` 또는 `server.accessMode`를 바꾼 뒤 관리자 권한으로 `Restart-Service NeuralChat`을 실행하면 서비스와 Windows 방화벽 규칙이 새 설정으로 동기화됩니다. 앱 데이터와 로그는 `%ProgramData%\Neural Chat\data`에 보존됩니다.
+
+무인 설치에서도 같은 공개 MSI 속성을 사용할 수 있습니다.
+
+```powershell
+msiexec /i NeuralNetUI-1.3.3-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
+```
+
+MSI를 다시 빌드하려면 Node.js, .NET 8 SDK가 있는 Windows x64 개발 환경에서 다음을 실행합니다. WiX 5 도구는 처음 빌드할 때 `installer/.tools`에 로컬 설치됩니다.
+
+```powershell
+.\installer\build-msi.ps1
+```
+
+## Docker 배포
+
+Docker Desktop(Windows) 또는 Docker Engine과 Docker Compose v2(Linux)가 설치되어 있으면 운영체제별 스크립트 하나로 이미지를 빌드하고 컨테이너를 시작할 수 있습니다.
+
+Windows:
+
+```bat
+deploy-docker-windows.bat
+```
+
+Linux:
+
+```bash
+chmod +x deploy-docker-linux.sh
+./deploy-docker-linux.sh
+```
+
+기본 접속 주소는 `http://localhost:3000`이며 SQLite DB와 업로드 파일은 프로젝트의 `data` 디렉터리에 계속 보존됩니다. 외부 포트를 바꾸려면 실행 전에 `NEURAL_CHAT_PORT`를 지정합니다.
+
+```bat
+set NEURAL_CHAT_PORT=65500
+deploy-docker-windows.bat
+```
+
+```bash
+NEURAL_CHAT_PORT=65500 ./deploy-docker-linux.sh
+```
+
+호스트 PC에서 실행 중인 OpenAI 호환 API 서버에 연결할 때는 앱 설정의 Base URL에 `http://host.docker.internal:8888/v1`처럼 `host.docker.internal`을 사용합니다. Windows와 Linux 모두 Compose에서 이 호스트 이름을 사용할 수 있도록 설정되어 있습니다.
+
+컨테이너 로그 확인과 종료는 다음 명령으로 할 수 있습니다.
+
+```bash
+docker compose logs -f neural-chat
+docker compose down
 ```
 
 ## LXC 배포
@@ -59,6 +119,8 @@ cp -a .next/standalone/. /opt/neural-chat/
 cp -a .next/static /opt/neural-chat/.next/static
 mkdir -p /opt/neural-chat/scripts
 cp scripts/start-server.mjs /opt/neural-chat/scripts/
+cp scripts/ddgs-search.py /opt/neural-chat/scripts/
+cp requirements.txt /opt/neural-chat/
 cp app-config.json /opt/neural-chat/
 ```
 
@@ -71,7 +133,7 @@ systemctl enable --now neural-chat
 
 앱 설정과 대화 데이터는 기본적으로 실행 디렉터리의 `data/neural-chat.sqlite3`에 저장됩니다. 운영 환경에서는 예시 서비스처럼 `NEURAL_CHAT_DATA_DIR=/var/lib/neural-chat`을 반드시 지정하고 해당 디렉터리를 서비스 사용자만 읽고 쓸 수 있게 두는 것을 권장합니다. DB 파일만 별도 위치에 둘 경우 `NEURAL_CHAT_DB_PATH`를 사용할 수 있습니다. 저장된 API 키는 브라우저 응답에 다시 포함되지 않습니다.
 
-SQLite는 WAL 모드, 외래키 검사, 5초 busy timeout을 사용하며 대화의 모든 브랜치와 메시지는 한 트랜잭션으로 저장됩니다. 사용자 메시지 편집, 모델 응답 편집, 응답 재생성은 모두 기존 경로를 보존한 새 브랜치를 생성합니다. 수정본이 있는 각 메시지 아래의 `< m / n >` 탐색기로 해당 메시지의 이전·다음 수정본과 연결된 채팅 기록을 즉시 전환할 수 있으며, 상단 브랜치 선택기는 전체 경로를 고르는 보조 수단으로 유지됩니다. 내보내기는 선택 브랜치의 Markdown 또는 모든 브랜치가 포함된 JSON을 지원합니다.
+SQLite는 WAL 모드, 외래키 검사, 5초 busy timeout을 사용하며 대화의 모든 브랜치와 메시지는 한 트랜잭션으로 저장됩니다. 사용자 메시지 편집, 모델 응답 편집, 응답 재생성은 모두 기존 경로를 보존한 새 브랜치를 생성합니다. 수정본이 있는 각 메시지 아래의 `< m / n >` 탐색기로 해당 메시지의 이전·다음 수정본과 연결된 채팅 기록을 즉시 전환할 수 있습니다. 내보내기는 선택 브랜치의 Markdown 또는 모든 브랜치가 포함된 JSON을 지원합니다.
 
 이미지는 한 메시지에 최대 12장, 장당 20MB까지 첨부할 수 있습니다. 이미지 메타데이터와 메시지 연결은 SQLite에 저장하고, DB 비대화를 막기 위해 원본과 브라우저에서 생성한 경량 썸네일은 `data/uploads`에 분리 저장합니다. 모델 요청에는 원본이 data URL로 전달됩니다. 채팅 화면에서는 썸네일만 지연 로딩하고 클릭할 때 원본을 엽니다.
 
@@ -90,6 +152,26 @@ cp -a /var/lib/neural-chat/uploads /backup/uploads
 
 모델 응답은 GitHub Flavored Markdown으로 렌더링되며 목록, 링크, 표, 인라인 코드와 코드 블록을 지원합니다. 사용자 메시지는 입력한 일반 텍스트 그대로 표시됩니다. 완료된 모델 응답은 응답 아래의 편집 버튼으로 현재 브랜치 안에서 수정할 수 있습니다.
 
+## 사용자와 권한
+
+- 사용자 테이블이 비어 있는 최초 접속에서는 최고 관리자 계정을 생성합니다. 기존 버전에서 이전된 대화와 업로드는 이 계정에 귀속됩니다.
+- 최고 관리자와 관리자는 설정에서 일반 사용자 또는 관리자 계정을 추가하고, 다른 사용자의 표시 이름을 변경하거나 계정을 삭제할 수 있습니다. 최고 관리자 계정과 현재 로그인한 본인 계정은 삭제할 수 없습니다.
+- 대화와 이미지 업로드는 사용자별로 분리되며 다른 사용자의 API 접근도 거부됩니다.
+- 커스텀 모델은 만든 사용자에게만 보입니다. 제작자가 **커스텀 모델 공개**를 켜면 다른 사용자도 채팅에서 사용할 수 있지만 수정할 수는 없습니다.
+- 일반 사용자의 설정 화면은 자신이 만든 커스텀 모델, 자신이 만든 커스텀 Reasoning 프리셋, 계정 비밀번호 변경만 제공합니다.
+
+## 인터넷 도구
+
+입력창의 `+` 메뉴에서 **인터넷 검색**과 **페이지 방문**을 각각 켤 수 있습니다. 활성화된 도구만 OpenAI 호환 `tools` 정의로 모델에 전달되고, 모델이 호출하면 서버가 결과를 실행해 같은 요청 흐름 안에서 모델에 돌려줍니다. 검색은 Python `ddgs` 패키지를 사용합니다. 페이지 방문은 공개 HTTP(S) 주소만 허용하며 localhost와 사설 IP 대역을 차단합니다.
+
+한 응답에서 발생한 도구 호출은 렌치 아이콘이 있는 하나의 **도구 사용 중/도구 사용함** 폴딩에 모입니다. 각 호출은 **인터넷 검색 도구 사용 중**, **페이지 방문 도구 사용함**처럼 이름과 상태를 표시하는 하위 폴딩이며, 펼치면 도구 호출 인자와 결과를 확인할 수 있습니다. 진행 중인 호출은 자동으로 펼쳐지고 완료된 호출은 접힌 상태로 정리됩니다.
+
+직접 실행하는 경우 아래 의존성도 설치할 수 있습니다. `host-windows.bat`와 `host-linux.sh`, Docker 이미지는 이를 자동 처리합니다.
+
+```bash
+python -m pip install -r requirements.txt
+```
+
 ## Reasoning 동작
 
 - **Built-in** 프리셋은 선택한 값을 OpenAI 호환 요청의 `reasoning_effort`로 전달합니다.
@@ -101,6 +183,7 @@ cp -a /var/lib/neural-chat/uploads /backup/uploads
 - `/models`가 반환한 항목은 Models 관리 목록에 모두 보존됩니다. 모델별 **메인 인터페이스에 표시** 토글을 끄면 모델 선택기와 Reasoning 설정 목록에서만 숨겨집니다.
 - 커스텀 Reasoning 템플릿의 시스템 프롬프트는 모델 프롬프트를 `Replace`, `Prepend`, `Append`하는 세 가지 방식으로 조합할 수 있습니다.
 - 커스텀 모델은 별도 모델을 복제하지 않는 alias입니다. 표시 이름과 ID, 시스템 프롬프트만 독립적으로 가지며 요청은 기반 모델의 ID로 전송됩니다.
+- 일반 설정의 **On demand**를 켜면 각 추론 요청 전에 서버의 `/api/inference/load`를 호출해 선택한 모델을 먼저 로드합니다. `repo:variant` 형식의 모델 ID는 `model_path`와 `gguf_variant`로 나누어 전송합니다.
 
 ## 언어
 
