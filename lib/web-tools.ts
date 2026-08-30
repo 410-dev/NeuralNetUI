@@ -7,7 +7,7 @@ import os from "node:os";
 import { classifyDocument, cleanupTemporaryDocuments, decodeTextDocument, pdfModelContent, sniffDocument, sniffRasterMimeType, type ModelContentPart } from "./document-processing";
 import type { ToolSettings } from "./types";
 
-export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; currentTime?: boolean; location?: boolean; multipleChoice?: boolean };
+export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; browser?: boolean; currentTime?: boolean; location?: boolean; multipleChoice?: boolean };
 export type WebToolExecution = { result: unknown; content?: ModelContentPart[] };
 
 export function toolDefinitions(enabled: EnabledWebTools) {
@@ -26,6 +26,30 @@ export function toolDefinitions(enabled: EnabledWebTools) {
       name: "visit_page",
       description: "Visit a public HTTP(S) page and read its title and main text. Use URLs from search results when more detail is needed.",
       parameters: { type: "object", properties: { url: { type: "string", description: "Public http:// or https:// URL" } }, required: ["url"], additionalProperties: false },
+    },
+  });
+  if (enabled.browser) tools.push({
+    type: "function",
+    function: {
+      name: "browser",
+      description: "Control a real JavaScript-enabled browser for pages that visit_page cannot render. Open a public page, inspect its visible text and numbered element refs, then click, type, select, press keys, scroll, wait, or take a screenshot. Reuse the returned session_id for later actions. To capture a page n seconds after opening, use action=open with wait_seconds=n and screenshot=true. Close the session when finished.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["open", "inspect", "click", "type", "select", "press", "scroll", "wait", "screenshot", "close"] },
+          url: { type: "string", description: "Public HTTP(S) URL; required for open" },
+          session_id: { type: "string", description: "Session returned by open; required for every other action" },
+          target: { type: "string", description: "Element ref such as e3 from the latest snapshot, or a CSS selector" },
+          text: { type: "string", description: "Replacement text for type" },
+          value: { type: "string", description: "Option value for select" },
+          key: { type: "string", description: "Playwright key such as Enter, Tab, or ArrowDown for press" },
+          delta_y: { type: "number", minimum: -10000, maximum: 10000, description: "Vertical pixels for scroll" },
+          wait_seconds: { type: "number", minimum: 0, maximum: 30, description: "Delay before returning or capturing" },
+          screenshot: { type: "boolean", description: "Capture after open and wait_seconds" },
+          full_page: { type: "boolean", description: "Capture the complete scrollable page" },
+        },
+        required: ["action"], additionalProperties: false,
+      },
     },
   });
   if (enabled.currentTime) tools.push({

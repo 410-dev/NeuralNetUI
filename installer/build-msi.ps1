@@ -58,6 +58,16 @@ try {
     Copy-Item -LiteralPath "scripts\process-pdf.py" -Destination (Join-Path $stageRoot "app\scripts\process-pdf.py") -Force
     Copy-Item -LiteralPath "requirements.txt" -Destination (Join-Path $stageRoot "app\requirements.txt") -Force
 
+    $browserRoot = Join-Path $stageRoot "app\browser"
+    $previousBrowserPath = $env:PLAYWRIGHT_BROWSERS_PATH
+    try {
+        $env:PLAYWRIGHT_BROWSERS_PATH = $browserRoot
+        & (Join-Path $repoRoot "node_modules\.bin\playwright-core.cmd") install chromium
+        if ($LASTEXITCODE -ne 0) { throw "The Chromium browser runtime could not be bundled." }
+    } finally {
+        $env:PLAYWRIGHT_BROWSERS_PATH = $previousBrowserPath
+    }
+
     $python = (Get-Command python -ErrorAction SilentlyContinue).Source
     if (-not $python) { throw "Python 3 is required to bundle the DDGS internet-search runtime." }
     $pythonVersion = & $python -c "import platform; print(platform.python_version())"
@@ -88,7 +98,7 @@ try {
         -ext WixToolset.UI.wixext `
         -d "StagePath=$stageRoot" `
         -intermediatefolder (Join-Path $buildRoot "wixobj") `
-        -o (Join-Path $outputRoot "NeuralNetUI-1.5.0-x64.msi")
+        -o (Join-Path $outputRoot "NeuralNetUI-1.6.0-x64.msi")
     if ($LASTEXITCODE -ne 0) { throw "The MSI build failed." }
 } finally {
     Pop-Location

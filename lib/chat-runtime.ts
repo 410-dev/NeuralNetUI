@@ -2,6 +2,7 @@ import { canUseModel, readConfig } from "./config";
 import { readConversation, writeConversation } from "./conversations";
 import { readUploadModelContent } from "./uploads";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
+import { closeBrowserSessions, executeBrowserTool } from "./browser-tool";
 import type { Conversation, StoredMessage, ToolEvent, ToolSettings } from "./types";
 import type { ModelContentPart } from "./document-processing";
 
@@ -238,6 +239,7 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
     const normalized = validateQuestions(args); updateToolEvent(job, call.id, { arguments: normalized });
     return { result: await waitForBrowser(job, call) };
   }
+  if (call.function.name === "browser" && enabled.browser) return executeBrowserTool(`${job.userId}:${job.input.conversationId}:${job.message.id}`, call.function.arguments);
   return executeWebTool(call.function.name, call.function.arguments, enabled, settings);
 }
 
@@ -266,6 +268,7 @@ async function run(job: ChatJob) {
     }
     const enabled: EnabledWebTools = {
       internetSearch: job.input.tools?.internetSearch === true, pageVisit: job.input.tools?.pageVisit === true,
+      browser: job.input.tools?.browser === true,
       currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
     };
     const tools = toolDefinitions(enabled);
@@ -301,6 +304,8 @@ async function run(job: ChatJob) {
     job.status = stopped ? "stopped" : "error"; job.error = stopped ? undefined : error instanceof Error ? error.message : "Chat generation failed.";
     if (job.message.reasoning) job.message.reasoningDurationSeconds ||= Math.max(1, reasoningSeconds);
     await persist(job).catch(() => undefined); broadcast(job, true); finishSubscribers(job);
+  } finally {
+    await closeBrowserSessions(`${job.userId}:${job.input.conversationId}:${job.message.id}`);
   }
 }
 

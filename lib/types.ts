@@ -122,6 +122,7 @@ export interface MultipleChoiceQuestion {
 export interface EnabledTools {
   internetSearch: boolean;
   pageVisit: boolean;
+  browser: boolean;
   currentTime: boolean;
   location: boolean;
   multipleChoice: boolean;

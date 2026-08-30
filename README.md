@@ -52,7 +52,7 @@ chmod +x host-linux.sh
 
 ## Windows MSI 설치
 
-`installer/output/NeuralNetUI-1.5.0-x64.msi`는 Node.js, 앱 런타임, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
+`installer/output/NeuralNetUI-1.6.0-x64.msi`는 Node.js, 앱 런타임, 헤드리스 Chromium, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
 
 트레이 아이콘을 두 번 누르면 Web UI를 다시 열 수 있습니다. 우클릭 메뉴에는 **설정 파일 수정**, **재시작**, **종료하기**가 있으며, 종료는 서비스와 트레이 앱을 함께 중지합니다. 시작 메뉴의 **NeuralNetUI**를 누르면 중지된 서비스를 다시 시작하고 Web UI를 호스팅하며 트레이 아이콘도 복원합니다. 서비스 제어와 보호된 설정 파일 편집에는 Windows 관리자 권한 확인이 표시될 수 있습니다.
 
@@ -61,7 +61,7 @@ chmod +x host-linux.sh
 무인 설치에서도 같은 공개 MSI 속성을 사용할 수 있습니다.
 
 ```powershell
-msiexec /i NeuralNetUI-1.5.0-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
+msiexec /i NeuralNetUI-1.6.0-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
 ```
 
 MSI를 다시 빌드하려면 Node.js, .NET 8 SDK가 있는 Windows x64 개발 환경에서 다음을 실행합니다. WiX 5 도구는 처음 빌드할 때 `installer/.tools`에 로컬 설치됩니다.
@@ -165,7 +165,11 @@ cp -a /var/lib/neural-chat/uploads /backup/uploads
 
 ## 인터넷 도구
 
-입력창의 `+` 메뉴에서 **인터넷 검색**과 **페이지 방문**을 각각 켤 수 있습니다. 활성화된 도구만 OpenAI 호환 `tools` 정의로 모델에 전달되고, 모델이 호출하면 서버가 결과를 실행해 같은 요청 흐름 안에서 모델에 돌려줍니다. 검색은 Python `ddgs` 패키지를 사용합니다. 페이지 방문은 공개 HTTP(S) 주소만 허용하며 localhost와 사설 IP 대역을 차단합니다.
+입력창의 `+` 메뉴에서 **인터넷 검색**, **페이지 방문**, **브라우저**를 각각 켤 수 있습니다. 활성화된 도구만 OpenAI 호환 `tools` 정의로 모델에 전달되고, 모델이 호출하면 서버가 결과를 실행해 같은 요청 흐름 안에서 모델에 돌려줍니다. 검색은 Python `ddgs` 패키지를 사용합니다. 페이지 방문과 브라우저는 공개 HTTP(S) 주소만 허용하며 localhost와 사설 IP 대역을 차단합니다.
+
+**브라우저** 도구는 실제 Chromium에서 JavaScript를 실행합니다. 모델은 `open`, `inspect`, `click`, `type`, `select`, `press`, `scroll`, `wait`, `screenshot`, `close` 작업을 연속 호출할 수 있고, DOM 스냅샷에 포함된 `e1`, `e2` 같은 요소 참조로 페이지를 조작합니다. `open` 또는 `screenshot`에 `wait_seconds`를 지정하면 최대 30초를 기다린 뒤 화면을 캡처하며, 캡처 이미지는 모델의 비전 입력으로도 전달됩니다. 전체 페이지 캡처는 메모리 남용을 막기 위해 높이 8,000px까지로 제한됩니다. 세션은 사용자와 응답별로 격리되고 응답 종료 시 자동으로 닫히며, 서브리소스 요청에도 공개 주소 검사를 적용합니다.
+
+Docker 이미지와 Windows MSI는 Chromium을 포함합니다. 소스에서 직접 실행할 때 Chrome 또는 Edge가 설치되어 있지 않다면 `npm run browser:install`을 한 번 실행하세요. 별도 Chromium 실행 파일은 `NEURAL_CHAT_BROWSER_EXECUTABLE` 환경 변수로 지정할 수 있습니다.
 
 한 응답에서 발생한 도구 호출은 렌치 아이콘이 있는 하나의 **도구 사용 중/도구 사용함** 폴딩에 모입니다. 각 호출은 **인터넷 검색 도구 사용 중**, **페이지 방문 도구 사용함**처럼 이름과 상태를 표시하는 하위 폴딩이며, 펼치면 도구 호출 인자와 결과를 확인할 수 있습니다. 진행 중인 호출은 자동으로 펼쳐지고 완료된 호출은 접힌 상태로 정리됩니다.
 
