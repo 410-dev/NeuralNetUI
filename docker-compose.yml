@@ -1,0 +1,22 @@
+services:
+  neural-chat:
+    container_name: neural-chat
+    image: neural-chat-ui:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    user: "${NEURAL_CHAT_UID:-1000}:${NEURAL_CHAT_GID:-1000}"
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      NEURAL_CHAT_DATA_DIR: /app/data
+    ports:
+      - "${NEURAL_CHAT_PORT:-3000}:3000"
+    volumes:
+      - "${NEURAL_CHAT_DATA_PATH:-./data}:/app/data"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
