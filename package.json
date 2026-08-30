@@ -1,12 +1,14 @@
 {
   "name": "neural-chat-ui",
-  "version": "1.0.0",
+  "version": "1.3.3",
+  "type": "module",
   "private": true,
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "dev": "node scripts/start-server.mjs dev",
+    "test": "node --test --experimental-strip-types \"lib/*.test.ts\"",
     "build": "next build",
     "start": "node scripts/start-server.mjs start"
   },
