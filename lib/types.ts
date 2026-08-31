@@ -58,6 +58,8 @@ export interface AppConfig {
     language: Locale;
     onDemand: boolean;
     showModelIdentifiers: boolean;
+    defaultModelId?: string;
+    defaultReasoningPresetId?: string;
   };
   toolSettings: ToolSettings;
   models: ModelConfig[];
