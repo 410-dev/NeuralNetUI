@@ -12,9 +12,11 @@
 - Client-side IDs use Web Crypto when available and a collision-resistant fallback on non-secure LAN/Tailscale HTTP origins where browsers hide Web Crypto.
 - Frontend design guidance lives in `design/MASTER.md`.
 - Per-user default model and reasoning preset are applied on a fresh app session; in-app New Chat preserves the current selection.
+- Admins can unload the inference server's currently loaded model from the model picker; the server-side proxy keeps the configured API key out of the browser and the action is disabled during local generation.
+- User message bubbles use a 17px desktop font and a readable 16px mobile font.
 - General settings can export/import validated `neuralnetui-model-settings` v1 JSON with two-space indentation; ownership metadata is never exported and imports save immediately.
 - Chat streaming auto-follows only while the thread remains near the bottom, and hidden served models are excluded from alias base-model choices.
-- On narrow mobile screens, user-message actions sit below the bubble, which uses nearly the available screen width and a compact 60% font. Message and code copying falls back to a selection-based path on insecure LAN/Tailscale HTTP origins.
+- On narrow mobile screens, user-message actions sit below the bubble, which uses nearly the available screen width and a 16px font. Message and code copying falls back to a selection-based path on insecure LAN/Tailscale HTTP origins.
 - Unit tests run with `npm test`; type checking uses `npx tsc --noEmit`; the production build uses `npm run build`.
 - Windows x64 MSI packaging is driven by `installer/build-msi.ps1` and bundles the standalone Next.js app, Node.js, embedded Python search/PDF dependencies, service host, and tray host.
 - Current release version: 1.6.1.

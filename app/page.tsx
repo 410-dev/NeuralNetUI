@@ -4,7 +4,7 @@ import {
   ArrowUp, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, CirclePlus, Copy, Download, FileJson,
   FileText, GitBranch, ImagePlus, KeyRound, LoaderCircle, Menu, MessageSquarePlus, Pencil, Plus, RefreshCw,
   Search, Server, Settings2, SlidersHorizontal, Sparkles, Square, Trash2, UserRound, X, Globe2, Link2,
-  LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Upload,
+  LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload,
 } from "lucide-react";
 import { FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -52,7 +52,7 @@ const translations = {
   en: {
     newChat: "New Chat", search: "Search", searchChats: "Search chats…", histories: "Chat histories", exportChat: "Export chat", deleteChat: "Delete chat", deleteAllChats: "Delete all chats", confirmDeleteChat: "Delete this chat permanently?", confirmDeleteAllChats: "Delete all chat histories permanently?",
     historyEmpty: "Your conversations will appear here.", settingsConnections: "Settings & connections", selectModel: "Select a model",
-    availableModels: "Available models", manageModels: "Manage models", welcome: "What would you like to explore?",
+    availableModels: "Available models", manageModels: "Manage models", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", unloadDuringGeneration: "Stop generation before unloading the model.", welcome: "What would you like to explore?",
     messagePlaceholder: "Message your model…", reasoningPreset: "Reasoning preset", native: "Native", template: "Template", default: "default",
     sendPriorReasoning: "Send prior reasoning", sendPriorReasoningDesc: "Include reasoning_content in the next request",
     disclaimer: "Responses may be inaccurate. Verify important information.", stop: "Stop generating", send: "Send message", addToQueue: "Add to queue", queuedMessages: "Queued messages", removeQueuedMessage: "Remove queued message",
@@ -86,7 +86,7 @@ const translations = {
   ko: {
     newChat: "새 채팅", search: "검색", searchChats: "채팅 검색…", histories: "채팅 기록", exportChat: "채팅 내보내기", deleteChat: "대화 삭제", deleteAllChats: "전체 대화 삭제", confirmDeleteChat: "이 대화를 영구적으로 삭제할까요?", confirmDeleteAllChats: "모든 대화 기록을 영구적으로 삭제할까요?",
     historyEmpty: "대화를 시작하면 여기에 표시됩니다.", settingsConnections: "설정 및 연결", selectModel: "모델 선택",
-    availableModels: "사용 가능한 모델", manageModels: "모델 관리", welcome: "무엇을 함께 살펴볼까요?",
+    availableModels: "사용 가능한 모델", manageModels: "모델 관리", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", unloadDuringGeneration: "생성을 중단한 후 모델을 언로드해 주세요.", welcome: "무엇을 함께 살펴볼까요?",
     messagePlaceholder: "모델에게 메시지 보내기…", reasoningPreset: "Reasoning 프리셋", native: "내장", template: "템플릿", default: "기본값",
     sendPriorReasoning: "이전 Reasoning 전송", sendPriorReasoningDesc: "다음 요청에 reasoning_content를 포함합니다",
     disclaimer: "응답이 부정확할 수 있습니다. 중요한 정보는 확인해 주세요.", stop: "생성 중단", send: "메시지 전송", addToQueue: "대기열에 추가", queuedMessages: "대기 중인 메시지", removeQueuedMessage: "대기열에서 제거",
@@ -199,6 +199,8 @@ export default function Home() {
   const [draft, setDraft] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [unloadingModel, setUnloadingModel] = useState(false);
+  const [modelControlNotice, setModelControlNotice] = useState<{ message: string; error: boolean } | null>(null);
   const [presetMenuOpen, setPresetMenuOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -341,6 +343,7 @@ export default function Home() {
   const visibleModels = config.models.filter((model) => model.visible !== false);
   const selectedModel = visibleModels.find((model) => model.id === selectedModelId) || visibleModels[0];
   const selectedPreset = selectedModel?.reasoningPresets.find((preset) => preset.id === selectedPresetId) || selectedModel?.reasoningPresets[0];
+  const canManageInference = config.account?.role === "admin" || config.account?.role === "superadmin";
   const activeBranch = conversation?.branches.find((branch) => branch.id === conversation.activeBranchId);
   const pendingChoice = pendingMultipleChoiceEvent(messages);
   const contextUsedTokens = useMemo(() => {
@@ -403,6 +406,21 @@ export default function Home() {
     } catch (caught) {
       setConfig(config);
       setError(caught instanceof Error ? caught.message : "Unable to save the default selection.");
+    }
+  }
+
+  async function unloadModel() {
+    if (isGenerating || unloadingModel) return;
+    setUnloadingModel(true); setModelControlNotice(null);
+    try {
+      const response = await fetch("/api/inference/unload", { method: "POST" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || c.modelUnloadFailed);
+      setModelControlNotice({ message: c.modelUnloaded, error: false });
+    } catch (caught) {
+      setModelControlNotice({ message: caught instanceof Error ? caught.message : c.modelUnloadFailed, error: true });
+    } finally {
+      setUnloadingModel(false);
     }
   }
 
@@ -791,8 +809,8 @@ export default function Home() {
       <section className="chat-surface">
         <div className="ambient-glow" />
         <div className="model-switcher">
-          <button className="model-trigger" onClick={() => setModelMenuOpen((value) => !value)}><span>{selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
-          {modelMenuOpen && <div className="popover model-popover"><div className="popover-heading"><span>{c.availableModels}</span><small>{visibleModels.length}</small></div>{visibleModels.map((model) => <button className="model-option" key={model.id} onClick={() => chooseModel(model)}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{model.isAlias && <b>ALIAS</b>}</button>)}<button className="manage-link" onClick={() => { setModelMenuOpen(false); setSettingsOpen(true); }}><Settings2 size={15} /> {c.manageModels}</button><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button></div>}
+          <button className="model-trigger" onClick={() => { if (!modelMenuOpen) setModelControlNotice(null); setModelMenuOpen((value) => !value); }}><span>{selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
+          {modelMenuOpen && <div className="popover model-popover"><div className="popover-heading"><span>{c.availableModels}</span><small>{visibleModels.length}</small></div>{visibleModels.map((model) => <button className="model-option" key={model.id} onClick={() => chooseModel(model)}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{model.isAlias && <b>ALIAS</b>}</button>)}<button className="manage-link" onClick={() => { setModelMenuOpen(false); setSettingsOpen(true); }}><Settings2 size={15} /> {c.manageModels}</button><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{canManageInference && <><button className="unload-model-action" disabled={isGenerating || unloadingModel} title={isGenerating ? c.unloadDuringGeneration : c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>{modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</>}</div>}
         </div>
 
         <div className="conversation-stage">

@@ -1,6 +1,7 @@
 import { canUseModel, readConfig } from "./config";
 import { readConversation, writeConversation } from "./conversations";
 import { readUploadModelContent } from "./uploads";
+import { inferenceEndpoint } from "./inference-control";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
 import { closeBrowserSessions, executeBrowserTool } from "./browser-tool";
 import type { Conversation, StoredMessage, ToolEvent, ToolSettings } from "./types";
@@ -55,7 +56,6 @@ globalThis.neuralChatJobs = jobs;
 const encoder = new TextEncoder();
 
 function endpoint(baseUrl: string) { return `${baseUrl.replace(/\/$/, "")}/chat/completions`; }
-function loadEndpoint(baseUrl: string) { const url = new URL(baseUrl); url.pathname = `${url.pathname.replace(/\/$/, "").replace(/\/v1$/, "")}/api/inference/load`; url.search = ""; url.hash = ""; return url.toString(); }
 function loadBody(sourceModel: string) {
   const separator = sourceModel.lastIndexOf(":"); const lastPathSeparator = Math.max(sourceModel.lastIndexOf("/"), sourceModel.lastIndexOf("\\"));
   return separator <= lastPathSeparator || separator === 1 ? { model_path: sourceModel } : { model_path: sourceModel.slice(0, separator), gguf_variant: sourceModel.slice(separator + 1) };
@@ -258,11 +258,11 @@ async function run(job: ChatJob) {
     const apiKey = config.server.apiKey || process.env.OPENAI_API_KEY || "";
     const headers = { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) };
     if (config.preferences.onDemand) {
-      const target = loadBody(model.sourceModel); const statusUrl = loadEndpoint(config.server.baseUrl).replace(/\/load$/, "/status");
+      const target = loadBody(model.sourceModel); const statusUrl = inferenceEndpoint(config.server.baseUrl, "status");
       const statusResponse = await fetch(statusUrl, { headers, signal: job.controller.signal, cache: "no-store" });
       const status = statusResponse.ok ? await statusResponse.json().catch(() => ({})) : {};
       if (status.model_identifier !== target.model_path || (target.gguf_variant && status.gguf_variant !== target.gguf_variant)) {
-        const loadResponse = await fetch(loadEndpoint(config.server.baseUrl), { method: "POST", headers, body: JSON.stringify(target), signal: job.controller.signal });
+        const loadResponse = await fetch(inferenceEndpoint(config.server.baseUrl, "load"), { method: "POST", headers, body: JSON.stringify(target), signal: job.controller.signal });
         if (!loadResponse.ok) throw new Error((await loadResponse.text()) || `Model load failed with ${loadResponse.status}`);
       }
     }
