@@ -78,9 +78,10 @@ export const configSchema = z.object({
     language: z.enum(["en", "ko"]).default("en"),
     onDemand: z.boolean().default(false),
     showModelIdentifiers: z.boolean().default(true),
+    renderStrikethrough: z.boolean().default(true),
     defaultModelId: z.string().min(1).optional(),
     defaultReasoningPresetId: z.string().min(1).optional(),
-  }).default({ sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true }),
+  }).default({ sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true }),
   toolSettings: toolSettingsSchema,
   models: z.array(modelSchema),
 });
@@ -88,7 +89,7 @@ export const configSchema = z.object({
 const defaults: AppConfig = {
   server: { baseUrl: "http://localhost:8888/v1", apiKey: "" },
   profile: { name: "User" },
-  preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true },
+  preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true },
   toolSettings: DEFAULT_TOOL_SETTINGS,
   models: [],
 };
@@ -172,6 +173,8 @@ export function publicConfig(config: AppConfig, user: AuthUser): PublicConfig {
     sendReasoningToModel: typeof user.preferences.sendReasoningToModel === "boolean" ? user.preferences.sendReasoningToModel : config.preferences.sendReasoningToModel,
     exportReasoning: typeof user.preferences.exportReasoning === "boolean" ? user.preferences.exportReasoning : config.preferences.exportReasoning,
     language: user.preferences.language === "ko" || user.preferences.language === "en" ? user.preferences.language : config.preferences.language,
+    showModelIdentifiers: typeof user.preferences.showModelIdentifiers === "boolean" ? user.preferences.showModelIdentifiers : config.preferences.showModelIdentifiers,
+    renderStrikethrough: typeof user.preferences.renderStrikethrough === "boolean" ? user.preferences.renderStrikethrough : config.preferences.renderStrikethrough,
     defaultModelId: typeof user.preferences.defaultModelId === "string" ? user.preferences.defaultModelId : config.preferences.defaultModelId,
     defaultReasoningPresetId: typeof user.preferences.defaultReasoningPresetId === "string" ? user.preferences.defaultReasoningPresetId : config.preferences.defaultReasoningPresetId,
   };
@@ -247,6 +250,8 @@ export async function writeConfigForUser(input: unknown, user: AuthUser): Promis
     sendReasoningToModel: incoming.preferences.sendReasoningToModel,
     exportReasoning: incoming.preferences.exportReasoning,
     language: incoming.preferences.language,
+    showModelIdentifiers: incoming.preferences.showModelIdentifiers,
+    renderStrikethrough: incoming.preferences.renderStrikethrough,
     defaultModelId: incoming.preferences.defaultModelId,
     defaultReasoningPresetId: incoming.preferences.defaultReasoningPresetId,
   };

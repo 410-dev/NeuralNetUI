@@ -58,6 +58,7 @@ export interface AppConfig {
     language: Locale;
     onDemand: boolean;
     showModelIdentifiers: boolean;
+    renderStrikethrough: boolean;
     defaultModelId?: string;
     defaultReasoningPresetId?: string;
   };

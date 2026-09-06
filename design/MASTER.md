@@ -6,6 +6,8 @@
 - Use the dark neutral surface with restrained blue accents already established by the application.
 - Reveal dense technical information progressively through clear, keyboard-accessible disclosure controls.
 - Preserve readable vertical stacks on mobile and never require horizontal page scrolling.
+- Keep settings categories in a horizontally scrollable tab row on narrow screens so every panel remains reachable without compressing its icon target.
+- Group display-only preferences under Appearance; model identifiers and Markdown strikethrough are personal presentation choices.
 
 ## Tool activity
 
