@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { deleteAllConversations, listConversations, writeConversation } from "@/lib/conversations";
+import { searchConversations, deleteAllConversations, listConversations, writeConversation } from "@/lib/conversations";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  try { const user = requireUser(request); return NextResponse.json({ conversations: await listConversations(user.id) }); }
+  try { const user = requireUser(request); const query = new URL(request.url).searchParams.get("q"); return NextResponse.json(query !== null ? { results: await searchConversations(user.id, query) } : { conversations: await listConversations(user.id) }); }
   catch (error) { return authErrorResponse(error); }
 }
 

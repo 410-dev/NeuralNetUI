@@ -8,7 +8,7 @@
 - Page visits support bounded text/JSON/XML, safe raster images, and temporary PDF processing; archives and unsupported binaries are rejected.
 - The opt-in Browser tool uses isolated headless Chromium sessions for JavaScript rendering, element-ref interactions, waits, and model-visible screenshots. Public-address checks cover navigation and subresources; sessions close at the end of each model response.
 - Image and PDF uploads share the attachment pipeline. PDF originals and bounded extraction caches live under `data/uploads`; scanned-page renders and URL downloads are temporary and are removed after use.
-- Admins configure tool rounds, attachment/download limits, PDF processing limits, timeouts, and orphan-upload retention in the Tools settings tab.
+- Admins configure tool rounds, attachment/download limits, PDF processing limits, timeouts, and orphan-upload retention in the Harness settings tab.
 - Client-side IDs use Web Crypto when available and a collision-resistant fallback on non-secure LAN/Tailscale HTTP origins where browsers hide Web Crypto.
 - Frontend design guidance lives in `design/MASTER.md`.
 - Per-user default model and reasoning preset are applied on a fresh app session; in-app New Chat preserves the current selection.
@@ -25,7 +25,7 @@
 - Connections are ordered and support OpenAI API or LM Studio drivers. Connections, models, and reasoning presets use drag-and-drop or adjacent up/down controls; their independently scrollable settings lists persist the order shown by chat pickers. Each connection preserves its own discovered model metadata and reasoning presets; duplicate served identifiers resolve to the highest-priority connection.
 - LM Studio discovery and model management use its native `/api/v1` REST API. Chat streaming uses LM Studio's OpenAI-compatible endpoint to retain custom tool calls and full assistant history.
 - Chat admission uses a server-wide residency manager: inventory checks and load/unload mutations are serialized; aliases use their base model. Dispatched mutations retain the lock through completion even if the caller cancels.
-- Current release version: 1.8.3.
+- Current release version: 1.9.0.
 - The UI/LM Studio audit in `docs/audits/2026-09-08-ui-lmstudio.md` has 14 addressed findings; #7 is intentional behavior per the user. Settings preserve protected presets and unsaved model edits; aliases resolve their base connection; API-key removal explicitly disables fallback credentials.
 - Deleted conversations/users discard their chat jobs. Background saves validate task ownership and conversation existence inside the SQLite transaction. Terminal jobs release full histories and expire after 60 seconds, with at most 64 terminal jobs retained.
 - Persisted tool call/result pairs are restored for follow-up requests. Interrupted questions recover on conversation read; active questions can be stopped. SSE errors and incomplete streams are surfaced, and failed client saves restore the unsent draft.
@@ -37,4 +37,8 @@
 - SQLite migration 7 persists per-server/per-model LFU counts and last-use timestamps. Eviction chooses idle LLM model groups by fewest uses, then oldest use; multiple loaded instances count separately toward the cap.
 - Chat snapshots expose transient waitPhase values for session waits, freeing space, model loading, server waits, and response preparation. Five seconds without upstream progress shows server waiting. Only connection refusal/DNS failures are retried, for up to 30 seconds; ambiguous inference failures are not replayed.
 - OpenAI-compatible managed connections probe LM Studio native management before falling back to the existing /api/inference API. Accurate external-app busy detection depends on upstream metadata; guaranteed protection is for this app's jobs. Manual admin unload remains unrestricted.
-- Version 1.8.3 MSI built and metadata verified on 2026-09-08; unsigned. Output: `installer/output/NeuralNetUI-1.8.3-x64.msi`.
+- Version 1.9.0 MSI built and metadata verified on 2026-09-08; unsigned. Output: `installer/output/NeuralNetUI-1.9.0-x64.msi`.
+
+- Harness settings retain tool limits and add rolling/compacting context handling plus optional first-turn title generation before/after the response. Defaults: rolling, 80% compaction threshold, title disabled, task reasoning off; empty model choice resolves the current chat base model.
+- Migration 8 adds separately stored branch summaries, protected title metadata, and message context token counts. Summary SHA-256 fingerprints validate the covered upstream history before reuse; original messages remain intact. Harness requests acquire/release residency independently to avoid serial-policy deadlocks.
+- History search reads original content from all user-owned branches, returning up to 100 branch matches with snippets and a non-active-branch indicator. PATCH conversation renames protect manual/generated titles from stale full saves. Desktop sidebar collapse is localStorage-backed.

@@ -18,6 +18,7 @@ const messageSchema = z.object({
   reasoningTokens: z.number().int().nonnegative().optional(),
   totalTokens: z.number().int().nonnegative().optional(),
   completionDurationSeconds: z.number().nonnegative().optional(),
+  contextTokens: z.number().int().nonnegative().optional(),
   timeToFirstTokenSeconds: z.number().nonnegative().optional(),
   toolEvents: z.array(z.object({
     id: z.string().min(1),
@@ -99,9 +100,11 @@ const insertAttachment = db.prepare("INSERT OR IGNORE INTO message_attachments(m
 
 function storeConversation(record: Conversation, userId: string, guard?: () => boolean) {
   db.transaction(() => {
-    const owner = db.prepare("SELECT user_id FROM conversations WHERE id = ?").get(record.id) as { user_id: string | null } | undefined;
+    const owner = db.prepare("SELECT user_id, title, title_managed FROM conversations WHERE id = ?").get(record.id) as { user_id: string | null; title: string; title_managed: number } | undefined;
     if (guard && (!guard() || !owner)) throw new Error("Conversation was deleted or its task was replaced.");
     if (owner && owner.user_id !== userId) throw new Error("Conversation not found.");
+    const summaries = db.prepare("SELECT cs.* FROM context_summaries cs JOIN branches b ON b.id = cs.branch_id WHERE b.conversation_id = ?").all(record.id) as Array<{branch_id: string; fingerprint: string; covered_count: number; summary: string}>;
+    if (owner?.title_managed) record.title = owner.title;
     db.prepare("DELETE FROM conversations WHERE id = ? AND user_id = ?").run(record.id, userId);
     insertConversation.run({ ...record, userId, reasoningPresetId: record.reasoningPresetId ?? null });
     for (const [branchPosition, branch] of record.branches.entries()) {
@@ -113,6 +116,8 @@ function storeConversation(record: Conversation, userId: string, guard?: () => b
         position: branchPosition,
       });
     }
+    if (owner?.title_managed) db.prepare("UPDATE conversations SET title_managed = 1 WHERE id = ?").run(record.id);
+    for (const summary of summaries) if (record.branches.some(b => b.id === summary.branch_id)) db.prepare("INSERT INTO context_summaries VALUES (@branch_id, @fingerprint, @covered_count, @summary)").run(summary);
     for (const branch of record.branches) {
       for (const [messagePosition, message] of branch.messages.entries()) {
         insertMessage.run({
@@ -129,6 +134,7 @@ function storeConversation(record: Conversation, userId: string, guard?: () => b
           timeToFirstTokenSeconds: message.timeToFirstTokenSeconds ?? null,
           toolEvents: message.toolEvents?.length ? JSON.stringify(message.toolEvents) : null,
         });
+        db.prepare("UPDATE messages SET context_tokens = ? WHERE id = ? AND conversation_id = ?").run(message.contextTokens ?? null, message.id, record.id);
         insertBranchMessage.run(branch.id, message.id, messagePosition);
         for (const [attachmentPosition, attachment] of (message.attachments || []).entries()) {
           insertAttachment.run(message.id, attachment.id, attachmentPosition);
@@ -201,6 +207,7 @@ type MessageRow = {
   total_tokens: number | null;
   completion_duration_seconds: number | null;
   time_to_first_token_seconds: number | null;
+  context_tokens: number | null;
   tool_events: string | null;
   created_at: string;
 };
@@ -223,7 +230,7 @@ export async function readConversation(id: string, userId: string): Promise<Conv
   const branchRows = db.prepare("SELECT id, name, parent_branch_id, forked_from_message_id, created_at, updated_at FROM branches WHERE conversation_id = ? ORDER BY position").all(id) as BranchRow[];
   const messageRows = db.prepare(`
     SELECT bm.branch_id, m.id, m.revision_group_id, m.role, m.content, m.reasoning, m.reasoning_duration_seconds,
-           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.tool_events, m.created_at
+           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.context_tokens, m.tool_events, m.created_at
     FROM branch_messages bm
     JOIN messages m ON m.id = bm.message_id
     JOIN branches b ON b.id = bm.branch_id
@@ -264,6 +271,7 @@ export async function readConversation(id: string, userId: string): Promise<Conv
       reasoningTokens: row.reasoning_tokens ?? undefined,
       totalTokens: row.total_tokens ?? undefined,
       completionDurationSeconds: row.completion_duration_seconds ?? undefined,
+      contextTokens: row.context_tokens ?? undefined,
       timeToFirstTokenSeconds: row.time_to_first_token_seconds ?? undefined,
       toolEvents: row.tool_events ? JSON.parse(row.tool_events) : undefined,
       attachments: attachments.get(row.id),
@@ -330,4 +338,20 @@ export async function deleteAllConversations(userId: string) {
   const conversations = await listConversations(userId);
   for (const conversation of conversations) await deleteConversation(conversation.id, userId);
   return conversations.length;
+}
+
+export function renameConversation(id: string, userId: string, title: string, automatic = false) {
+  const clean = z.string().trim().min(1).max(200).parse(title);
+  return db.prepare(`UPDATE conversations SET title = ?, title_managed = 1 WHERE id = ? AND user_id = ? ${automatic ? "AND title_managed = 0" : ""}`).run(clean, id, userId).changes > 0;
+}
+
+export async function searchConversations(userId: string, query: string) {
+  await ensureLegacyConversationsMigrated(userId);
+  const needle = query.trim().slice(0, 200).toLocaleLowerCase();
+  if (!needle) return [];
+  const rows = db.prepare(`SELECT c.id, c.title, c.active_branch_id AS activeBranchId, b.id AS branchId, b.name AS branchName, m.content
+    FROM conversations c JOIN branches b ON b.conversation_id = c.id JOIN branch_messages bm ON bm.branch_id = b.id JOIN messages m ON m.id = bm.message_id
+    WHERE c.user_id = ? ORDER BY c.updated_at DESC, b.position, bm.position`).all(userId) as Array<{id:string;title:string;activeBranchId:string;branchId:string;branchName:string;content:string}>;
+  const seen = new Set<string>();
+  return rows.filter(row => { const key = row.id + ":" + row.branchId; if (seen.has(key) || !(row.content.toLocaleLowerCase().includes(needle) || row.title.toLocaleLowerCase().includes(needle))) return false; seen.add(key); return true; }).slice(0, 100).map(row => { const at = row.content.toLocaleLowerCase().indexOf(needle); return {...row, content: row.content.slice(Math.max(0, at - 60), Math.max(0, at - 60) + 240), otherBranch: row.branchId !== row.activeBranchId}; });
 }

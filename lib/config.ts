@@ -1,3 +1,4 @@
+import { DEFAULT_HARNESS_SETTINGS } from "./harness";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -17,7 +18,13 @@ const connectionSchema = z.object({ id: z.string().min(1), name: z.string().min(
 export const DEFAULT_TOOL_SETTINGS: ToolSettings = { maxToolRounds: 8, maxAttachmentsPerMessage: 12, textDownloadLimitMb: 1, textCharacterLimit: 24_000, imageDownloadLimitMb: 10, imageUploadLimitMb: 20, pdfSizeLimitMb: 25, pdfPageLimit: 100, pdfTextCharacterLimit: 100_000, pdfVisionPageLimit: 6, pdfProcessingTimeoutSeconds: 30, temporaryFileTtlMinutes: 60, orphanUploadTtlHours: 24 };
 const toolSettingsSchema = z.object({ maxToolRounds: z.number().int().min(1).max(32), maxAttachmentsPerMessage: z.number().int().min(1).max(50), textDownloadLimitMb: z.number().min(0.0625).max(10), textCharacterLimit: z.number().int().min(1_000).max(1_000_000), imageDownloadLimitMb: z.number().min(1).max(50), imageUploadLimitMb: z.number().min(1).max(50), pdfSizeLimitMb: z.number().min(1).max(100), pdfPageLimit: z.number().int().min(1).max(500), pdfTextCharacterLimit: z.number().int().min(1_000).max(1_000_000), pdfVisionPageLimit: z.number().int().min(0).max(20), pdfProcessingTimeoutSeconds: z.number().int().min(5).max(120), temporaryFileTtlMinutes: z.number().int().min(5).max(1_440), orphanUploadTtlHours: z.number().min(1).max(168) }).default(DEFAULT_TOOL_SETTINGS);
 const preferencesSchema = z.object({ sendReasoningToModel: z.boolean(), exportReasoning: z.boolean(), language: z.enum(["en", "ko"]).default("en"), onDemand: z.boolean().default(false), showModelIdentifiers: z.boolean().default(true), renderStrikethrough: z.boolean().default(true), defaultModelId: z.string().min(1).optional(), defaultReasoningPresetId: z.string().min(1).optional() }).default({ sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true });
-export const configSchema = z.object({ connections: z.array(connectionSchema).min(1).max(32), profile: z.object({ name: z.string().min(1) }), preferences: preferencesSchema, toolSettings: toolSettingsSchema, models: z.array(modelSchema) });
+const harnessSettingsSchema = z.object({
+  contextMode: z.enum(["rolling", "compacting"]), compactThreshold: z.number().int().min(10).max(95),
+  compactModelId: z.string().max(500), compactEffort: z.string().max(40), compactPrompt: z.string().trim().min(1).max(32000),
+  titleEnabled: z.boolean(), titleTiming: z.enum(["before", "after"]), titleModelId: z.string().max(500),
+  titleEffort: z.string().max(40), titlePrompt: z.string().trim().min(1).max(32000),
+}).default(DEFAULT_HARNESS_SETTINGS);
+export const configSchema = z.object({ connections: z.array(connectionSchema).min(1).max(32), profile: z.object({ name: z.string().min(1) }), preferences: preferencesSchema, toolSettings: toolSettingsSchema, harnessSettings: harnessSettingsSchema, models: z.array(modelSchema) });
 
 const defaults: AppConfig = { connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", models: [] }], profile: { name: "User" }, preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true }, toolSettings: DEFAULT_TOOL_SETTINGS, models: [] };
 const configPath = path.join(dataDir, "config.json");
@@ -30,7 +37,7 @@ function normalizeConfig(config: AppConfig): AppConfig {
 
 function migrateConfig(input: unknown): AppConfig {
   const current = configSchema.safeParse(input); if (current.success) return normalizeConfig(current.data);
-  const legacy = z.object({ server: z.object({ baseUrl: z.string().url(), apiKey: z.string() }), profile: z.object({ name: z.string().min(1) }), preferences: preferencesSchema, toolSettings: toolSettingsSchema, models: z.array(modelSchema) }).safeParse(input);
+  const legacy = z.object({ server: z.object({ baseUrl: z.string().url(), apiKey: z.string() }), profile: z.object({ name: z.string().min(1) }), preferences: preferencesSchema, toolSettings: toolSettingsSchema, harnessSettings: harnessSettingsSchema, models: z.array(modelSchema) }).safeParse(input);
   if (!legacy.success) throw current.error;
   const connection: ConnectionConfig = { id: "openai-default", name: "OpenAI API", driver: "openai", ...legacy.data.server, models: legacy.data.models.filter((model) => !model.isAlias).map((model) => ({ ...model, connectionId: "openai-default" })) };
   const aliases = legacy.data.models.filter((model) => model.isAlias).map((model) => ({ ...model, connectionId: "openai-default" }));

@@ -1,9 +1,13 @@
+import { DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages } from "./harness";
+import { harnessCompletion, prepareContext } from "./harness-runtime";
+import { effectiveContextWindowTokens } from "./model-context";
+import { db } from "./database";
 import { registerChatDisposal } from "./chat-disposal";
 import { reasoningEffort } from "./model-edits";
 import { restoreToolHistory, settlePendingTools } from "./conversation-messages";
 import { readSsePayload } from "./stream-protocol";
 import { canUseModel, readConfig } from "./config";
-import { readConversation, writeConversation } from "./conversations";
+import { readConversation, writeConversation, renameConversation } from "./conversations";
 import { readUploadModelContent } from "./uploads";
 import { chatEndpoint, connectionForModel, connectionHeaders, connectionRoot } from "./connection-drivers";
 import { createResidencyAdapter } from "./residency-adapter";
@@ -289,6 +293,29 @@ async function run(job: ChatJob) {
     let systemPrompt = modelPrompt;
     if (presetPrompt) systemPrompt = preset?.systemPromptMode === "replace" ? presetPrompt : preset?.systemPromptMode === "prepend" ? [presetPrompt, modelPrompt].filter(Boolean).join("\n\n") : [modelPrompt, presetPrompt].filter(Boolean).join("\n\n");
     let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt, config.toolSettings);
+    const enabled: EnabledWebTools = {
+      internetSearch: job.input.tools?.internetSearch === true, pageVisit: job.input.tools?.pageVisit === true,
+      browser: job.input.tools?.browser === true,
+      currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
+    };
+    const tools = toolDefinitions(enabled);
+    const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
+    const harnessContext = { config, model, userId: job.userId, signal: job.controller.signal, onPhase: (phase: ChatWaitPhase) => setWaitPhase(job, phase) };
+    const firstResponse = !job.conversation.branches.some(b => b.messages.some(m => m.role === "assistant" && m.content));
+    const generateTitle = async () => {
+      if (!harness.titleEnabled || !firstResponse) return;
+      const managed = db.prepare("SELECT title_managed FROM conversations WHERE id = ? AND user_id = ?").get(job.input.conversationId, job.userId) as {title_managed:number} | undefined;
+      if (!managed || managed.title_managed) return;
+      try {
+        const first = job.input.messages.find(m => m.role === "user");
+        const title = (await harnessCompletion(harnessContext, harness.titleModelId, harness.titleEffort, harness.titlePrompt, JSON.stringify({user:first?.content.slice(0, 2000), assistant:job.message.content.slice(0, 2000)}), 256)).split(/\r?\n/)[0].replace(/^["'#*]+|["'*]+$/g, "").trim().slice(0,200);
+        job.controller.signal.throwIfAborted();
+        if (title && renameConversation(job.input.conversationId, job.userId, title, true)) job.conversation.title = title;
+      } catch (error) { if (job.controller.signal.aborted) throw error; /* A title failure must not discard a chat response. */ }
+    };
+    if (harness.titleTiming === "before") await generateTitle();
+    messages = await prepareContext(harnessContext, job.input.branchId, messages, true, estimateTokens(tools));
+    job.message.contextTokens = estimateTokens(messages); broadcast(job, true);
     const headers = connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "");
     const serverKey = connectionRoot(connection.baseUrl);
     const sameServer = config.connections.filter(item => connectionRoot(item.baseUrl) === serverKey);
@@ -296,20 +323,26 @@ async function run(job: ChatJob) {
     const limit = limits.length ? Math.min(...limits) : 0;
     const policy = sameServer.some(item => item.modelWaitPolicy === "serial") ? "serial" : "capacity";
     const adapter = config.preferences.onDemand || limit > 0 ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase)) : undefined;
-    releaseModel = await modelResidency.acquire({ server: serverKey, model: model.sourceModel, limit, policy, adapter, signal: job.controller.signal, onPhase: phase => setWaitPhase(job, phase) });
-    const enabled: EnabledWebTools = {
-      internetSearch: job.input.tools?.internetSearch === true, pageVisit: job.input.tools?.pageVisit === true,
-      browser: job.input.tools?.browser === true,
-      currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
-    };
-    const tools = toolDefinitions(enabled);
+    const acquireModel = () => modelResidency.acquire({ server: serverKey, model: model.sourceModel, limit, policy, adapter, signal: job.controller.signal, onPhase: phase => setWaitPhase(job, phase) });
+    releaseModel = await acquireModel();
     for (let turn = 0; turn < config.toolSettings.maxToolRounds; turn += 1) {
-      const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
+      const contextWindow = effectiveContextWindowTokens(model, config.models);
+      if (contextWindow && turn > 0 && harness.contextMode === "compacting" && estimateTokens(messages) + estimateTokens(tools) >= Math.min(contextWindow * .95, contextWindow * harness.compactThreshold / 100)) {
+        releaseModel?.(); releaseModel = undefined;
+        messages = await prepareContext(harnessContext, job.input.branchId, messages, false, estimateTokens(tools));
+        releaseModel = await acquireModel();
+      }
+      if (contextWindow && harness.contextMode === "rolling") messages = rollingMessages(messages, Math.floor(contextWindow * .95) - estimateTokens(tools));
+      if (contextWindow && estimateTokens(messages) + estimateTokens(tools) > contextWindow * .95) throw new Error("Context and tool definitions exceed the model limit.");
+      job.message.contextTokens = estimateTokens(messages);
+      const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(contextWindow ? { max_tokens: Math.max(1, Math.min(4096, contextWindow - estimateTokens(messages) - estimateTokens(tools) - 32)) } : {}), stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
       const result = await streamTurn(job, body, headers); reasoningSeconds += result.reasoningDurationSeconds;
       if (!result.calls.length) {
-        job.message = { ...job.message, ...result.usage, reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,
+        job.message = { ...job.message, ...result.usage, contextTokens: (result.usage.inputTokens ?? estimateTokens(messages)) + (result.usage.outputTokens ?? estimateTokens(result.content)), reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,
           completionDurationSeconds: result.visibleDurationSeconds,
           timeToFirstTokenSeconds: Math.max(0, (performance.now() - requestStartedAt - (result.visibleDurationSeconds || 0) * 1000) / 1000) };
+        releaseModel?.(); releaseModel = undefined;
+        if (harness.titleTiming === "after") await generateTitle();
         job.waitPhase = undefined; job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
       }
       messages.push({ role: "assistant", content: result.content, ...(result.reasoning ? { reasoning_content: result.reasoning } : {}), tool_calls: result.calls });

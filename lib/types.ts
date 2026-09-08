@@ -79,8 +79,22 @@ export interface AppConfig {
     defaultModelId?: string;
     defaultReasoningPresetId?: string;
   };
+  harnessSettings?: HarnessSettings;
   toolSettings: ToolSettings;
   models: ModelConfig[];
+}
+
+export interface HarnessSettings {
+  contextMode: "rolling" | "compacting";
+  compactThreshold: number;
+  compactModelId: string;
+  compactEffort: string;
+  compactPrompt: string;
+  titleEnabled: boolean;
+  titleTiming: "before" | "after";
+  titleModelId: string;
+  titleEffort: string;
+  titlePrompt: string;
 }
 
 export interface ToolSettings {
@@ -112,6 +126,7 @@ export interface StoredMessage {
   totalTokens?: number;
   completionDurationSeconds?: number;
   timeToFirstTokenSeconds?: number;
+  contextTokens?: number;
   toolEvents?: ToolEvent[];
   attachments?: StoredAttachment[];
   createdAt: string;

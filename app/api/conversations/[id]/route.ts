@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteConversation, readConversation, writeConversation } from "@/lib/conversations";
+import { renameConversation, deleteConversation, readConversation, writeConversation } from "@/lib/conversations";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { getChatJob } from "@/lib/chat-runtime";
 import { settlePendingTools } from "@/lib/conversation-messages";
@@ -32,4 +32,11 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   try { const { id } = await context.params; const user = requireUser(request); await deleteConversation(id, user.id); return new Response(null, { status: 204 }); }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "대화를 삭제하지 못했습니다." }, { status: 400 }); }
+}
+
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  let user; try { user = requireUser(request); } catch (error) { return authErrorResponse(error); }
+  try { const { id } = await context.params; const { title } = await request.json();
+    return renameConversation(id, user.id, title) ? NextResponse.json({ title: title.trim() }) : NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+  } catch { return NextResponse.json({ error: "Title must contain 1–200 characters" }, { status: 400 }); }
 }

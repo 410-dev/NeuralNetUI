@@ -234,6 +234,14 @@ function openDatabase() {
     })();
   }
 
+  const harnessVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (harnessVersion.version < 8) connection.transaction(() => {
+    connection.exec(`ALTER TABLE conversations ADD COLUMN title_managed INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE messages ADD COLUMN context_tokens INTEGER;
+      CREATE TABLE context_summaries (branch_id TEXT PRIMARY KEY REFERENCES branches(id) ON DELETE CASCADE,
+        fingerprint TEXT NOT NULL, covered_count INTEGER NOT NULL, summary TEXT NOT NULL);`);
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(8, new Date().toISOString());
+  })();
   return connection;
 }
 

@@ -41,3 +41,10 @@
 - Keep the regular message composer visually secondary and unavailable while an answer is required.
 - Keep generation cancellation available while a question is waiting; restore ordinary input when the task stops or is no longer available.
 - Use motion only for active status indicators; completed and failed states must remain legible without animation.
+
+## Harness and history
+
+- Keep tool limits under Harness settings alongside context handling and title generation. Show advanced controls only when their mode is active.
+- Edit long harness prompts in a large separate modal; nested dialogs suspend the parent focus trap.
+- Search original history in a dedicated modal, show branch matches with snippets, and open the selected branch directly.
+- Desktop collapsed navigation retains only expand, new chat, search and profile controls. Mobile navigation retains its existing full drawer.

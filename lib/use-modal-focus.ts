@@ -16,6 +16,7 @@ export function useModalFocus(onClose: () => void) {
       .filter(element => element.tabIndex >= 0 && element.getClientRects().length > 0);
     const focusFirst = () => (focusable()[0] || root).focus();
     const keydown = (event: globalThis.KeyboardEvent) => {
+      if (root.inert) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close.current(); }
       if (event.key !== "Tab") return;
       const elements = focusable(); const first = elements[0]; const last = elements.at(-1);
@@ -23,7 +24,7 @@ export function useModalFocus(onClose: () => void) {
       if (event.shiftKey && (document.activeElement === first || !root.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && (document.activeElement === last || !root.contains(document.activeElement))) { event.preventDefault(); first.focus(); }
     };
-    const focusin = (event: FocusEvent) => { if (!root.contains(event.target as Node)) focusFirst(); };
+    const focusin = (event: FocusEvent) => { if (!root.inert && !root.contains(event.target as Node)) focusFirst(); };
     document.addEventListener("keydown", keydown, true);
     document.addEventListener("focusin", focusin);
     focusFirst();
