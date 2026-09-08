@@ -22,6 +22,6 @@
 - On narrow mobile screens, user-message actions sit below the bubble, which uses nearly the available screen width and a 16px font. Message and code copying falls back to a selection-based path on insecure LAN/Tailscale HTTP origins.
 - Unit tests run with `npm test`; type checking uses `npx tsc --noEmit`; the production build uses `npm run build`.
 - Windows x64 MSI packaging is driven by `installer/build-msi.ps1` and bundles the standalone Next.js app, Node.js, embedded Python search/PDF dependencies, service host, and tray host.
-- Connections are ordered and support OpenAI API or LM Studio drivers. Each connection preserves its own discovered model metadata and reasoning presets; duplicate served identifiers resolve to the highest-priority connection.
+- Connections are ordered and support OpenAI API or LM Studio drivers. Connections, models, and reasoning presets use drag-and-drop or adjacent up/down controls; their independently scrollable settings lists persist the order shown by chat pickers. Each connection preserves its own discovered model metadata and reasoning presets; duplicate served identifiers resolve to the highest-priority connection.
 - LM Studio discovery and model management use its native `/api/v1` REST API. Chat streaming uses LM Studio's OpenAI-compatible endpoint to retain custom tool calls and full assistant history.
-- Current release version: 1.8.0.
+- Current release version: 1.8.1.

@@ -421,13 +421,18 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 .settings-section.wide { max-width: none; }
 .split-model-editor { height: 440px; min-height: 0; display: grid; grid-template-columns: 190px minmax(0,1fr); border: 1px solid var(--border); border-radius: 15px; overflow: hidden; background: rgba(255,255,255,.012); }
-.model-column { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: rgba(8,11,9,.3); }
+.model-column { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: rgba(8,11,9,.3); }
 .model-column-head { height: 44px; flex: 0 0 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 13px; border-bottom: 1px solid var(--border); color: var(--dim); font-size: 10px; letter-spacing: .07em; text-transform: uppercase; }
-.model-column-head > button { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: rgba(255,255,255,.04); }
-.model-column-list { flex: 1; min-height: 0; overflow-y: auto; padding: 7px; }
+.order-actions { display: flex; align-items: center; gap: 3px; }
+.order-actions > button { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); background: rgba(255,255,255,.04); }
+.order-actions > button:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,.09); }
+.order-actions > button:disabled { opacity: .28; cursor: not-allowed; }
+.model-column-list { flex: 1 1 0; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 7px; }
 .model-column-list > button { width: 100%; min-height: 51px; padding: 8px; display: grid; grid-template-columns: 26px minmax(0,1fr); gap: 7px; align-items: start; text-align: left; border-radius: 10px; color: var(--muted); background: transparent; }
 .model-column-list > button:hover { background: rgba(255,255,255,.035); }
 .model-column-list > button.active { color: var(--text); background: var(--accent-soft); }
+.model-column-list > button[draggable="true"] { cursor: grab; }
+.model-column-list > button[draggable="true"]:active { cursor: grabbing; }
 .model-type-icon { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; color: var(--accent-bright); background: rgba(255,255,255,.045); }
 .model-column-list strong, .model-column-list small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-column-list strong { font-size: 11px; font-weight: 560; }
@@ -435,6 +440,12 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .model-editor-pane { min-width: 0; overflow-y: auto; padding: 15px; }
 .model-editor-pane .editor-card { border: 0; background: transparent; padding: 0; }
 .reasoning-pane { padding: 13px; }
+.connection-editor { height: 460px; }
+.connection-editor .connection-card { min-height: 100%; align-content: start; }
+.preset-editor { transition: border-color .15s, background .15s; }
+.preset-editor.active { border-color: rgba(112,160,255,.4); background: rgba(112,160,255,.045); }
+.preset-editor[draggable="true"] .kind-icon { cursor: grab; }
+.preset-editor[draggable="true"]:active .kind-icon { cursor: grabbing; }
 
 .mini-dialog-layer { position: fixed; z-index: 130; inset: 0; display: grid; place-items: center; padding: 18px; }
 .export-dialog { position: relative; width: min(440px, 100%); border: 1px solid var(--border-strong); border-radius: 19px; padding: 18px; background: #171b18; box-shadow: var(--shadow); }
@@ -456,6 +467,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .split-model-editor { height: auto; max-height: none; grid-template-columns: 1fr; }
   .model-column { height: 155px; border-right: 0; border-bottom: 1px solid var(--border); }
   .model-editor-pane { max-height: 360px; }
+  .connection-editor { height: auto; }
+}
+@media (max-width: 560px) {
+  .section-title > .order-actions { grid-column: 2; width: max-content; }
 }
 
 .general-setting-card { padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: rgba(255,255,255,.018); }

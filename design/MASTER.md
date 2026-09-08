@@ -8,7 +8,8 @@
 - Preserve readable vertical stacks on mobile and never require horizontal page scrolling.
 - Keep settings categories in a horizontally scrollable tab row on narrow screens so every panel remains reachable without compressing its icon target.
 - Group display-only preferences under Appearance; model identifiers and Markdown strikethrough are personal presentation choices.
-- Present model connections as reorderable cards; priority must be visible, and each card owns its driver, credentials, discovery action, and remembered models.
+- Present connections, models, and reasoning presets as reorderable selections with drag-and-drop plus adjacent up/down controls; the saved order must match the chat pickers.
+- Keep long settings sidebars independently scrollable while the selected item's editor remains visible.
 
 ## Tool activity
 

@@ -19,3 +19,11 @@ test("connection order resolves duplicate model identifiers", () => {
   assert.deepEqual(resolveConnectionModels(connections).map(({ name, connectionId }) => [name, connectionId]), [["Top model", "top"], ["unique", "lower"]]);
   assert.equal(resolveConnectionModels(connections.reverse())[0].name, "Lower model");
 });
+
+test("saved model order remains independent from connection priority", () => {
+  const connections: ConnectionConfig[] = [
+    { id: "top", name: "Top", driver: "openai", baseUrl: "http://top/v1", apiKey: "", models: [model("a", "top"), model("b", "top")] },
+    { id: "lower", name: "Lower", driver: "lmstudio", baseUrl: "http://lower", apiKey: "", models: [model("c", "lower")] },
+  ];
+  assert.deepEqual(resolveConnectionModels(connections, [], ["c", "a", "b"]).map(({ id }) => id), ["c", "a", "b"]);
+});

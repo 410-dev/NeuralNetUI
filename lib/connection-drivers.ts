@@ -1,4 +1,5 @@
 import type { ConnectionConfig, ConnectionDriver, ModelConfig } from "./types";
+import { applyPreferredOrder } from "./ordered-list.ts";
 
 export function connectionRoot(baseUrl: string) {
   const url = new URL(baseUrl);
@@ -26,7 +27,7 @@ export function connectionHeaders(connection: Pick<ConnectionConfig, "apiKey">, 
   return { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) };
 }
 
-export function resolveConnectionModels(connections: ConnectionConfig[], aliases: ModelConfig[] = []) {
+export function resolveConnectionModels(connections: ConnectionConfig[], aliases: ModelConfig[] = [], preferredOrder: string[] = []) {
   const seen = new Set<string>(); const models: ModelConfig[] = [];
   for (const connection of connections) {
     for (const model of connection.models) {
@@ -40,7 +41,7 @@ export function resolveConnectionModels(connections: ConnectionConfig[], aliases
     const base = models.find((model) => model.sourceModel === alias.sourceModel || model.id === alias.sourceModel);
     models.push({ ...alias, connectionId: alias.connectionId || base?.connectionId });
   }
-  return models;
+  return applyPreferredOrder(models, preferredOrder);
 }
 
 export function connectionForModel(connections: ConnectionConfig[], model: ModelConfig) {

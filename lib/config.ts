@@ -23,7 +23,7 @@ const configPath = path.join(dataDir, "config.json");
 function normalizeConfig(config: AppConfig): AppConfig {
   const edited = new Map(config.models.filter((model) => !model.isAlias && model.connectionId).map((model) => [`${model.connectionId}\0${model.id}`, model]));
   const connections = config.connections.map((connection) => ({ ...connection, models: connection.models.filter((model) => !model.isAlias).map((model) => ({ ...model, ...edited.get(`${connection.id}\0${model.id}`), connectionId: connection.id })) }));
-  return { ...config, connections, models: resolveConnectionModels(connections, config.models.filter((model) => model.isAlias)) };
+  return { ...config, connections, models: resolveConnectionModels(connections, config.models.filter((model) => model.isAlias), config.models.map((model) => model.id)) };
 }
 
 function migrateConfig(input: unknown): AppConfig {
@@ -79,7 +79,9 @@ export async function writeConfigForUser(input: unknown, user: AuthUser): Promis
   const connections = incoming.connections.map((connection) => { const previous = existing.get(connection.id); return { ...connection, apiKey: connection.apiKey || previous?.apiKey || "", models: connection.models.map((model) => mergePrivatePresets(previous?.models.find((item) => item.id === model.id) || model, model)) }; });
   const incomingAliases = incoming.models.filter((model) => model.isAlias).map((model) => { const previous = current.models.find((item) => item.isAlias && item.id === model.id); return mergePrivatePresets(previous || model, { ...model, ownerId: previous?.ownerId || user.id }); });
   const protectedAliases = current.models.filter((model) => model.isAlias && model.ownerId && model.ownerId !== user.id && !incomingAliases.some((candidate) => candidate.id === model.id));
-  return writeConfig({ ...incoming, connections, models: [...incomingAliases, ...protectedAliases], profile: current.profile, preferences: { ...current.preferences, ...incoming.preferences } });
+  const aliasesById = new Map(incomingAliases.map((model) => [model.id, model]));
+  const orderedIncoming = incoming.models.map((model) => model.isAlias ? aliasesById.get(model.id) : model).filter((model): model is ModelConfig => Boolean(model));
+  return writeConfig({ ...incoming, connections, models: [...orderedIncoming, ...protectedAliases], profile: current.profile, preferences: { ...current.preferences, ...incoming.preferences } });
 }
 
 export function inferModel(input: string | Record<string, unknown>, driver: "openai" | "lmstudio" = "openai", connectionId?: string): ModelConfig {
