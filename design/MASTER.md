@@ -45,6 +45,13 @@
 ## Harness and history
 
 - Keep tool limits under Harness settings alongside context handling and title generation. Show advanced controls only when their mode is active.
+- Give every settings panel the shared section heading: one icon, one title, one description. Harness panels are no exception.
+- Present a small set of exclusive modes as radio cards with an icon, a short name and one explanatory line, not as a bare dropdown.
+- Gather the controls that depend on a mode or switch inside one quiet bordered block under the choice that reveals them.
+- Break long numeric limit lists into labelled groups of related fields so each group reads as a short topic.
+- Show a bounded percentage as a slider with its current value beside it.
 - Edit long harness prompts in a large separate modal; nested dialogs suspend the parent focus trap.
 - Search original history in a dedicated modal, show branch matches with snippets, and open the selected branch directly.
-- Desktop collapsed navigation retains only expand, new chat, search and profile controls. Mobile navigation retains its existing full drawer.
+- Give the sidebar a compact header holding the wordmark and a single icon control: collapse on desktop, close on mobile.
+- Keep per-conversation rename and delete actions in one hover-revealed action group on the same row as the title; coarse pointers show them permanently.
+- Desktop collapsed navigation retains only expand, new chat, search and profile controls, centred in the narrow rail. Mobile navigation retains its existing full drawer.

@@ -2,6 +2,21 @@
 
 `llm-chat-ui.html`의 디자인 언어를 이어 만든 다중 서버 채팅 UI입니다. OpenAI API와 LM Studio 드라이버, 서버별 모델 설정, 우선순위 라우팅을 지원하며 Next.js 프론트엔드와 스트리밍 프록시 백엔드를 한 프로세스에서 실행합니다.
 
+## 하네스 설정과 사이드바 UI 정리 (1.9.1)
+
+관리자 설정의 **하네스 설정** 탭과 메인 화면 사이드바를 사용자 친화적으로 다듬었습니다. 기능과 저장 값은 그대로입니다.
+
+- 하네스 설정의 모든 구역이 다른 설정 탭과 같은 아이콘·제목·설명 머리글을 사용합니다.
+- 컨텍스트 처리 방식(Rolling / Compacting)과 제목 생성 시점은 드롭다운 대신 아이콘과 한 줄 설명이 있는 선택 카드로 고릅니다.
+- 압축 시작 임계값은 현재 값이 옆에 표시되는 슬라이더로 조절합니다.
+- 모드에 따라 나타나는 하위 설정은 선택 카드 아래의 한 묶음 안에 모입니다. 추론 강도 목록은 원시 값 대신 현재 언어의 이름으로 표시합니다.
+- 도구·파일 제한 13개는 도구 반복, 첨부 및 다운로드, PDF 처리, 임시 파일 정리 네 묶음으로 나눠 표시합니다.
+- 사이드바 머리글에 앱 이름과 아이콘 하나만 남겼습니다. PC에서는 접기, 모바일 서랍에서는 닫기 버튼이 됩니다.
+- 채팅 기록의 제목 변경·삭제 버튼이 한 줄 안의 한 묶음으로 정리되어 더 이상 줄이 두 줄로 깨지지 않습니다. 터치 화면에서는 항상 보입니다.
+- 접힌 사이드바의 아이콘은 좁은 레일 가운데에 정렬됩니다.
+
+검증: `npm test`, `npx tsc --noEmit`, `npm run build`.
+
 ## 하네스 설정과 채팅 기록 (1.9.0)
 
 관리자 설정의 **하네스 설정**에서 기존 도구·파일 제한과 다음 항목을 관리합니다.
@@ -86,7 +101,7 @@ chmod +x host-linux.sh
 
 ## Windows MSI 설치
 
-`installer/output/NeuralNetUI-1.9.0-x64.msi`는 Node.js, 앱 런타임, 헤드리스 Chromium, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
+`installer/output/NeuralNetUI-1.9.1-x64.msi`는 Node.js, 앱 런타임, 헤드리스 Chromium, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
 
 트레이 아이콘을 두 번 누르면 Web UI를 다시 열 수 있습니다. 우클릭 메뉴에는 **설정 파일 수정**, **재시작**, **종료하기**가 있으며, 종료는 서비스와 트레이 앱을 함께 중지합니다. 시작 메뉴의 **NeuralNetUI**를 누르면 중지된 서비스를 다시 시작하고 Web UI를 호스팅하며 트레이 아이콘도 복원합니다. 서비스 제어와 보호된 설정 파일 편집에는 Windows 관리자 권한 확인이 표시될 수 있습니다.
 
@@ -95,7 +110,7 @@ chmod +x host-linux.sh
 무인 설치에서도 같은 공개 MSI 속성을 사용할 수 있습니다.
 
 ```powershell
-msiexec /i NeuralNetUI-1.9.0-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
+msiexec /i NeuralNetUI-1.9.1-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
 ```
 
 MSI를 다시 빌드하려면 Node.js, .NET 8 SDK가 있는 Windows x64 개발 환경에서 다음을 실행합니다. WiX 5 도구는 처음 빌드할 때 `installer/.tools`에 로컬 설치됩니다.

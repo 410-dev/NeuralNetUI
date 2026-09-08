@@ -2,6 +2,7 @@
 
 import { HarnessSettingsPanel, TextDialog } from "./harness-settings";
 import { HistorySearch } from "./history-search";
+import { SectionTitle } from "./section-title";
 import { chatWaitLabel } from "@/lib/chat-progress";
 import { normalizeReasoning, reasoningOptionName, isReasoningToggle } from "@/lib/reasoning-capabilities";
 
@@ -10,7 +11,7 @@ import {
   FileText, GitBranch, GripVertical, ImagePlus, KeyRound, LoaderCircle, Menu, MessageSquarePlus, Pencil, Plus, RefreshCw,
   Search, Server, Settings2, SlidersHorizontal, Sparkles, Square, Trash2, UserRound, X, Globe2, Link2,
   LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload,
-  Palette,
+  Palette, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -92,7 +93,7 @@ const translations = {
     thinking: "Thinking…", editResponse: "Edit response", saveEdit: "Save", thoughtFor: "Thought for", useWrapping: "Use wrapping", copied: "Copied",
     addMenu: "Add", tools: "Tools", internetSearch: "Internet search", internetSearchDesc: "Let the model search DuckDuckGo", pageVisit: "Visit pages", pageVisitDesc: "Let the model read public web pages", browserTool: "Browser", browserToolDesc: "Render JavaScript pages, interact, and take screenshots", currentTime: "Current time", currentTimeDesc: "Provide local time and time zone to the model", locationTool: "Current location", locationToolDesc: "Use browser location and detailed reverse geocoding", multipleChoice: "Multiple choice", multipleChoiceDesc: "Let the model ask up to three selectable questions", usingTool: "Using a tool…", toolCall: "Tool call", toolResult: "Tool result", submitChoices: "Submit answers", otherChoice: "Or type a direct answer…", choiceNext: "Next", choiceBack: "Previous question", choiceProgress: "Question", choiceWaiting: "Answer the question above to continue", locationPermission: "Waiting for browser location permission…",
     account: "Account", users: "Users", signOut: "Sign out", changePassword: "Change password", currentPassword: "Current password", newPassword: "New password", passwordChanged: "Password changed. Please sign in again.",
-    toolsSettings: "Harness settings", toolsSettingsTitle: "Tool and file limits", toolsSettingsDesc: "Control tool iterations, downloads, PDF processing, and temporary upload cleanup.", maxToolRounds: "Maximum tool rounds", maxAttachments: "Attachments per message", textDownloadLimit: "Text download limit (MB)", textCharacterLimit: "Text characters sent to model", imageDownloadLimit: "Image URL limit (MB)", imageUploadLimit: "Image upload limit (MB)", pdfSizeLimit: "PDF limit (MB)", pdfPageLimit: "PDF pages processed", pdfTextLimit: "PDF characters sent to model", pdfVisionPages: "Scanned PDF vision pages", pdfTimeout: "PDF processing timeout (seconds)", temporaryFileTtl: "Temporary file cleanup (minutes)", orphanTtl: "Unattached upload retention (hours)", toolsSafetyHelp: "Values are validated against server safety boundaries when saved.",
+    toolsSettings: "Harness settings", toolsSettingsTitle: "Tool and file limits", toolsSettingsDesc: "Control tool iterations, downloads, PDF processing, and temporary upload cleanup.", maxToolRounds: "Maximum tool rounds", maxAttachments: "Attachments per message", textDownloadLimit: "Text download limit (MB)", textCharacterLimit: "Text characters sent to model", imageDownloadLimit: "Image URL limit (MB)", imageUploadLimit: "Image upload limit (MB)", pdfSizeLimit: "PDF limit (MB)", pdfPageLimit: "PDF pages processed", pdfTextLimit: "PDF characters sent to model", pdfVisionPages: "Scanned PDF vision pages", pdfTimeout: "PDF processing timeout (seconds)", temporaryFileTtl: "Temporary file cleanup (minutes)", orphanTtl: "Unattached upload retention (hours)", toolLoopGroup: "Tool loop", attachmentGroup: "Attachments and downloads", pdfGroup: "PDF processing", cleanupGroup: "Temporary file cleanup", toolsSafetyHelp: "Values are validated against server safety boundaries when saved.",
     userManagement: "User management", userManagementDesc: "Administrators can create accounts, change display names and roles, and delete accounts.", username: "Username", password: "Password", role: "Role", standardUser: "User", administrator: "Administrator", addUser: "Add user", saveDisplayName: "Save user changes", deleteUser: "Delete user", confirmDeleteUser: "Permanently delete this user and all of their data?", userDeleted: "User deleted.", publicModel: "Public custom model", publicModelDesc: "Allow every user to use this custom model.",
     contextWindow: "Context window", contextWindowHelp: "Set a per-model fallback limit. When the API also advertises a limit, the smaller value is used.", aliasContextWindowHelp: "Leave empty to inherit the base model. A value here overrides the base model setting while respecting the server limit.", inheritedContextWindow: "Inherited from base model", apiContextWindow: "API-detected context", effectiveContextWindow: "Effective maximum", contextUsed: "context tokens used", contextUnavailable: "Set this model's context window in Settings.",
     outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token",
@@ -126,7 +127,7 @@ const translations = {
     thinking: "생각 중…", editResponse: "응답 편집", saveEdit: "저장", thoughtFor: "동안 생각함", useWrapping: "줄 바꿈 사용", copied: "복사됨",
     addMenu: "추가", tools: "도구", internetSearch: "인터넷 검색", internetSearchDesc: "모델이 DuckDuckGo를 검색하도록 허용", pageVisit: "페이지 방문", pageVisitDesc: "모델이 공개 웹 페이지를 읽도록 허용", browserTool: "브라우저", browserToolDesc: "JS 페이지 렌더링, 인터랙션 및 스크린샷 허용", currentTime: "현재 시간", currentTimeDesc: "현지 시간과 시간대를 모델에 제공", locationTool: "현재 위치", locationToolDesc: "브라우저 위치와 상세 역지오코딩 사용", multipleChoice: "다중 선택", multipleChoiceDesc: "모델이 선택형 질문을 최대 3개까지 요청", usingTool: "도구 사용 중…", toolCall: "도구 호출", toolResult: "도구 결과", submitChoices: "답변 제출", otherChoice: "또는 직접 답변…", choiceNext: "다음", choiceBack: "이전 질문", choiceProgress: "질문", choiceWaiting: "위 질문에 답하면 모델이 계속 응답합니다", locationPermission: "브라우저 위치 권한을 기다리는 중…",
     account: "계정", users: "사용자", signOut: "로그아웃", changePassword: "비밀번호 변경", currentPassword: "현재 비밀번호", newPassword: "새 비밀번호", passwordChanged: "비밀번호를 변경했습니다. 다시 로그인해 주세요.",
-    toolsSettings: "하네스 설정", toolsSettingsTitle: "도구 및 파일 제한", toolsSettingsDesc: "도구 반복, 다운로드, PDF 처리 및 임시 업로드 정리 기준을 설정합니다.", maxToolRounds: "최대 도구 호출 라운드", maxAttachments: "메시지당 첨부 개수", textDownloadLimit: "텍스트 다운로드 제한 (MB)", textCharacterLimit: "모델에 전달할 텍스트 글자 수", imageDownloadLimit: "이미지 URL 제한 (MB)", imageUploadLimit: "이미지 업로드 제한 (MB)", pdfSizeLimit: "PDF 제한 (MB)", pdfPageLimit: "처리할 PDF 페이지 수", pdfTextLimit: "모델에 전달할 PDF 글자 수", pdfVisionPages: "스캔 PDF 비전 페이지 수", pdfTimeout: "PDF 처리 제한 시간 (초)", temporaryFileTtl: "임시 파일 정리 시간 (분)", orphanTtl: "미첨부 업로드 보관 시간", toolsSafetyHelp: "저장 시 서버의 안전 범위 안에서 값이 검증됩니다.",
+    toolsSettings: "하네스 설정", toolsSettingsTitle: "도구 및 파일 제한", toolsSettingsDesc: "도구 반복, 다운로드, PDF 처리 및 임시 업로드 정리 기준을 설정합니다.", maxToolRounds: "최대 도구 호출 라운드", maxAttachments: "메시지당 첨부 개수", textDownloadLimit: "텍스트 다운로드 제한 (MB)", textCharacterLimit: "모델에 전달할 텍스트 글자 수", imageDownloadLimit: "이미지 URL 제한 (MB)", imageUploadLimit: "이미지 업로드 제한 (MB)", pdfSizeLimit: "PDF 제한 (MB)", pdfPageLimit: "처리할 PDF 페이지 수", pdfTextLimit: "모델에 전달할 PDF 글자 수", pdfVisionPages: "스캔 PDF 비전 페이지 수", pdfTimeout: "PDF 처리 제한 시간 (초)", temporaryFileTtl: "임시 파일 정리 시간 (분)", orphanTtl: "미첨부 업로드 보관 시간", toolLoopGroup: "도구 반복", attachmentGroup: "첨부 및 다운로드", pdfGroup: "PDF 처리", cleanupGroup: "임시 파일 정리", toolsSafetyHelp: "저장 시 서버의 안전 범위 안에서 값이 검증됩니다.",
     userManagement: "사용자 관리", userManagementDesc: "관리자는 계정을 만들고, 다른 사용자의 표시 이름과 권한을 변경하거나 계정을 삭제할 수 있습니다.", username: "사용자 이름", password: "비밀번호", role: "역할", standardUser: "일반 사용자", administrator: "관리자", addUser: "사용자 추가", saveDisplayName: "사용자 변경 저장", deleteUser: "사용자 삭제", confirmDeleteUser: "이 사용자와 모든 데이터를 영구적으로 삭제할까요?", userDeleted: "사용자를 삭제했습니다.", publicModel: "커스텀 모델 공개", publicModelDesc: "모든 사용자가 이 커스텀 모델을 사용할 수 있습니다.",
     contextWindow: "컨텍스트 윈도우", contextWindowHelp: "모델별 대체 한도를 설정합니다. API도 한도를 반환하면 둘 중 작은 값을 사용합니다.", aliasContextWindowHelp: "비워 두면 기반 모델 값을 상속합니다. 값을 입력하면 서버 한도 안에서 기반 모델 설정을 오버라이드합니다.", inheritedContextWindow: "기반 모델에서 상속", apiContextWindow: "API 감지 컨텍스트", effectiveContextWindow: "적용 최대값", contextUsed: "컨텍스트 토큰 사용", contextUnavailable: "설정에서 이 모델의 컨텍스트 윈도우를 지정해 주세요.",
     outputTokens: "출력 토큰", reasoningTokens: "reasoning", tokensPerSecond: "토큰/초", timeToFirstToken: "첫 토큰 도착 시간",
@@ -837,12 +838,16 @@ export default function Home() {
       <button className="mobile-menu" aria-label={locale === "ko" ? "메뉴 열기" : "Open menu"} onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
       <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-visible" : ""}`}>
         <section className="side-panel">
-          <button className="pill-button sidebar-toggle" title={collapsed ? (locale === "ko" ? "펼치기" : "Expand") : (locale === "ko" ? "접기" : "Collapse")} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => { setCollapsed(!collapsed); localStorage.setItem("neural-sidebar-collapsed", String(!collapsed)); }}>{collapsed ? <ChevronRight size={18}/> : <ChevronLeft size={18}/>}<span>{locale === "ko" ? "접기" : "Collapse"}</span></button>
+          <div className="sidebar-head">
+            <span className="sidebar-brand"><Sparkles size={16} /><span>NeuralNetUI</span></span>
+            <button className="sidebar-toggle" title={collapsed ? (locale === "ko" ? "사이드바 펼치기" : "Expand sidebar") : (locale === "ko" ? "사이드바 접기" : "Collapse sidebar")} aria-label={collapsed ? (locale === "ko" ? "사이드바 펼치기" : "Expand sidebar") : (locale === "ko" ? "사이드바 접기" : "Collapse sidebar")} onClick={() => { setCollapsed(!collapsed); localStorage.setItem("neural-sidebar-collapsed", String(!collapsed)); }}>{collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
+            <button className="sidebar-close" title={locale === "ko" ? "메뉴 닫기" : "Close menu"} aria-label={locale === "ko" ? "메뉴 닫기" : "Close menu"} onClick={() => setMobileOpen(false)}><X size={18} /></button>
+          </div>
           <div className="new-chat-halo"><button className="pill-button primary-nav" title={c.newChat} aria-label={c.newChat} onClick={() => newChat()}><MessageSquarePlus size={19} /> <span>{c.newChat}</span></button></div>
           <button className="pill-button" title={c.search} aria-label={c.search} onClick={() => setSearching(true)}><Search size={18} /> <span>{c.search}</span></button>
           <div className="history-heading"><p className="section-label">{c.histories}</p><div>{conversation && <button onClick={() => setExportOpen(true)} title={c.exportChat} aria-label={c.exportChat}><Download size={15} /></button>}{histories.length > 0 && <button onClick={() => void deleteAllHistories()} title={c.deleteAllChats} aria-label={c.deleteAllChats}><Trash2 size={15} /></button>}</div></div>
           <div className="history-list">
-            {visibleHistory.map((item) => <div className={`history-row ${item.id === conversation?.id ? "active" : ""}`} key={item.id}><button className="history-item" onClick={() => loadConversation(item.id)}><span>{item.title}</span></button><button className="history-rename" onClick={() => setRenameTarget(item)} title={locale === "ko" ? "제목 변경" : "Rename chat"} aria-label={`${locale === "ko" ? "제목 변경" : "Rename chat"}: ${item.title}`}><Pencil size={13}/></button><button className="history-delete" onClick={() => void deleteHistory(item.id)} title={c.deleteChat} aria-label={`${c.deleteChat}: ${item.title}`}><Trash2 size={13} /></button></div>)}
+            {visibleHistory.map((item) => <div className={`history-row ${item.id === conversation?.id ? "active" : ""}`} key={item.id}><button className="history-item" onClick={() => loadConversation(item.id)}><span>{item.title}</span></button><div className="history-row-actions"><button className="history-rename" onClick={() => setRenameTarget(item)} title={locale === "ko" ? "제목 변경" : "Rename chat"} aria-label={`${locale === "ko" ? "제목 변경" : "Rename chat"}: ${item.title}`}><Pencil size={13}/></button><button className="history-delete" onClick={() => void deleteHistory(item.id)} title={c.deleteChat} aria-label={`${c.deleteChat}: ${item.title}`}><Trash2 size={13} /></button></div></div>)}
             {!visibleHistory.length && <p className="history-empty">{c.historyEmpty}</p>}
           </div>
         </section>
@@ -1258,22 +1263,31 @@ function SettingsPanel({ initial, onClose, onSaved, onLogout }: { initial: Publi
 
 function ToolsSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>> }) {
   const setValue = (key: keyof ToolSettings, value: number) => setDraft((current) => ({ ...current, toolSettings: { ...current.toolSettings, [key]: value } }));
-  const fields: Array<{ key: keyof ToolSettings; label: string; min: number; max: number; step?: number }> = [
-    { key: "maxToolRounds", label: c.maxToolRounds, min: 1, max: 32 },
-    { key: "maxAttachmentsPerMessage", label: c.maxAttachments, min: 1, max: 50 },
-    { key: "textDownloadLimitMb", label: c.textDownloadLimit, min: .0625, max: 10, step: .0625 },
-    { key: "textCharacterLimit", label: c.textCharacterLimit, min: 1_000, max: 1_000_000 },
-    { key: "imageDownloadLimitMb", label: c.imageDownloadLimit, min: 1, max: 50 },
-    { key: "imageUploadLimitMb", label: c.imageUploadLimit, min: 1, max: 50 },
-    { key: "pdfSizeLimitMb", label: c.pdfSizeLimit, min: 1, max: 100 },
-    { key: "pdfPageLimit", label: c.pdfPageLimit, min: 1, max: 500 },
-    { key: "pdfTextCharacterLimit", label: c.pdfTextLimit, min: 1_000, max: 1_000_000 },
-    { key: "pdfVisionPageLimit", label: c.pdfVisionPages, min: 0, max: 20 },
-    { key: "pdfProcessingTimeoutSeconds", label: c.pdfTimeout, min: 5, max: 120 },
-    { key: "temporaryFileTtlMinutes", label: c.temporaryFileTtl, min: 5, max: 1_440 },
-    { key: "orphanUploadTtlHours", label: c.orphanTtl, min: 1, max: 168 },
+  // Related limits stay together so the tab reads as four short topics instead of one long grid.
+  const groups: Array<{ title: string; fields: Array<{ key: keyof ToolSettings; label: string; min: number; max: number; step?: number }> }> = [
+    { title: c.toolLoopGroup, fields: [
+      { key: "maxToolRounds", label: c.maxToolRounds, min: 1, max: 32 },
+    ] },
+    { title: c.attachmentGroup, fields: [
+      { key: "maxAttachmentsPerMessage", label: c.maxAttachments, min: 1, max: 50 },
+      { key: "imageUploadLimitMb", label: c.imageUploadLimit, min: 1, max: 50 },
+      { key: "imageDownloadLimitMb", label: c.imageDownloadLimit, min: 1, max: 50 },
+      { key: "textDownloadLimitMb", label: c.textDownloadLimit, min: .0625, max: 10, step: .0625 },
+      { key: "textCharacterLimit", label: c.textCharacterLimit, min: 1_000, max: 1_000_000 },
+    ] },
+    { title: c.pdfGroup, fields: [
+      { key: "pdfSizeLimitMb", label: c.pdfSizeLimit, min: 1, max: 100 },
+      { key: "pdfPageLimit", label: c.pdfPageLimit, min: 1, max: 500 },
+      { key: "pdfTextCharacterLimit", label: c.pdfTextLimit, min: 1_000, max: 1_000_000 },
+      { key: "pdfVisionPageLimit", label: c.pdfVisionPages, min: 0, max: 20 },
+      { key: "pdfProcessingTimeoutSeconds", label: c.pdfTimeout, min: 5, max: 120 },
+    ] },
+    { title: c.cleanupGroup, fields: [
+      { key: "temporaryFileTtlMinutes", label: c.temporaryFileTtl, min: 5, max: 1_440 },
+      { key: "orphanUploadTtlHours", label: c.orphanTtl, min: 1, max: 168 },
+    ] },
   ];
-  return <div className="settings-section wide"><SectionTitle icon={<Wrench size={19} />} title={c.toolsSettingsTitle} description={c.toolsSettingsDesc} /><div className="tool-settings-grid">{fields.map((field) => <label className="field" key={field.key}><span>{field.label}</span><input type="number" min={field.min} max={field.max} step={field.step || 1} value={draft.toolSettings[field.key]} onChange={(event) => setValue(field.key, Number(event.target.value))} /></label>)}</div><p className="settings-help">{c.toolsSafetyHelp}</p></div>;
+  return <div className="settings-section wide"><SectionTitle icon={<Wrench size={19} />} title={c.toolsSettingsTitle} description={c.toolsSettingsDesc} />{groups.map((group) => <div className="settings-group" key={group.title}><h4>{group.title}</h4><div className="tool-settings-grid">{group.fields.map((field) => <label className="field" key={field.key}><span>{field.label}</span><input type="number" min={field.min} max={field.max} step={field.step || 1} value={draft.toolSettings[field.key]} onChange={(event) => setValue(field.key, Number(event.target.value))} /></label>)}</div></div>)}<p className="settings-help">{c.toolsSafetyHelp}</p></div>;
 }
 
 function GeneralSettings({ c, draft, setDraft, admin, onExport, onImport, importing }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; admin: boolean; onExport: () => void; onImport: (file: File) => Promise<void>; importing: boolean }) {
@@ -1420,5 +1434,4 @@ function AccountSettings({ c, account, onLogout }: { c: CopySet; account?: Accou
   return <div className="settings-section"><SectionTitle icon={<UserRound size={19} />} title={account?.displayName || c.account} description={`@${account?.username || ""} · ${account?.role || ""}`} /><form className="account-card" onSubmit={change}><label className="field"><span>{c.currentPassword}</span><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></label><label className="field"><span>{c.newPassword}</span><input type="password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></label><button className="save-button" disabled={busy}>{c.changePassword}</button>{notice && <small className="settings-notice">{notice}</small>}</form><button className="sign-out-button" onClick={() => void onLogout()}><LogOut size={16} />{c.signOut}</button></div>;
 }
 
-function SectionTitle({ icon, title, description, action }: { icon: React.ReactNode; title: string; description: string; action?: React.ReactNode }) { return <div className="section-title"><span className="title-icon">{icon}</span><div><h3>{title}</h3><p>{description}</p></div>{action}</div>; }
 function EmptyState({ text }: { text: string }) { return <div className="empty-state"><UserRound size={22} /><p>{text}</p></div>; }
