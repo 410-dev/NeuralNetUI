@@ -18,6 +18,12 @@
 - Generate built-in reasoning choices from model capabilities: Fast / Thinking for toggles, Fast plus advertised effort levels when supported; omit unsupported controls.
 - Aliases display inherited capabilities as read-only. Custom templates retain prompt replacement, prepend, and append controls; their native selector offers only supported values.
 
+## Residency and waiting
+
+- Put the per-server resident-model limit and wait policy together in Connection settings; explain zero as unlimited.
+- Show one localized, accessible status line in the assistant response area for session waiting, unloading, loading, server waiting, or response preparation. Preserve the stop action throughout waiting.
+- Clear transient statuses when generation starts producing output or the job ends; never store them as conversation content.
+
 ## Tool activity
 
 - Group all tool calls from one assistant message under one top-level disclosure with a wrench icon and aggregate state.

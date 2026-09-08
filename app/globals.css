@@ -612,3 +612,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .choice-composer-card > footer { padding-right: 11px; }
   .choice-response-bubble { max-width: 84vw; }
 }
+
+.chat-wait-status { display: flex; align-items: center; gap: 9px; padding: 8px 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.chat-wait-status svg { flex: 0 0 auto; }
+.chat-wait-status span { min-width: 0; overflow-wrap: anywhere; }

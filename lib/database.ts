@@ -218,6 +218,22 @@ function openDatabase() {
     if (violations.length) throw new Error("Database migration 6 left invalid attachment references.");
   }
 
+  const residencyVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (residencyVersion.version < 7) {
+    connection.transaction(() => {
+      connection.exec(`
+        CREATE TABLE model_usage (
+          server_key TEXT NOT NULL,
+          model_id TEXT NOT NULL,
+          use_count INTEGER NOT NULL DEFAULT 0 CHECK (use_count >= 0),
+          last_used INTEGER NOT NULL,
+          PRIMARY KEY (server_key, model_id)
+        );
+      `);
+      connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(7, new Date().toISOString());
+    })();
+  }
+
   return connection;
 }
 

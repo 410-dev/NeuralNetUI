@@ -5,12 +5,13 @@ import { readSsePayload } from "./stream-protocol";
 import { canUseModel, readConfig } from "./config";
 import { readConversation, writeConversation } from "./conversations";
 import { readUploadModelContent } from "./uploads";
-import { inferenceEndpoint } from "./inference-control";
-import { chatEndpoint, connectionForModel, connectionHeaders } from "./connection-drivers";
-import { ensureLmStudioModelLoaded } from "./lm-studio-control";
+import { chatEndpoint, connectionForModel, connectionHeaders, connectionRoot } from "./connection-drivers";
+import { createResidencyAdapter } from "./residency-adapter";
+import { modelResidency } from "./residency-runtime";
+import { progressFetch, withSlowProgress } from "./chat-progress";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
 import { closeBrowserSessions, executeBrowserTool } from "./browser-tool";
-import type { Conversation, StoredMessage, ToolEvent, ToolSettings } from "./types";
+import type { ChatWaitPhase, Conversation, StoredMessage, ToolEvent, ToolSettings } from "./types";
 import type { ModelContentPart } from "./document-processing";
 
 type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
@@ -24,6 +25,7 @@ export type ChatJobSnapshot = {
   status: JobStatus;
   message: StoredMessage;
   error?: string;
+  waitPhase?: ChatWaitPhase;
 };
 
 export type StartChatJobInput = {
@@ -49,6 +51,7 @@ type ChatJob = {
   subscribers: Set<ReadableStreamDefaultController<Uint8Array>>;
   waiting: Map<string, (value: unknown) => void>;
   error?: string;
+  waitPhase?: ChatWaitPhase;
   discarded?: boolean;
   unregister?: () => void;
   expiryTimer?: ReturnType<typeof setTimeout>;
@@ -64,10 +67,6 @@ const jobs = globalThis.neuralChatJobs ?? new Map<string, ChatJob>();
 globalThis.neuralChatJobs = jobs;
 const encoder = new TextEncoder();
 
-function loadBody(sourceModel: string) {
-  const separator = sourceModel.lastIndexOf(":"); const lastPathSeparator = Math.max(sourceModel.lastIndexOf("/"), sourceModel.lastIndexOf("\\"));
-  return separator <= lastPathSeparator || separator === 1 ? { model_path: sourceModel } : { model_path: sourceModel.slice(0, separator), gguf_variant: sourceModel.slice(separator + 1) };
-}
 function parseArguments(value: string) { try { return JSON.parse(value || "{}"); } catch { return { _invalidJson: value }; } }
 function token(value: unknown) { return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined; }
 function usageFrom(payload: Record<string, unknown>) {
@@ -80,7 +79,12 @@ function usageFrom(payload: Record<string, unknown>) {
 }
 
 function snapshot(job: ChatJob): ChatJobSnapshot {
-  return { conversationId: job.input.conversationId, branchId: job.input.branchId, status: job.status, message: job.message, ...(job.error ? { error: job.error } : {}) };
+  return { conversationId: job.input.conversationId, branchId: job.input.branchId, status: job.status, message: job.message, waitPhase: job.waitPhase, ...(job.error ? { error: job.error } : {}) };
+}
+
+function setWaitPhase(job: ChatJob, phase?: ChatWaitPhase) {
+  if (job.discarded || job.controller.signal.aborted || !["running", "waiting"].includes(job.status) || job.waitPhase === phase) return;
+  job.waitPhase = phase; broadcast(job, true);
 }
 
 function send(controller: ReadableStreamDefaultController<Uint8Array>, value: ChatJobSnapshot | "done") {
@@ -143,10 +147,11 @@ async function upstreamMessages(input: StartChatJobInput, userId: string, system
 }
 
 async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>) {
-  const response = await fetch(String(body._endpoint), {
+  setWaitPhase(job, "preparing-response");
+  const response = await progressFetch(String(body._endpoint), {
     method: "POST", headers, signal: job.controller.signal,
     body: JSON.stringify(Object.fromEntries(Object.entries(body).filter(([key]) => key !== "_endpoint"))),
-  });
+  }, phase => setWaitPhase(job, phase), "preparing-response");
   if (!response.ok) throw new Error((await response.text()) || `Model server responded with ${response.status}`);
   if (!response.body) throw new Error("The model server returned no response stream.");
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
@@ -155,6 +160,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   let terminated = false; let sawPayload = false; let finishReason = false;
   const readPayload = (payload: Record<string, unknown>) => {
     sawPayload = true;
+    setWaitPhase(job, content || reasoning || calls.size ? undefined : "preparing-response");
     usage = { ...usage, ...usageFrom(payload) };
     const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }> : [];
     if (choices[0]?.finish_reason) finishReason = true;
@@ -166,10 +172,12 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     if (reasoningDelta) { reasoningStarted ??= now; reasoningEnded = now; }
     content += contentDelta; reasoning += reasoningDelta;
     if (contentDelta || reasoningDelta) {
+      setWaitPhase(job, undefined);
       job.message = { ...job.message, content: job.message.content + contentDelta, reasoning: (job.message.reasoning || "") + reasoningDelta };
       broadcast(job);
     }
     if (Array.isArray(delta.tool_calls)) for (const part of delta.tool_calls as Array<Record<string, unknown>>) {
+      setWaitPhase(job, undefined);
       const index = typeof part.index === "number" ? part.index : calls.size;
       const fn = part.function as Record<string, unknown> | undefined;
       const previous = calls.get(index) || { id: "", type: "function" as const, function: { name: "", arguments: "" } };
@@ -189,7 +197,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   };
   try {
     while (!terminated) {
-      const { done, value } = await reader.read(); if (done) break;
+      const { done, value } = await withSlowProgress(() => reader.read(), () => setWaitPhase(job, "waiting-server")); if (done) break;
       buffer += decoder.decode(value, { stream: true }); const records = buffer.split(/\r?\n\r?\n/); buffer = records.pop() || "";
       for (const record of records) { consume(record); if (terminated) break; }
     }
@@ -197,6 +205,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     if (!terminated && buffer.trim()) consume(buffer);
     if (!sawPayload || !terminated && !finishReason) throw new Error("The model response stream ended before completion.");
   } finally {
+    setWaitPhase(job, undefined);
     await reader.cancel().catch(() => undefined); reader.releaseLock();
   }
   return {
@@ -266,6 +275,7 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
 
 async function run(job: ChatJob) {
   const requestStartedAt = performance.now(); let reasoningSeconds = 0;
+  let releaseModel: (() => void) | undefined;
   try {
     const config = await readConfig();
     if (job.input.messages.some((message) => (message.attachments?.length || 0) > config.toolSettings.maxAttachmentsPerMessage)) throw new Error(`A message exceeds the configured ${config.toolSettings.maxAttachmentsPerMessage}-attachment limit.`);
@@ -280,15 +290,13 @@ async function run(job: ChatJob) {
     if (presetPrompt) systemPrompt = preset?.systemPromptMode === "replace" ? presetPrompt : preset?.systemPromptMode === "prepend" ? [presetPrompt, modelPrompt].filter(Boolean).join("\n\n") : [modelPrompt, presetPrompt].filter(Boolean).join("\n\n");
     let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt, config.toolSettings);
     const headers = connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "");
-    if (config.preferences.onDemand) {
-      if (connection.driver === "lmstudio") {
-        await ensureLmStudioModelLoaded({ baseUrl: connection.baseUrl, headers, sourceModel: model.sourceModel, modelId: model.id, contextWindowTokens: model.contextWindowTokens, signal: job.controller.signal });
-      } else {
-        const target = loadBody(model.sourceModel); const statusUrl = inferenceEndpoint(connection.baseUrl, "status");
-        const statusResponse = await fetch(statusUrl, { headers, signal: job.controller.signal, cache: "no-store" }); const status = statusResponse.ok ? await statusResponse.json().catch(() => ({})) : {};
-        if (status.model_identifier !== target.model_path || (target.gguf_variant && status.gguf_variant !== target.gguf_variant)) { const loadResponse = await fetch(inferenceEndpoint(connection.baseUrl, "load"), { method: "POST", headers, body: JSON.stringify(target), signal: job.controller.signal }); if (!loadResponse.ok) throw new Error((await loadResponse.text()) || `Model load failed with ${loadResponse.status}`); }
-      }
-    }
+    const serverKey = connectionRoot(connection.baseUrl);
+    const sameServer = config.connections.filter(item => connectionRoot(item.baseUrl) === serverKey);
+    const limits = sameServer.map(item => item.maxResidentModels || 0).filter(limit => limit > 0);
+    const limit = limits.length ? Math.min(...limits) : 0;
+    const policy = sameServer.some(item => item.modelWaitPolicy === "serial") ? "serial" : "capacity";
+    const adapter = config.preferences.onDemand || limit > 0 ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase)) : undefined;
+    releaseModel = await modelResidency.acquire({ server: serverKey, model: model.sourceModel, limit, policy, adapter, signal: job.controller.signal, onPhase: phase => setWaitPhase(job, phase) });
     const enabled: EnabledWebTools = {
       internetSearch: job.input.tools?.internetSearch === true, pageVisit: job.input.tools?.pageVisit === true,
       browser: job.input.tools?.browser === true,
@@ -302,7 +310,7 @@ async function run(job: ChatJob) {
         job.message = { ...job.message, ...result.usage, reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,
           completionDurationSeconds: result.visibleDurationSeconds,
           timeToFirstTokenSeconds: Math.max(0, (performance.now() - requestStartedAt - (result.visibleDurationSeconds || 0) * 1000) / 1000) };
-        job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
+        job.waitPhase = undefined; job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
       }
       messages.push({ role: "assistant", content: result.content, ...(result.reasoning ? { reasoning_content: result.reasoning } : {}), tool_calls: result.calls });
       const visualToolContent: ModelContentPart[] = [];
@@ -325,10 +333,12 @@ async function run(job: ChatJob) {
   } catch (error) {
     const stopped = (error as Error).name === "AbortError" || job.controller.signal.aborted;
     job.message = settlePendingTools([job.message])[0];
+    job.waitPhase = undefined;
     job.status = stopped ? "stopped" : "error"; job.error = stopped ? undefined : error instanceof Error ? error.message : "Chat generation failed.";
     if (job.message.reasoning) job.message.reasoningDurationSeconds ||= Math.max(1, reasoningSeconds);
     await persist(job).catch(() => undefined); broadcast(job, true); finishSubscribers(job);
   } finally {
+    releaseModel?.();
     await closeBrowserSessions(`${job.userId}:${job.input.conversationId}:${job.message.id}`).catch(() => undefined);
     job.waiting.clear();
     job.input = { ...job.input, messages: [] };
@@ -351,7 +361,7 @@ export async function startChatJob(input: StartChatJobInput, userId: string) {
   existing = jobs.get(input.conversationId);
   if (existing && existing.userId === userId && ["running", "waiting"].includes(existing.status)) return snapshot(existing);
   const job: ChatJob = {
-    userId, input, conversation, status: "running", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
+    userId, input, conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
     message: { id: input.assistantMessageId, revisionGroupId: input.revisionGroupId, role: "assistant", content: "", reasoning: "", toolEvents: [], createdAt: new Date().toISOString() },
   };
   if (existing) discardJob(existing);

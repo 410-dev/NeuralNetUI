@@ -1,5 +1,6 @@
 "use client";
 
+import { chatWaitLabel } from "@/lib/chat-progress";
 import { normalizeReasoning, reasoningOptionName, isReasoningToggle } from "@/lib/reasoning-capabilities";
 
 import {
@@ -16,7 +17,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type {
-  ChatBranch, ConnectionConfig, Conversation, ConversationSummary, ModelConfig, PublicConfig,
+  ChatWaitPhase, ChatBranch, ConnectionConfig, Conversation, ConversationSummary, ModelConfig, PublicConfig,
   ReasoningPreset, StoredAttachment, StoredMessage, Locale, AccountInfo, UserSummary, EnabledTools, ToolEvent, MultipleChoiceQuestion, ToolSettings,
 } from "@/lib/types";
 import { advertisedContextWindowTokens, effectiveContextWindowTokens } from "@/lib/model-context";
@@ -47,7 +48,7 @@ type QueuedPrompt = {
   tools: EnabledTools;
 };
 type CompletionOptions = Omit<QueuedPrompt, "id" | "content" | "attachments">;
-type ChatJobSnapshot = { conversationId: string; branchId: string; status: "running" | "waiting" | "completed" | "stopped" | "error"; message: StoredMessage; error?: string };
+type ChatJobSnapshot = { conversationId: string; branchId: string; status: "running" | "waiting" | "completed" | "stopped" | "error"; message: StoredMessage; error?: string; waitPhase?: ChatWaitPhase };
 const emptyConfig: PublicConfig = {
   connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", hasApiKey: false, models: [] }],
   profile: { name: "" },
@@ -216,6 +217,7 @@ export default function Home() {
   const [exportOpen, setExportOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [pendingWait, setPendingWait] = useState<{ messageId: string; phase: ChatWaitPhase } | null>(null);
   const [error, setError] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchText, setSearchText] = useState("");
@@ -458,13 +460,13 @@ export default function Home() {
     draftAttachments.forEach((attachment) => fetch(`/api/uploads/${attachment.id}`, { method: "DELETE" }).catch(() => undefined));
     const id = uid("conversation"); pendingConversationIdRef.current = id; navigateToChat(id, replaceUrl);
     autoFollowThreadRef.current = true;
-    setDraftAttachments([]); setRenderedMessageCount(60); setIsGenerating(false); setConversation(null); setMessages([]); setDraft(""); setError(""); setMobileOpen(false);
+    setDraftAttachments([]); setRenderedMessageCount(60); setIsGenerating(false); setPendingWait(null); setConversation(null); setMessages([]); setDraft(""); setError(""); setMobileOpen(false);
   }
 
   function resetWorkspaceForAuthChange() {
     abandonRef.current = true; abortRef.current?.abort(); clearQueuedPrompts();
     setConfig(structuredClone(emptyConfig)); selectedModelIdRef.current = ""; setSelectedModelId(""); setSelectedPresetId("");
-    setConversation(null); setMessages([]); setHistories([]); setDraft(""); setDraftAttachments([]); setIsGenerating(false); setError("");
+    setConversation(null); setMessages([]); setHistories([]); setDraft(""); setDraftAttachments([]); setIsGenerating(false); setPendingWait(null); setError("");
     setSearchText(""); setSearching(false); setExportOpen(false); setMobileOpen(false);
   }
 
@@ -594,6 +596,7 @@ export default function Home() {
               const next = JSON.parse(data) as ChatJobSnapshot;
               baseMessages = [...baseMessages.filter((message) => message.id !== next.message.id), next.message];
               setMessages(baseMessages);
+              setPendingWait(next.waitPhase ? { messageId: next.message.id, phase: next.waitPhase } : null);
               setConversation((current) => current ? { ...current, branches: current.branches.map((item) => item.id === next.branchId ? { ...item, messages: baseMessages } : item) } : current);
               const waitingLocation = next.message.toolEvents?.find((event) => event.name === "get_current_location" && event.status === "waiting");
               if (waitingLocation) provideBrowserLocation(next.conversationId, waitingLocation.id);
@@ -614,7 +617,7 @@ export default function Home() {
       const latestBranch = latest.branches.find((item) => item.id === branchId) || latest.branches[0];
       setConversation(latest); setMessages(latestBranch?.messages || []); await refreshHistories(); return latest;
     } finally {
-      if (abortRef.current === controller) { abortRef.current = null; setIsGenerating(false); }
+      if (abortRef.current === controller) { abortRef.current = null; setIsGenerating(false); setPendingWait(null); }
     }
   }
 
@@ -627,7 +630,7 @@ export default function Home() {
       working = { ...working, modelId: liveModel.id, reasoningPresetId: livePreset?.id };
     }
     const placeholder: StoredMessage = { id: uid("assistant"), revisionGroupId, role: "assistant", content: "", reasoning: "", createdAt: now() };
-    setMessages([...requestMessages, placeholder]); setIsGenerating(true); setError("");
+    setMessages([...requestMessages, placeholder]); setPendingWait({ messageId: placeholder.id, phase: "preparing-response" }); setIsGenerating(true); setError("");
     try {
       if (!await persist(working, create)) {
         const lastUser = requestMessages.at(-1);
@@ -635,7 +638,7 @@ export default function Home() {
           setDraft(current => current || lastUser.content);
           setDraftAttachments(current => current.length ? current : lastUser.attachments || []);
         }
-        setIsGenerating(false); return null;
+        setIsGenerating(false); setPendingWait(null); return null;
       }
       const response = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -647,7 +650,7 @@ export default function Home() {
       if (!response.ok) { const detail = await response.json().catch(() => ({})); throw new Error(detail.error || `요청에 실패했습니다 (${response.status})`); }
       const completed = await watchChatJob(working, branchId); if (completed) void refreshModelContextWindow(working.modelId); return completed;
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "채팅 요청에 실패했습니다."); setMessages(requestMessages); setIsGenerating(false); return null;
+      setError(caught instanceof Error ? caught.message : "채팅 요청에 실패했습니다."); setMessages(requestMessages); setIsGenerating(false); setPendingWait(null); return null;
     }
   }
 
@@ -852,7 +855,7 @@ export default function Home() {
           {!messages.length ? <div className="idle-center"><div className="welcome"><div className="welcome-mark"><Sparkles size={19} /></div><h1>{greeting}</h1><p>{c.welcome}</p></div><Composer c={c} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} /></div> : <>
             <div className="thread" ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
               {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
-              {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} renderStrikethrough={config.preferences.renderStrikethrough !== false} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
+              {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
             </div>
             <Composer c={c} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} />
           </>}
@@ -1125,7 +1128,7 @@ function ToolActivityGroup({ c, locale, events }: { c: CopySet; locale: Locale; 
   </details>;
 }
 
-function Message({ c, locale, message, renderStrikethrough, pending, revisions, onFork, onEditAssistant, onRegenerate, onRegenerateUser, onDeleteUser, onRevision }: { c: CopySet; locale: Locale; message: StoredMessage; renderStrikethrough: boolean; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
+function Message({ c, locale, message, waitPhase, renderStrikethrough, pending, revisions, onFork, onEditAssistant, onRegenerate, onRegenerateUser, onDeleteUser, onRevision }: { c: CopySet; locale: Locale; message: StoredMessage; waitPhase?: ChatWaitPhase; renderStrikethrough: boolean; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
   const [thoughtOpen, setThoughtOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(message.content);
@@ -1149,10 +1152,11 @@ function Message({ c, locale, message, renderStrikethrough, pending, revisions, 
   if (message.role === "user") return <div className="message-row user-message"><div className="user-message-actions">{editing ? <div className="message-edit">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}<textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => setEditing(false)}>{c.cancel}</button><button onClick={() => { if (text.trim() !== message.content) onFork(message.id, text); setEditing(false); }}><GitBranch size={13} /> {c.forkSend}</button></div></div> : <><div className="user-message-toolbar"><button title={c.regenerateRequest} aria-label={c.regenerateRequest} onClick={() => onRegenerateUser(message.id)}><RefreshCw size={13} /></button>{message.content && <button title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={13} /></button>}<button title={c.editBranch} aria-label={c.editBranch} onClick={() => setEditing(true)}><Pencil size={13} /></button><button className="delete" title={c.deleteMessage} aria-label={c.deleteMessage} onClick={() => onDeleteUser(message.id)}><Trash2 size={13} /></button></div><div className="user-message-stack long-press-target" {...longPress}><div className="user-message-content">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}{message.content && <div className="message-bubble">{message.content}</div>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /></div></>}</div>{actions}</div>;
   const showThought = isThinking || thoughtOpen;
   return <div className="message-row assistant-message long-press-target" {...longPress}>
+    {pending && waitPhase && <div className="chat-wait-status" role="status" aria-live="polite"><LoaderCircle className="spin" size={16} /><span>{chatWaitLabel(waitPhase, locale)}</span></div>}
     {message.reasoning && <div className={`thinking-block ${isThinking ? "streaming" : ""}`}><button onClick={() => !isThinking && setThoughtOpen((value) => !value)} aria-expanded={showThought}><BrainCircuit size={15} /> {isThinking ? c.thinking : formatThoughtDuration(message.reasoningDurationSeconds || 1, locale)} {!isThinking && <ChevronDown size={14} className={thoughtOpen ? "rotate" : ""} />}</button>{showThought && <div ref={reasoningRef} className={`thinking-preview ${isThinking ? "live" : ""}`}>{displayedReasoning}</div>}</div>}
     {visibleToolEvents.length ? <ToolActivityGroup c={c} locale={locale} events={visibleToolEvents} /> : null}
     {choiceResponses.map((event) => <MultipleChoiceResponse key={event.id} event={event} />)}
-    {editing ? <div className="assistant-edit"><textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => { setText(message.content); setEditing(false); }}>{c.cancel}</button><button className="save-response" onClick={() => { if (text.trim()) onEditAssistant(message.id, text); setEditing(false); }}><Check size={13} /> {c.saveEdit}</button></div></div> : <div className="assistant-copy markdown-body">{message.content ? <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: true }], remarkMath]} rehypePlugins={[rehypeKatex]} components={{ a: (props) => <a {...props} target="_blank" rel="noreferrer" />, pre: ({ children }) => <CodeSnippet c={c}>{children}</CodeSnippet>, del: ({ node, children, ...props }) => renderStrikethrough ? <del {...props}>{children}</del> : <>{literalStrikethroughSource(message.content, node, String(children))}</> }}>{message.content}</ReactMarkdown> : pending && !waitingForChoice ? <span className="typing"><i /><i /><i /></span> : ""}</div>}
+    {editing ? <div className="assistant-edit"><textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => { setText(message.content); setEditing(false); }}>{c.cancel}</button><button className="save-response" onClick={() => { if (text.trim()) onEditAssistant(message.id, text); setEditing(false); }}><Check size={13} /> {c.saveEdit}</button></div></div> : <div className="assistant-copy markdown-body">{message.content ? <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: true }], remarkMath]} rehypePlugins={[rehypeKatex]} components={{ a: (props) => <a {...props} target="_blank" rel="noreferrer" />, pre: ({ children }) => <CodeSnippet c={c}>{children}</CodeSnippet>, del: ({ node, children, ...props }) => renderStrikethrough ? <del {...props}>{children}</del> : <>{literalStrikethroughSource(message.content, node, String(children))}</> }}>{message.content}</ReactMarkdown> : pending && !waitingForChoice && !waitPhase ? <span className="typing"><i /><i /><i /></span> : ""}</div>}
     {!pending && !editing && <div className="assistant-footer"><div className="assistant-actions"><button className="message-action-button" title={c.regenerate} aria-label={c.regenerate} onClick={() => onRegenerate(message.id)}><RefreshCw size={14} /></button>{message.content && <button className="message-action-button" title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={14} /></button>}<button className="message-action-button" title={c.editResponse} aria-label={c.editResponse} onClick={() => setEditing(true)}><Pencil size={14} /></button></div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /><MessageTokenStats c={c} locale={locale} message={message} /></div>}
     {actions}
   </div>;
@@ -1298,6 +1302,8 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
         <div className="connection-card-head"><strong>{activeIndex + 1}. {activeConnection.name}</strong>{activeIndex === 0 && <em>{c.priorityHelp}</em>}<button aria-label={c.removeConnection} title={c.removeConnection} disabled={draft.connections.length < 2} onClick={() => removeConnection(activeConnection.id)}><Trash2 size={15} /></button></div>
         <div className="form-grid"><label className="field"><span>{c.connectionName}</span><input value={activeConnection.name} onChange={(event) => patchConnection(activeConnection.id, { name: event.target.value })} /></label><label className="field"><span>{c.driver}</span><select value={activeConnection.driver} onChange={(event) => { const driver = event.target.value as "openai" | "lmstudio"; patchConnection(activeConnection.id, { driver, baseUrl: driver === "lmstudio" && activeConnection.baseUrl === "http://localhost:8888/v1" ? "http://localhost:1234" : activeConnection.baseUrl }); }}><option value="openai">OpenAI API</option><option value="lmstudio">LM Studio</option></select></label></div>
         <label className="field"><span>{c.baseUrl}</span><input value={activeConnection.baseUrl} onChange={(event) => patchConnection(activeConnection.id, { baseUrl: event.target.value })} placeholder={activeConnection.driver === "lmstudio" ? "http://localhost:1234" : "http://localhost:8888/v1"} /><small>{activeConnection.driver === "lmstudio" ? "LM Studio REST API /api/v1" : c.baseUrlHelp}</small></label>
+        <label className="field"><span>{draft.preferences.language === "ko" ? "최대 모델 상주 한도" : "Maximum resident models"}</span><input type="number" min={0} max={128} step={1} inputMode="numeric" value={activeConnection.maxResidentModels || 0} onChange={(event) => patchConnection(activeConnection.id, { maxResidentModels: Math.min(128, Math.max(0, Math.floor(Number(event.target.value) || 0))) })} /><small>{draft.preferences.language === "ko" ? "0은 제한 없음입니다. 한도를 설정하면 필요할 때 모델을 로드하고, 사용 중이지 않은 모델 중 사용 횟수가 가장 적은 모델부터 교체합니다. 모델 관리 API가 필요합니다." : "0 means unlimited. A positive limit loads models as needed and replaces the least-used idle model. Requires a model-management API."}</small></label>
+        <label className="field"><span>{draft.preferences.language === "ko" ? "다른 세션 실행 중 대기 방식" : "Wait policy while other sessions are running"}</span><select value={activeConnection.modelWaitPolicy || "capacity"} onChange={(event) => patchConnection(activeConnection.id, { modelWaitPolicy: event.target.value as "capacity" | "serial" })}><option value="capacity">{draft.preferences.language === "ko" ? "교체 후보가 모두 사용 중일 때만 대기" : "Wait only when all eviction candidates are busy"}</option><option value="serial">{draft.preferences.language === "ko" ? "다른 세션이 실행 중이면 항상 대기" : "Always wait for other sessions to finish"}</option></select><small>{draft.preferences.language === "ko" ? "이 앱의 모든 사용자와 대화에 적용됩니다. Alias는 기반 모델과 상주 공간을 공유합니다." : "Applies across all users and conversations in this app. Aliases share residency with their base model."}</small></label>
         <label className="field"><span>{c.apiKey}</span><div className="field-with-icon"><KeyRound size={16} /><input type="password" value={activeConnection.apiKey} onChange={(event) => patchConnection(activeConnection.id, { apiKey: event.target.value, clearApiKey: false })} placeholder={activeConnection.hasApiKey ? c.savedKey : activeConnection.driver === "lmstudio" ? "Optional" : c.requiredKey} /></div><small>{c.apiKeyHelp}</small></label>
         <button type="button" className="secondary-button" disabled={activeConnection.clearApiKey || !(activeConnection.hasApiKey || activeConnection.apiKey)} onClick={() => patchConnection(activeConnection.id, { apiKey: "", clearApiKey: true, hasApiKey: false })}>{draft.preferences.language === "ko" ? (activeConnection.clearApiKey ? "API 키 사용 안 함" : "저장된 API 키 삭제") : (activeConnection.clearApiKey ? "API key disabled" : "Remove saved API key")}</button>
         <div className="connection-test"><div><strong>{c.discover}</strong><small>{activeConnection.models.length} {c.models} · {c.discoverDesc}</small></div><button onClick={() => onDetect(activeConnection.id)} disabled={Boolean(detectingConnectionId)}><RefreshCw size={16} className={detecting ? "spin" : ""} />{detecting ? c.detecting : c.detectModels}</button></div>

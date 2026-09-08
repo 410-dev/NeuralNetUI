@@ -2,6 +2,8 @@ export type ReasoningKind = "builtin" | "custom";
 export type SystemPromptMode = "replace" | "prepend" | "append";
 export type Locale = "en" | "ko";
 export type ConnectionDriver = "openai" | "lmstudio";
+export type ModelWaitPolicy = "capacity" | "serial";
+export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response";
 
 export interface ReasoningPreset {
   id: string;
@@ -42,6 +44,9 @@ export interface ConnectionConfig {
   apiKey: string;
   /** Explicitly disable saved and environment credentials until a replacement is entered. */
   clearApiKey?: boolean;
+  /** Zero or absent means unlimited. A positive limit enables managed loading. */
+  maxResidentModels?: number;
+  modelWaitPolicy?: ModelWaitPolicy;
   models: ModelConfig[];
 }
 
