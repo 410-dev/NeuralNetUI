@@ -75,6 +75,13 @@
 - The composer is one pill row holding the add menu, the draft, the context meter, the reasoning picker and send.
 - When the draft no longer fits beside those controls, the composer stretches into a large rounded rectangle: the text takes the first row and the controls drop below it.
 - Decide the layout by measuring the draft against the space left over by the controls, whose widths are identical in both layouts, so the two states cannot oscillate.
+- Stack the composer as soon as the leftover space is too narrow to type in, not only when the draft overflows it. On a phone that means the stacked layout from the start.
+- Centre single-line rows. A row taller than its content must centre it; reserve top alignment for options that genuinely have several lines, where the marker belongs beside the first one.
+
+## Experimental features
+
+- Unfinished capabilities live behind an administrator switch in their own settings tab, listed after the harness tab.
+- While a feature is off, hide its control in the chat menus and refuse it on the server as well; a client must not be able to ask for it.
 
 ## Appearance choices
 

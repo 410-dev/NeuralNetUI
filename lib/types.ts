@@ -96,6 +96,7 @@ export interface AppConfig {
   };
   harnessSettings?: HarnessSettings;
   toolSettings: ToolSettings;
+  experimental: ExperimentalFeatures;
   models: ModelConfig[];
 }
 
@@ -110,6 +111,11 @@ export interface HarnessSettings {
   titleModelId: string;
   titleEffort: string;
   titlePrompt: string;
+}
+
+/** Opt-in features an administrator must switch on before anyone can use them. */
+export interface ExperimentalFeatures {
+  browserTool: boolean;
 }
 
 export interface ToolSettings {

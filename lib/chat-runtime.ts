@@ -295,7 +295,7 @@ async function run(job: ChatJob) {
     let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt, config.toolSettings);
     const enabled: EnabledWebTools = {
       internetSearch: job.input.tools?.internetSearch === true, pageVisit: job.input.tools?.pageVisit === true,
-      browser: job.input.tools?.browser === true,
+      browser: job.input.tools?.browser === true && config.experimental?.browserTool === true,
       currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
     };
     const tools = toolDefinitions(enabled);
