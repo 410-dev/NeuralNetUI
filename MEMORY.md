@@ -26,3 +26,4 @@
 - LM Studio discovery and model management use its native `/api/v1` REST API. Chat streaming uses LM Studio's OpenAI-compatible endpoint to retain custom tool calls and full assistant history.
 - LM Studio on-demand loading checks `loaded_instances` before calling the load endpoint and coalesces concurrent loads for the same model, preventing duplicate instances across messages.
 - Current release version: 1.8.1.
+- Unresolved UI/LM Studio audit findings and reproduction evidence are recorded in `docs/audits/2026-09-08-ui-lmstudio.md`; the audit is documentation only, not a set of fixes.
