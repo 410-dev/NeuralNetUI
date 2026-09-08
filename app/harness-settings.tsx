@@ -6,6 +6,7 @@ import type { HarnessSettings, PublicConfig } from "@/lib/types";
 import { DEFAULT_HARNESS_SETTINGS } from "@/lib/harness";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { SectionTitle } from "./section-title";
+import { SelectMenu } from "./select-menu";
 
 const EFFORT_LABELS: Record<string, [string, string]> = {
   off: ["Off", "사용 안 함"], on: ["Thinking", "사고 사용"], minimal: ["Minimal", "최소"],
@@ -34,9 +35,11 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
     const effortKey=kind==="compact"?"compactEffort":"titleEffort";
     const model=draft.models.find(m=>m.id===h[modelKey]);
     const efforts=model?.reasoningEfforts || ["off","on","minimal","low","medium","high","xhigh"];
+    const modelLabel = ko?"사용할 모델":"Model";
+    const effortLabelText = ko?"추론 강도":"Reasoning effort";
     return <div className="form-grid">
-      <label className="field"><span>{ko?"사용할 모델":"Model"}</span><select value={h[modelKey]} onChange={e=>patch({[modelKey]:e.target.value,[effortKey]:"off"})}><option value="">{ko?"현재 채팅의 기반 모델":"Current chat's base model"}</option>{draft.models.filter(m=>!m.isAlias && m.visible!==false).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select><small>{ko?"비워 두면 대화에서 선택한 모델을 그대로 사용합니다.":"Left unset, the model selected in the chat is used."}</small></label>
-      <label className="field"><span>{ko?"추론 강도":"Reasoning effort"}</span><select value={h[effortKey]} onChange={e=>patch({[effortKey]:e.target.value})}>{[...new Set(["off",...efforts])].map(e=><option key={e} value={e}>{effortLabel(e)}</option>)}</select><small>{ko?"모델이 지원하는 강도만 전달됩니다.":"Only model-supported values are sent."}</small></label>
+      <label className="field"><span>{modelLabel}</span><SelectMenu label={modelLabel} value={h[modelKey]} options={[{ value:"", label:ko?"현재 채팅의 기반 모델":"Current chat's base model" },...draft.models.filter(m=>!m.isAlias && m.visible!==false).map(m=>({ value:m.id, label:m.name }))]} onChange={value=>patch({[modelKey]:value,[effortKey]:"off"})}/><small>{ko?"비워 두면 대화에서 선택한 모델을 그대로 사용합니다.":"Left unset, the model selected in the chat is used."}</small></label>
+      <label className="field"><span>{effortLabelText}</span><SelectMenu label={effortLabelText} value={h[effortKey]} options={[...new Set(["off",...efforts])].map(value=>({ value, label:effortLabel(value) }))} onChange={value=>patch({[effortKey]:value})}/><small>{ko?"모델이 지원하는 강도만 전달됩니다.":"Only model-supported values are sent."}</small></label>
     </div>;
   }
   return <div className="harness-settings">

@@ -16,7 +16,7 @@ export async function PUT(request: Request) {
     const user = requireUser(request);
     const saved = await writeConfigForUser(incoming, user);
     const admin = user.role === "admin" || user.role === "superadmin";
-    return NextResponse.json(publicConfig(saved, { ...user, displayName: admin ? incoming.profile?.name || user.displayName : user.displayName, preferences: { ...user.preferences, sendReasoningToModel: incoming.preferences?.sendReasoningToModel, exportReasoning: incoming.preferences?.exportReasoning, language: incoming.preferences?.language, showModelIdentifiers: incoming.preferences?.showModelIdentifiers, renderStrikethrough: incoming.preferences?.renderStrikethrough, defaultModelId: incoming.preferences?.defaultModelId, defaultReasoningPresetId: incoming.preferences?.defaultReasoningPresetId } }));
+    return NextResponse.json(publicConfig(saved, { ...user, displayName: admin ? incoming.profile?.name || user.displayName : user.displayName, preferences: { ...user.preferences, sendReasoningToModel: incoming.preferences?.sendReasoningToModel, exportReasoning: incoming.preferences?.exportReasoning, language: incoming.preferences?.language, showModelIdentifiers: incoming.preferences?.showModelIdentifiers, renderStrikethrough: incoming.preferences?.renderStrikethrough, defaultModelId: incoming.preferences?.defaultModelId, defaultReasoningPresetId: incoming.preferences?.defaultReasoningPresetId, appearance: incoming.preferences?.appearance } }));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof ZodError ? error.issues[0]?.message : "설정을 저장하지 못했습니다." },

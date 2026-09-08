@@ -1,5 +1,17 @@
 # NeuralNetUI Design Language
 
+## 2.0 form language
+
+- Every button, input and dropdown trigger is a full pill. Multi-line fields and containers use the large corner tokens instead; nothing in the interface reads as a square.
+- Corner radii come from the `--radius-*` tokens. Raise the tokens rather than hand-tuning individual rules.
+- Surfaces and type are hue-free: white and grey only. Colour belongs to the accent, which marks interactive and selected states, and to the danger and success signals.
+- The accent is a per-user choice. Never hardcode an accent hue; build translucent accents from `rgb(var(--accent-rgb) / a)` so a palette change reaches every rule.
+- Icons are drawn marks, not badges: white strokes, no plate, no tinted container. Icon-only buttons signal hover with colour and a slight scale, never a filled background.
+- Native `select` elements cannot carry the pill shape or the popover animation, so the single `SelectMenu` component serves every choice in the app.
+- Popovers animate both ways. Keep them mounted through the exit keyframes with `usePopoverPresence` and anchor the transform origin to the edge they grow from.
+- Motion is elastic: share the `--spring` easing for shape, width and scale changes so the interface feels physical rather than linear.
+- Reset a control's background explicitly. A styled `button` that leaves `background` unset shows the browser's disabled plate.
+
 ## Principles
 
 - Keep the chat itself visually dominant; controls should stay compact and quiet until needed.
@@ -55,3 +67,17 @@
 - Give the sidebar a compact header holding the wordmark and a single icon control: collapse on desktop, close on mobile.
 - Keep per-conversation rename and delete actions in one hover-revealed action group on the same row as the title; coarse pointers show them permanently.
 - Desktop collapsed navigation retains only expand, new chat, search and profile controls, centred in the narrow rail. Mobile navigation retains its existing full drawer.
+- The rail carries no wordmark. Its header holds one icon control: collapse on desktop, close in the mobile drawer.
+- Collapsing animates the rail's width with the shared spring. Fade labels out and collapse their width together so nothing overflows the narrow rail mid-transition.
+
+## Composer
+
+- The composer is one pill row holding the add menu, the draft, the context meter, the reasoning picker and send.
+- When the draft no longer fits beside those controls, the composer stretches into a large rounded rectangle: the text takes the first row and the controls drop below it.
+- Decide the layout by measuring the draft against the space left over by the controls, whose widths are identical in both layouts, so the two states cannot oscillate.
+
+## Appearance choices
+
+- Accent palettes are named swatches plus one custom colour. The settings panel previews the chosen accent live and restores the saved one if the panel is dismissed.
+- Streaming has two independent presentation choices: whether newly settled text fades in, and whether bursts of tokens are released immediately or spread evenly.
+- Presentation preferences never change what is sent to a model, and never alter stored conversation content.

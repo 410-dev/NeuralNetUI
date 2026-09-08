@@ -4,6 +4,20 @@ export type Locale = "en" | "ko";
 export type ConnectionDriver = "openai" | "lmstudio";
 export type ModelWaitPolicy = "capacity" | "serial";
 export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response";
+export type AccentPaletteId = "blue" | "violet" | "teal" | "amber" | "rose" | "graphite" | "custom";
+export type StreamReveal = "instant" | "fade";
+export type StreamPacing = "immediate" | "chunked";
+
+/** Per-user presentation choices that never affect what is sent to a model. */
+export interface AppearancePreferences {
+  accentPalette: AccentPaletteId;
+  /** Used when the palette is "custom". */
+  accentColor: string;
+  streamReveal: StreamReveal;
+  streamPacing: StreamPacing;
+  /** Characters released per step while pacing is "chunked". */
+  streamChunkSize: number;
+}
 
 export interface ReasoningPreset {
   id: string;
@@ -78,6 +92,7 @@ export interface AppConfig {
     renderStrikethrough: boolean;
     defaultModelId?: string;
     defaultReasoningPresetId?: string;
+    appearance: AppearancePreferences;
   };
   harnessSettings?: HarnessSettings;
   toolSettings: ToolSettings;
