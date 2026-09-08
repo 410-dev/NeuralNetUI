@@ -332,6 +332,17 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .connection-test strong, .reason-capability strong { font-size: 12px; }.connection-test small, .reason-capability small { color: var(--dim); margin-top: 4px; font-size: 10px; line-height: 1.45; }
 .connection-test button, .subtle-action { display: flex; align-items: center; gap: 7px; white-space: nowrap; height: 34px; border-radius: 9px; background: rgba(255,255,255,.06); color: #d1d7d3; padding: 0 11px; font-size: 11px; }
 .connection-test button:hover, .subtle-action:hover { background: rgba(255,255,255,.1); }
+.connection-list { display: grid; gap: 12px; }
+.connection-card { display: grid; gap: 13px; padding: 15px; border: 1px solid var(--border); border-radius: 14px; background: rgba(255,255,255,.018); }
+.connection-card[draggable="true"] { cursor: default; }
+.connection-card-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.connection-card-head strong { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.connection-card-head em { color: var(--accent-bright); background: rgba(78,154,135,.12); border-radius: 999px; padding: 4px 8px; font-size: 9px; font-style: normal; text-transform: uppercase; letter-spacing: .04em; }
+.connection-card-head button { display: grid; place-items: center; width: 30px; height: 30px; color: var(--dim); border-radius: 8px; }
+.connection-card-head button:hover:not(:disabled) { color: #ff9b9b; background: rgba(255,90,90,.08); }
+.connection-card-head button:disabled { opacity: .3; }
+.connection-grip { display: grid; place-items: center; color: var(--dim); cursor: grab; touch-action: none; }
+.connection-card:active .connection-grip { cursor: grabbing; }
 .spin { animation: spin 1s linear infinite; } @keyframes spin { to{ transform:rotate(360deg) } }
 .model-tabs { display: flex; gap: 5px; overflow-x: auto; border-bottom: 1px solid var(--border); margin-bottom: 18px; padding-bottom: 8px; }
 .model-tabs button { display: flex; gap: 7px; align-items: center; white-space: nowrap; height: 32px; padding: 0 10px; border-radius: 8px; background: transparent; color: var(--muted); font-size: 11px; }

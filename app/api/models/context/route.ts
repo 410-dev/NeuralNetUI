@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { canUseModel, inferModel, readConfig, writeConfig } from "@/lib/config";
 import { baseModelForAlias, inferApiContextWindowTokens } from "@/lib/model-context";
+import { connectionForModel, modelsEndpoint } from "@/lib/connection-drivers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,19 +22,21 @@ export async function POST(request: Request) {
     if (!requested) return NextResponse.json({ error: "선택한 모델을 사용할 수 없습니다." }, { status: 400 });
     const base = baseModelForAlias(requested, config.models) || requested;
 
-    const baseUrl = config.server.baseUrl.replace(/\/$/, "");
-    const apiKey = config.server.apiKey || process.env.OPENAI_API_KEY || "";
-    const response = await fetch(`${baseUrl}/models`, {
+    const connection = connectionForModel(config.connections, base);
+    if (!connection) return NextResponse.json({ error: "모델 연결을 찾을 수 없습니다." }, { status: 404 });
+    const apiKey = connection.apiKey || (connection.driver === "openai" ? process.env.OPENAI_API_KEY : "") || "";
+    const response = await fetch(modelsEndpoint(connection.driver, connection.baseUrl), {
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
       signal: AbortSignal.timeout(10_000),
       cache: "no-store",
     });
     if (!response.ok) throw new Error(`Server responded with ${response.status}`);
     const payload = await response.json();
-    const records = Array.isArray(payload?.data) ? payload.data.filter((item: { id?: string }) => item?.id) as Array<Record<string, unknown>> : [];
+    const rawRecords = connection.driver === "lmstudio" ? payload?.models : payload?.data;
+    const records = Array.isArray(rawRecords) ? rawRecords.filter((item: { id?: string; key?: string }) => item?.id || item?.key) as Array<Record<string, unknown>> : [];
     const targetIdentifier = identifierWithoutVariant(base.sourceModel);
     const record = records.find((candidate) => {
-      const inferred = inferModel(candidate);
+      const inferred = inferModel(candidate, connection.driver, connection.id);
       return inferred.id === base.id
         || inferred.sourceModel === base.sourceModel
         || identifierWithoutVariant(inferred.sourceModel) === targetIdentifier;

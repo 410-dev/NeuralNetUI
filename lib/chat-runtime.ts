@@ -2,6 +2,7 @@ import { canUseModel, readConfig } from "./config";
 import { readConversation, writeConversation } from "./conversations";
 import { readUploadModelContent } from "./uploads";
 import { inferenceEndpoint } from "./inference-control";
+import { chatEndpoint, connectionForModel, connectionHeaders, lmStudioEndpoint } from "./connection-drivers";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
 import { closeBrowserSessions, executeBrowserTool } from "./browser-tool";
 import type { Conversation, StoredMessage, ToolEvent, ToolSettings } from "./types";
@@ -55,7 +56,6 @@ const jobs = globalThis.neuralChatJobs ?? new Map<string, ChatJob>();
 globalThis.neuralChatJobs = jobs;
 const encoder = new TextEncoder();
 
-function endpoint(baseUrl: string) { return `${baseUrl.replace(/\/$/, "")}/chat/completions`; }
 function loadBody(sourceModel: string) {
   const separator = sourceModel.lastIndexOf(":"); const lastPathSeparator = Math.max(sourceModel.lastIndexOf("/"), sourceModel.lastIndexOf("\\"));
   return separator <= lastPathSeparator || separator === 1 ? { model_path: sourceModel } : { model_path: sourceModel.slice(0, separator), gguf_variant: sourceModel.slice(separator + 1) };
@@ -134,9 +134,9 @@ async function upstreamMessages(input: StartChatJobInput, userId: string, system
 }
 
 async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>) {
-  const response = await fetch(endpoint(String(body._baseUrl)), {
+  const response = await fetch(String(body._endpoint), {
     method: "POST", headers, signal: job.controller.signal,
-    body: JSON.stringify(Object.fromEntries(Object.entries(body).filter(([key]) => key !== "_baseUrl"))),
+    body: JSON.stringify(Object.fromEntries(Object.entries(body).filter(([key]) => key !== "_endpoint"))),
   });
   if (!response.ok) throw new Error((await response.text()) || `Model server responded with ${response.status}`);
   if (!response.body) throw new Error("The model server returned no response stream.");
@@ -250,20 +250,22 @@ async function run(job: ChatJob) {
     if (job.input.messages.some((message) => (message.attachments?.length || 0) > config.toolSettings.maxAttachmentsPerMessage)) throw new Error(`A message exceeds the configured ${config.toolSettings.maxAttachmentsPerMessage}-attachment limit.`);
     const model = config.models.find((item) => item.id === job.input.modelId);
     if (!model || !canUseModel(model, { id: job.userId } as never)) throw new Error("The selected model is unavailable.");
+    const connection = connectionForModel(config.connections, model);
+    if (!connection) throw new Error("The selected model's connection is unavailable.");
     const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId);
     const modelPrompt = model.systemPrompt?.trim() || ""; const presetPrompt = preset?.kind === "custom" ? preset.systemPrompt?.trim() || "" : "";
     let systemPrompt = modelPrompt;
     if (presetPrompt) systemPrompt = preset?.systemPromptMode === "replace" ? presetPrompt : preset?.systemPromptMode === "prepend" ? [presetPrompt, modelPrompt].filter(Boolean).join("\n\n") : [modelPrompt, presetPrompt].filter(Boolean).join("\n\n");
     let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt, config.toolSettings);
-    const apiKey = config.server.apiKey || process.env.OPENAI_API_KEY || "";
-    const headers = { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) };
+    const headers = connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "");
     if (config.preferences.onDemand) {
-      const target = loadBody(model.sourceModel); const statusUrl = inferenceEndpoint(config.server.baseUrl, "status");
-      const statusResponse = await fetch(statusUrl, { headers, signal: job.controller.signal, cache: "no-store" });
-      const status = statusResponse.ok ? await statusResponse.json().catch(() => ({})) : {};
-      if (status.model_identifier !== target.model_path || (target.gguf_variant && status.gguf_variant !== target.gguf_variant)) {
-        const loadResponse = await fetch(inferenceEndpoint(config.server.baseUrl, "load"), { method: "POST", headers, body: JSON.stringify(target), signal: job.controller.signal });
-        if (!loadResponse.ok) throw new Error((await loadResponse.text()) || `Model load failed with ${loadResponse.status}`);
+      if (connection.driver === "lmstudio") {
+        const loadResponse = await fetch(lmStudioEndpoint(connection.baseUrl, "load"), { method: "POST", headers, body: JSON.stringify({ model: model.sourceModel, ...(model.contextWindowTokens ? { context_length: model.contextWindowTokens } : {}) }), signal: job.controller.signal });
+        if (!loadResponse.ok && loadResponse.status !== 409) throw new Error((await loadResponse.text()) || `Model load failed with ${loadResponse.status}`);
+      } else {
+        const target = loadBody(model.sourceModel); const statusUrl = inferenceEndpoint(connection.baseUrl, "status");
+        const statusResponse = await fetch(statusUrl, { headers, signal: job.controller.signal, cache: "no-store" }); const status = statusResponse.ok ? await statusResponse.json().catch(() => ({})) : {};
+        if (status.model_identifier !== target.model_path || (target.gguf_variant && status.gguf_variant !== target.gguf_variant)) { const loadResponse = await fetch(inferenceEndpoint(connection.baseUrl, "load"), { method: "POST", headers, body: JSON.stringify(target), signal: job.controller.signal }); if (!loadResponse.ok) throw new Error((await loadResponse.text()) || `Model load failed with ${loadResponse.status}`); }
       }
     }
     const enabled: EnabledWebTools = {
@@ -273,7 +275,7 @@ async function run(job: ChatJob) {
     };
     const tools = toolDefinitions(enabled);
     for (let turn = 0; turn < config.toolSettings.maxToolRounds; turn += 1) {
-      const body: Record<string, unknown> = { _baseUrl: config.server.baseUrl, model: model.sourceModel, messages, stream: true, stream_options: { include_usage: true }, ...(preset?.effort ? { reasoning_effort: preset.effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
+      const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, stream: true, stream_options: { include_usage: true }, ...(preset?.effort ? { reasoning_effort: preset.effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
       const result = await streamTurn(job, body, headers); reasoningSeconds += result.reasoningDurationSeconds;
       if (!result.calls.length) {
         job.message = { ...job.message, ...result.usage, reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,

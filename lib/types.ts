@@ -1,6 +1,7 @@
 export type ReasoningKind = "builtin" | "custom";
 export type SystemPromptMode = "replace" | "prepend" | "append";
 export type Locale = "en" | "ko";
+export type ConnectionDriver = "openai" | "lmstudio";
 
 export interface ReasoningPreset {
   id: string;
@@ -29,6 +30,17 @@ export interface ModelConfig {
   apiContextWindowTokens?: number;
   ownerId?: string;
   isPublic?: boolean;
+  /** Connection that serves this model. Aliases inherit their base model connection. */
+  connectionId?: string;
+}
+
+export interface ConnectionConfig {
+  id: string;
+  name: string;
+  driver: ConnectionDriver;
+  baseUrl: string;
+  apiKey: string;
+  models: ModelConfig[];
 }
 
 export type UserRole = "superadmin" | "admin" | "user";
@@ -45,10 +57,8 @@ export interface UserSummary extends AccountInfo {
 }
 
 export interface AppConfig {
-  server: {
-    baseUrl: string;
-    apiKey: string;
-  };
+  /** Ordered highest priority first. */
+  connections: ConnectionConfig[];
   profile: {
     name: string;
   };
@@ -171,7 +181,9 @@ export interface ConversationSummary {
   updatedAt: string;
 }
 
-export type PublicConfig = Omit<AppConfig, "server"> & {
-  server: AppConfig["server"] & { apiKey: string; hasApiKey: boolean };
+export type PublicConnectionConfig = Omit<ConnectionConfig, "apiKey"> & { apiKey: string; hasApiKey: boolean };
+
+export type PublicConfig = Omit<AppConfig, "connections"> & {
+  connections: PublicConnectionConfig[];
   account?: AccountInfo;
 };

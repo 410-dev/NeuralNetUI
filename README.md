@@ -1,6 +1,6 @@
 # Neural Chat
 
-`llm-chat-ui.html`의 디자인 언어를 이어 만든 OpenAI API 호환 채팅 UI입니다. Next.js 프론트엔드와 설정/모델 감지/스트리밍 프록시 백엔드를 한 프로세스에서 실행합니다.
+`llm-chat-ui.html`의 디자인 언어를 이어 만든 다중 서버 채팅 UI입니다. OpenAI API와 LM Studio 드라이버, 서버별 모델 설정, 우선순위 라우팅을 지원하며 Next.js 프론트엔드와 스트리밍 프록시 백엔드를 한 프로세스에서 실행합니다.
 
 ## 로컬 실행
 
@@ -52,7 +52,7 @@ chmod +x host-linux.sh
 
 ## Windows MSI 설치
 
-`installer/output/NeuralNetUI-1.7-x64.msi`는 Node.js, 앱 런타임, 헤드리스 Chromium, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
+`installer/output/NeuralNetUI-1.8.0-x64.msi`는 Node.js, 앱 런타임, 헤드리스 Chromium, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
 
 트레이 아이콘을 두 번 누르면 Web UI를 다시 열 수 있습니다. 우클릭 메뉴에는 **설정 파일 수정**, **재시작**, **종료하기**가 있으며, 종료는 서비스와 트레이 앱을 함께 중지합니다. 시작 메뉴의 **NeuralNetUI**를 누르면 중지된 서비스를 다시 시작하고 Web UI를 호스팅하며 트레이 아이콘도 복원합니다. 서비스 제어와 보호된 설정 파일 편집에는 Windows 관리자 권한 확인이 표시될 수 있습니다.
 
@@ -61,7 +61,7 @@ chmod +x host-linux.sh
 무인 설치에서도 같은 공개 MSI 속성을 사용할 수 있습니다.
 
 ```powershell
-msiexec /i NeuralNetUI-1.7-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
+msiexec /i NeuralNetUI-1.8.0-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
 ```
 
 MSI를 다시 빌드하려면 Node.js, .NET 8 SDK가 있는 Windows x64 개발 환경에서 다음을 실행합니다. WiX 5 도구는 처음 빌드할 때 `installer/.tools`에 로컬 설치됩니다.
@@ -183,6 +183,13 @@ Docker 이미지와 Windows MSI는 Chromium을 포함합니다. 소스에서 직
 python -m pip install -r requirements.txt
 ```
 
+## 모델 서버 연결
+
+- `설정 > 연결`에서 OpenAI API 또는 LM Studio 드라이버를 선택해 여러 서버를 추가할 수 있습니다.
+- LM Studio는 기본 주소 `http://localhost:1234`와 네이티브 `/api/v1/models`, `/api/v1/models/load`, `/api/v1/models/unload`를 사용합니다. 채팅은 도구 호출과 전체 대화 이력을 보존하기 위해 LM Studio의 `/v1/chat/completions` 호환 스트림을 사용합니다.
+- 연결 카드를 드래그하거나 위/아래 버튼으로 정렬할 수 있습니다. 같은 모델 identifier가 여러 서버에 있으면 가장 위 연결이 선택됩니다.
+- 감지된 모델, 표시 여부, 설명, 시스템 프롬프트, 컨텍스트 길이와 Reasoning 프리셋은 연결별로 저장되므로 다른 서버를 사용한 뒤 돌아와도 복원됩니다.
+
 ## Reasoning 동작
 
 - **Built-in** 프리셋은 선택한 값을 OpenAI 호환 요청의 `reasoning_effort`로 전달합니다.
@@ -190,12 +197,12 @@ python -m pip install -r requirements.txt
 - Qwen3.8의 화면상 **Extra High**는 실제 서버가 허용하는 API 값인 `xhigh`로 전송됩니다.
 - 입력창의 Reasoning 메뉴에서 이전 assistant 응답의 `reasoning_content`를 다음 요청에 포함할지 선택할 수 있습니다.
 - Reasoning 생성 중에는 최근 내용이 약 5줄 높이로 스트리밍되고, 완료 후에는 실제 측정한 소요 시간을 `Thought for …` 또는 `… 동안 생각함`으로 표시합니다.
-- 모델 감지는 `/models`를 조회한 뒤 잘 알려진 reasoning 모델 이름을 기준으로 기능을 추정합니다. 호환 API에 표준 capability 필드가 없으므로 설정에서 언제든 수동으로 덮어쓸 수 있습니다.
+- OpenAI 모델 감지는 `/models` 메타데이터와 잘 알려진 reasoning 모델 이름을 사용합니다. LM Studio는 `/api/v1/models`가 제공하는 `capabilities.reasoning.allowed_options`를 우선합니다. 설정에서 언제든 수동으로 덮어쓸 수 있습니다.
 - `/models`가 반환한 항목은 Models 관리 목록에 모두 보존됩니다. 모델별 **메인 인터페이스에 표시** 토글을 끄면 모델 선택기와 Reasoning 설정 목록에서만 숨겨집니다.
 - 숨긴 서빙 모델은 커스텀 alias의 기반 모델 선택 목록에서도 제외됩니다.
 - 커스텀 Reasoning 템플릿의 시스템 프롬프트는 모델 프롬프트를 `Replace`, `Prepend`, `Append`하는 세 가지 방식으로 조합할 수 있습니다.
 - 커스텀 모델은 별도 모델을 복제하지 않는 alias입니다. 표시 이름과 ID, 시스템 프롬프트만 독립적으로 가지며 요청은 기반 모델의 ID로 전송됩니다.
-- 일반 설정의 **On demand**를 켜면 각 추론 요청 전에 서버의 `/api/inference/load`를 호출해 선택한 모델을 먼저 로드합니다. `repo:variant` 형식의 모델 ID는 `model_path`와 `gguf_variant`로 나누어 전송합니다.
+- 일반 설정의 **On demand**를 켜면 각 추론 요청 전에 드라이버에 맞는 load API를 호출합니다. OpenAI 드라이버의 `repo:variant` 형식 ID는 `model_path`와 `gguf_variant`로 나누고, LM Studio에는 `model`과 선택적 `context_length`를 전송합니다.
 - 관리자 계정은 모델 선택 메뉴의 **로드된 모델 언로드** 버튼으로 서버의 현재 추론 모델을 메모리에서 내릴 수 있습니다. 모델 생성 중에는 실수로 활성 요청을 끊지 않도록 버튼이 비활성화됩니다.
 - 모델 및 Reasoning 선택기 하단의 **기본으로 사용**으로 다음 로그인/접속의 초기 모델과 추론 강도를 계정별로 저장할 수 있습니다. 기존 대화에서 **새 채팅**을 누르면 현재 선택은 유지됩니다.
 - 일반 설정에서 모델, alias, 가시성, Reasoning 프리셋과 기본 선택을 2-space JSON으로 내보내거나 다시 가져올 수 있습니다. 가져온 설정은 검증 후 즉시 저장됩니다.

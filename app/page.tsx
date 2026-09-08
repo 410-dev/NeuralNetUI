@@ -1,8 +1,8 @@
 "use client";
 
 import {
-  ArrowUp, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, CirclePlus, Copy, Download, FileJson,
-  FileText, GitBranch, ImagePlus, KeyRound, LoaderCircle, Menu, MessageSquarePlus, Pencil, Plus, RefreshCw,
+  ArrowUp, BrainCircuit, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CirclePlus, Copy, Download, FileJson,
+  FileText, GitBranch, GripVertical, ImagePlus, KeyRound, LoaderCircle, Menu, MessageSquarePlus, Pencil, Plus, RefreshCw,
   Search, Server, Settings2, SlidersHorizontal, Sparkles, Square, Trash2, UserRound, X, Globe2, Link2,
   LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload,
   Palette,
@@ -14,7 +14,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type {
-  ChatBranch, Conversation, ConversationSummary, ModelConfig, PublicConfig,
+  ChatBranch, ConnectionConfig, Conversation, ConversationSummary, ModelConfig, PublicConfig,
   ReasoningPreset, StoredAttachment, StoredMessage, Locale, AccountInfo, UserSummary, EnabledTools, ToolEvent, MultipleChoiceQuestion, ToolSettings,
 } from "@/lib/types";
 import { advertisedContextWindowTokens, effectiveContextWindowTokens } from "@/lib/model-context";
@@ -27,6 +27,7 @@ import { parseModelSettings, serializeModelSettings } from "@/lib/model-settings
 import { copyTextToClipboard } from "@/lib/client-clipboard";
 import { hasMobileComposerInput, shouldSubmitComposerOnEnter } from "@/lib/composer-keyboard";
 import { literalStrikethroughSource } from "@/lib/markdown-rendering";
+import { resolveConnectionModels } from "@/lib/connection-drivers";
 
 type SettingsTab = "general" | "appearance" | "connection" | "tools" | "models" | "reasoning" | "users" | "account";
 type AuthStatus = { setupRequired: boolean; authenticated: boolean; user: AccountInfo | null };
@@ -43,8 +44,8 @@ type QueuedPrompt = {
 type CompletionOptions = Omit<QueuedPrompt, "id" | "content" | "attachments">;
 type ChatJobSnapshot = { conversationId: string; branchId: string; status: "running" | "waiting" | "completed" | "stopped" | "error"; message: StoredMessage; error?: string };
 const emptyConfig: PublicConfig = {
-  server: { baseUrl: "http://localhost:8888/v1", apiKey: "", hasApiKey: false },
-  profile: { name: "Luke Song" },
+  connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", hasApiKey: false, models: [] }],
+  profile: { name: "" },
   preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true },
   toolSettings: { maxToolRounds: 8, maxAttachmentsPerMessage: 12, textDownloadLimitMb: 1, textCharacterLimit: 24_000, imageDownloadLimitMb: 10, imageUploadLimitMb: 20, pdfSizeLimitMb: 25, pdfPageLimit: 100, pdfTextCharacterLimit: 100_000, pdfVisionPageLimit: 6, pdfProcessingTimeoutSeconds: 30, temporaryFileTtlMinutes: 60, orphanUploadTtlHours: 24 },
   models: [],
@@ -65,7 +66,7 @@ const translations = {
     exportConversation: "Export conversation", exportDescription: "Export every branch as JSON, or the selected branch as Markdown.",
     includeReasoning: "Include reasoning", includeReasoningDesc: "Include model reasoning content in the export.", allBranches: "all branches",
     workspace: "Workspace", settings: "Settings", connection: "Connection", models: "Models", saveChanges: "Save changes", saving: "Saving…",
-    serverTitle: "OpenAI-compatible server", serverDesc: "Connect to the hosted API and discover every served model.", baseUrl: "Base URL",
+    serverTitle: "Model connections", serverDesc: "Add servers and drag them into priority order. The first server wins duplicate model identifiers.", baseUrl: "Base URL", connectionName: "Connection name", driver: "Driver", addConnection: "Add connection", removeConnection: "Remove connection", priorityHelp: "Highest priority", moveUp: "Move up", moveDown: "Move down",
     baseUrlHelp: "Include the API version path, usually /v1.", apiKey: "API key", savedKey: "Saved key ••••••••", requiredKey: "Required by the current server",
     apiKeyHelp: "The key is stored only on this server and is never returned to the browser.", displayName: "Display name",
     discover: "Discover models & capabilities", discoverDesc: "Calls GET /models and keeps every model returned by the server.", detecting: "Detecting…", detectModels: "Detect models",
@@ -99,7 +100,7 @@ const translations = {
     exportConversation: "대화 내보내기", exportDescription: "모든 브랜치를 JSON으로, 선택한 브랜치를 Markdown으로 내보냅니다.",
     includeReasoning: "Reasoning 포함", includeReasoningDesc: "내보내기에 모델의 reasoning 내용을 포함합니다.", allBranches: "모든 브랜치",
     workspace: "워크스페이스", settings: "설정", connection: "연결", models: "모델", saveChanges: "변경사항 저장", saving: "저장 중…",
-    serverTitle: "OpenAI 호환 서버", serverDesc: "호스팅된 API에 연결하고 서빙되는 모든 모델을 감지합니다.", baseUrl: "기본 URL",
+    serverTitle: "모델 서버 연결", serverDesc: "서버를 추가하고 드래그해 우선순위를 정합니다. 중복 모델 identifier는 가장 위 서버를 사용합니다.", baseUrl: "기본 URL", connectionName: "연결 이름", driver: "드라이버", addConnection: "연결 추가", removeConnection: "연결 삭제", priorityHelp: "최우선", moveUp: "위로 이동", moveDown: "아래로 이동",
     baseUrlHelp: "일반적으로 /v1을 포함한 API 버전 경로를 입력합니다.", apiKey: "API 키", savedKey: "저장된 키 ••••••••", requiredKey: "현재 서버에 API 키가 필요합니다",
     apiKeyHelp: "키는 이 서버에만 저장되며 브라우저로 다시 전송되지 않습니다.", displayName: "표시 이름",
     discover: "모델 및 기능 감지", discoverDesc: "GET /models를 호출하고 서버가 반환한 모든 모델을 보존합니다.", detecting: "감지 중…", detectModels: "모델 감지",
@@ -370,12 +371,13 @@ export default function Home() {
     }
     return new Map([...groups].map(([groupId, revisions]) => [groupId, [...revisions.values()]]));
   }, [conversation]);
-  const userFirstName = config.profile.name.trim().split(/\s+/)[0] || "there";
+  const userFirstName = config.profile.name.trim().split(/\s+/)[0];
   const greeting = useMemo(() => {
+    if (!config.account || !userFirstName) return locale === "ko" ? "안녕하세요." : "Hello";
     const hour = new Date().getHours();
     if (locale === "ko") return `${hour < 12 ? "좋은 아침이에요" : hour < 18 ? "좋은 오후예요" : "좋은 저녁이에요"}, ${userFirstName}님.`;
     return `Good ${hour < 12 ? "Morning" : hour < 18 ? "Afternoon" : "Evening"}, ${userFirstName}.`;
-  }, [userFirstName, locale]);
+  }, [config.account, userFirstName, locale]);
 
   async function refreshHistories() {
     const result = await fetch("/api/conversations").then((r) => r.json());
@@ -418,7 +420,7 @@ export default function Home() {
     if (isGenerating || unloadingModel) return;
     setUnloadingModel(true); setModelControlNotice(null);
     try {
-      const response = await fetch("/api/inference/unload", { method: "POST" });
+      const response = await fetch("/api/inference/unload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modelId: selectedModel?.id }) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || c.modelUnloadFailed);
       setModelControlNotice({ message: c.modelUnloaded, error: false });
@@ -807,7 +809,7 @@ export default function Home() {
           {searching && <input className="history-search" autoFocus value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder={c.searchChats} />}
           <div className="history-heading"><p className="section-label">{c.histories}</p><div>{conversation && <button onClick={() => setExportOpen(true)} title={c.exportChat} aria-label={c.exportChat}><Download size={15} /></button>}{histories.length > 0 && <button onClick={() => void deleteAllHistories()} title={c.deleteAllChats} aria-label={c.deleteAllChats}><Trash2 size={15} /></button>}</div></div>
           <div className="history-list">
-            {visibleHistory.map((item) => <div className={`history-row ${item.id === conversation?.id ? "active" : ""}`} key={item.id}><button className="history-item" onClick={() => loadConversation(item.id)}><span>{item.title}</span>{item.branchCount > 1 && <b><GitBranch size={11} />{item.branchCount}</b>}</button><button className="history-delete" onClick={() => void deleteHistory(item.id)} title={c.deleteChat} aria-label={`${c.deleteChat}: ${item.title}`}><Trash2 size={13} /></button></div>)}
+            {visibleHistory.map((item) => <div className={`history-row ${item.id === conversation?.id ? "active" : ""}`} key={item.id}><button className="history-item" onClick={() => loadConversation(item.id)}><span>{item.title}</span></button><button className="history-delete" onClick={() => void deleteHistory(item.id)} title={c.deleteChat} aria-label={`${c.deleteChat}: ${item.title}`}><Trash2 size={13} /></button></div>)}
             {!visibleHistory.length && <p className="history-empty">{c.historyEmpty}</p>}
           </div>
         </section>
@@ -1162,29 +1164,27 @@ function ExportDialog({ c, conversation, initialIncludeReasoning, onClose, onPre
 function SettingsPanel({ initial, onClose, onSaved, onLogout }: { initial: PublicConfig; onClose: () => void; onSaved: (config: PublicConfig) => void; onLogout: () => Promise<void> }) {
   const admin = initial.account?.role === "admin" || initial.account?.role === "superadmin";
   const firstEditableModel = initial.models.find((model) => !model.isAlias || model.ownerId === initial.account?.id) || initial.models[0];
-  const [draft, setDraft] = useState<PublicConfig>(structuredClone(initial)); const [tab, setTab] = useState<SettingsTab>("general"); const [activeModelId, setActiveModelId] = useState(firstEditableModel?.id || ""); const [saving, setSaving] = useState(false); const [detecting, setDetecting] = useState(false); const [notice, setNotice] = useState("");
+  const [draft, setDraft] = useState<PublicConfig>(structuredClone(initial)); const [tab, setTab] = useState<SettingsTab>("general"); const [activeModelId, setActiveModelId] = useState(firstEditableModel?.id || ""); const [saving, setSaving] = useState(false); const [detectingConnectionId, setDetectingConnectionId] = useState(""); const [notice, setNotice] = useState("");
   const activeModel = draft.models.find((model) => model.id === activeModelId);
   const c = copyFor(draft.preferences.language || "en");
   function updateModel(patch: Partial<ModelConfig>) { setDraft((current) => ({ ...current, models: current.models.map((model) => model.id === activeModelId ? { ...model, ...patch } : model) })); }
   async function save() { setSaving(true); setNotice(""); try { const response = await fetch("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft) }); const body = await response.json(); if (!response.ok) throw new Error(body.error); setDraft(body); onSaved(body); setNotice(c.saved); } catch (error) { setNotice(error instanceof Error ? error.message : "Save failed."); } finally { setSaving(false); } }
-  async function detect() {
-    setDetecting(true); setNotice("");
+  async function detect(connectionId: string) {
+    const target = draft.connections.find((connection) => connection.id === connectionId); if (!target) return;
+    setDetectingConnectionId(connectionId); setNotice("");
     try {
-      const response = await fetch("/api/models/detect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(draft.server) });
+      const response = await fetch("/api/models/detect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(target) });
       const body = await response.json(); if (!response.ok) throw new Error(body.error);
       const aliases = draft.models.filter((model) => model.isAlias);
       const detected: ModelConfig[] = body.models.map((model: ModelConfig) => {
         const baseIdentifier = model.sourceModel.split(":")[0];
-        const previous = draft.models.find((item) => !item.isAlias && item.sourceModel.split(":")[0] === baseIdentifier);
+        const previous = target.models.find((item) => !item.isAlias && item.sourceModel.split(":")[0] === baseIdentifier);
         return previous ? { ...model, name: previous.name, visible: previous.visible, description: previous.description, systemPrompt: previous.systemPrompt, reasoningSupported: previous.reasoningSupported, reasoningEfforts: previous.reasoningEfforts, reasoningPresets: previous.reasoningPresets, contextWindowTokens: previous.contextWindowTokens } : model;
       });
-      const refreshedAliases = aliases.map((alias) => {
-        const base = detected.find((model) => model.sourceModel === alias.sourceModel || model.id === alias.sourceModel);
-        return base ? { ...alias, apiContextWindowTokens: undefined } : alias;
-      });
-      setDraft((current) => ({ ...current, models: [...detected, ...refreshedAliases] })); setActiveModelId(detected[0]?.id || refreshedAliases[0]?.id || "");
+      setDraft((current) => { const connections = current.connections.map((connection) => connection.id === connectionId ? { ...connection, models: detected } : connection); return { ...current, connections, models: resolveConnectionModels(connections as ConnectionConfig[], aliases) }; });
+      setActiveModelId(detected[0]?.id || aliases[0]?.id || "");
       setNotice(`${body.models.length}${c.detectSaved}`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Connection failed."); } finally { setDetecting(false); }
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Connection failed."); } finally { setDetectingConnectionId(""); }
   }
   function addAlias() { const base = draft.models.find((model) => !model.isAlias && model.visible !== false); if (!base) { setNotice(c.detectFirst); return; } const alias: ModelConfig = { ...structuredClone(base), id: uid("alias"), name: draft.preferences.language === "ko" ? "새 커스텀 모델" : "New custom model", isAlias: true, visible: true, systemPrompt: "", contextWindowTokens: undefined, apiContextWindowTokens: undefined, ownerId: initial.account?.id, isPublic: false }; setDraft((current) => ({ ...current, models: [...current.models, alias] })); setActiveModelId(alias.id); setTab("models"); }
   function addPreset() { if (!activeModel) return; const preset: ReasoningPreset = { id: uid("preset"), name: draft.preferences.language === "ko" ? "새 템플릿" : "New template", kind: "custom", effort: activeModel.reasoningSupported ? activeModel.reasoningEfforts?.[0] || "medium" : "", systemPrompt: "", systemPromptMode: "append", ownerId: initial.account?.id }; updateModel({ reasoningPresets: [...activeModel.reasoningPresets, preset] }); }
@@ -1201,7 +1201,8 @@ function SettingsPanel({ initial, onClose, onSaved, onLogout }: { initial: Publi
       let imported: ReturnType<typeof parseModelSettings>;
       try { imported = parseModelSettings(await file.text()); }
       catch { throw new Error(c.invalidModelSettings); }
-      const next: PublicConfig = { ...draft, models: imported.models, preferences: { ...draft.preferences, defaultModelId: imported.defaults.modelId, defaultReasoningPresetId: imported.defaults.reasoningPresetId } };
+      const importedModels = imported.models.map((model) => model.isAlias ? model : { ...model, connectionId: draft.models.find((current) => !current.isAlias && (current.id === model.id || current.sourceModel === model.sourceModel))?.connectionId });
+      const next: PublicConfig = { ...draft, models: importedModels, preferences: { ...draft.preferences, defaultModelId: imported.defaults.modelId, defaultReasoningPresetId: imported.defaults.reasoningPresetId } };
       const response = await fetch("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) });
       const body = await response.json(); if (!response.ok) throw new Error(body.error || c.invalidModelSettings);
       setDraft(body); onSaved(body);
@@ -1211,7 +1212,7 @@ function SettingsPanel({ initial, onClose, onSaved, onLogout }: { initial: Publi
     } catch (error) { setNotice(error instanceof Error ? error.message : c.invalidModelSettings); }
     finally { setSaving(false); }
   }
-  return <div className="settings-layer" role="dialog" aria-modal="true" aria-label={c.settings}><button className="settings-backdrop" onClick={onClose} aria-label={c.cancel} /><section className="settings-panel"><header><div><span>{c.workspace}</span><h2>{c.settings}</h2></div><button onClick={onClose}><X size={20} /></button></header><div className="settings-body"><nav aria-label={c.settings}><button className={tab === "general" ? "active" : ""} onClick={() => setTab("general")}><Settings2 size={17} /> {c.general}</button><button className={tab === "appearance" ? "active" : ""} onClick={() => setTab("appearance")}><Palette size={17} /> {c.appearance}</button>{admin && <button className={tab === "connection" ? "active" : ""} onClick={() => setTab("connection")}><Server size={17} /> {c.connection}</button>}{admin && <button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><Wrench size={17} /> {c.toolsSettings}</button>}<button className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><SlidersHorizontal size={17} /> {c.models}</button><button className={tab === "reasoning" ? "active" : ""} onClick={openReasoning}><BrainCircuit size={17} /> Reasoning</button>{admin && <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}><Users size={17} /> {c.users}</button>}<button className={tab === "account" ? "active" : ""} onClick={() => setTab("account")}><UserRound size={17} /> {c.account}</button></nav><div className="settings-content">{tab === "general" && <GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving} />}{tab === "appearance" && <AppearanceSettings c={c} draft={draft} setDraft={setDraft} />}{tab === "connection" && admin && <ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detecting={detecting} />}{tab === "tools" && admin && <ToolsSettings c={c} draft={draft} setDraft={setDraft} />}{tab === "models" && <ModelSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account} />}{tab === "reasoning" && <ReasoningSettings c={c} draft={draft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account} />}{tab === "users" && admin && <UsersSettings c={c} />}{tab === "account" && <AccountSettings c={c} account={initial.account} onLogout={onLogout} />}</div></div><footer><span>{notice}</span><div><button className="secondary-button" onClick={onClose}>{c.cancel}</button>{tab !== "users" && tab !== "account" && <button className="save-button" onClick={save} disabled={saving}>{saving ? c.saving : c.saveChanges}</button>}</div></footer></section></div>;
+  return <div className="settings-layer" role="dialog" aria-modal="true" aria-label={c.settings}><button className="settings-backdrop" onClick={onClose} aria-label={c.cancel} /><section className="settings-panel"><header><div><span>{c.workspace}</span><h2>{c.settings}</h2></div><button onClick={onClose}><X size={20} /></button></header><div className="settings-body"><nav aria-label={c.settings}><button className={tab === "general" ? "active" : ""} onClick={() => setTab("general")}><Settings2 size={17} /> {c.general}</button><button className={tab === "appearance" ? "active" : ""} onClick={() => setTab("appearance")}><Palette size={17} /> {c.appearance}</button>{admin && <button className={tab === "connection" ? "active" : ""} onClick={() => setTab("connection")}><Server size={17} /> {c.connection}</button>}{admin && <button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><Wrench size={17} /> {c.toolsSettings}</button>}<button className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><SlidersHorizontal size={17} /> {c.models}</button><button className={tab === "reasoning" ? "active" : ""} onClick={openReasoning}><BrainCircuit size={17} /> Reasoning</button>{admin && <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}><Users size={17} /> {c.users}</button>}<button className={tab === "account" ? "active" : ""} onClick={() => setTab("account")}><UserRound size={17} /> {c.account}</button></nav><div className="settings-content">{tab === "general" && <GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving} />}{tab === "appearance" && <AppearanceSettings c={c} draft={draft} setDraft={setDraft} />}{tab === "connection" && admin && <ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} />}{tab === "tools" && admin && <ToolsSettings c={c} draft={draft} setDraft={setDraft} />}{tab === "models" && <ModelSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account} />}{tab === "reasoning" && <ReasoningSettings c={c} draft={draft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account} />}{tab === "users" && admin && <UsersSettings c={c} />}{tab === "account" && <AccountSettings c={c} account={initial.account} onLogout={onLogout} />}</div></div><footer><span>{notice}</span><div><button className="secondary-button" onClick={onClose}>{c.cancel}</button>{tab !== "users" && tab !== "account" && <button className="save-button" onClick={save} disabled={saving}>{saving ? c.saving : c.saveChanges}</button>}</div></footer></section></div>;
 }
 
 function ToolsSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>> }) {
@@ -1249,8 +1250,23 @@ function AppearanceSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicC
   return <div className="settings-section"><SectionTitle icon={<Palette size={19} />} title={c.appearanceTitle} description={c.appearanceDesc} /><div className="general-setting-card general-toggle-card"><div><strong>{c.showModelIdentifiers}</strong><small>{c.showModelIdentifiersHelp}</small></div><button role="switch" aria-checked={draft.preferences.showModelIdentifiers !== false} aria-label={c.showModelIdentifiers} className={`toggle ${draft.preferences.showModelIdentifiers !== false ? "on" : ""}`} onClick={() => togglePreference("showModelIdentifiers")}><i /></button></div><div className="general-setting-card general-toggle-card"><div><strong>{c.renderStrikethrough}</strong><small>{c.renderStrikethroughHelp}</small></div><button role="switch" aria-checked={draft.preferences.renderStrikethrough !== false} aria-label={c.renderStrikethrough} className={`toggle ${draft.preferences.renderStrikethrough !== false ? "on" : ""}`} onClick={() => togglePreference("renderStrikethrough")}><i /></button></div></div>;
 }
 
-function ConnectionSettings({ c, draft, setDraft, onDetect, detecting }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; onDetect: () => void; detecting: boolean }) {
-  return <div className="settings-section"><SectionTitle icon={<Server size={19} />} title={c.serverTitle} description={c.serverDesc} /><label className="field"><span>{c.baseUrl}</span><input value={draft.server.baseUrl} onChange={(event) => setDraft((current) => ({ ...current, server: { ...current.server, baseUrl: event.target.value } }))} placeholder="http://localhost:8888/v1" /><small>{c.baseUrlHelp}</small></label><label className="field"><span>{c.apiKey}</span><div className="field-with-icon"><KeyRound size={16} /><input type="password" value={draft.server.apiKey} onChange={(event) => setDraft((current) => ({ ...current, server: { ...current.server, apiKey: event.target.value } }))} placeholder={draft.server.hasApiKey ? c.savedKey : c.requiredKey} /></div><small>{c.apiKeyHelp}</small></label><label className="field compact"><span>{c.displayName}</span><input value={draft.profile.name} onChange={(event) => setDraft((current) => ({ ...current, profile: { name: event.target.value } }))} /></label><div className="connection-test"><div><strong>{c.discover}</strong><small>{c.discoverDesc}</small></div><button onClick={onDetect} disabled={detecting}><RefreshCw size={16} className={detecting ? "spin" : ""} />{detecting ? c.detecting : c.detectModels}</button></div></div>;
+function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionId }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; onDetect: (connectionId: string) => void; detectingConnectionId: string }) {
+  function replaceConnections(connections: PublicConfig["connections"]) { setDraft((current) => ({ ...current, connections, models: resolveConnectionModels(connections as ConnectionConfig[], current.models.filter((model) => model.isAlias)) })); }
+  function patchConnection(id: string, patch: Partial<PublicConfig["connections"][number]>) { replaceConnections(draft.connections.map((connection) => connection.id === id ? { ...connection, ...patch } : connection)); }
+  function addConnection() { replaceConnections([...draft.connections, { id: uid("connection"), name: "LM Studio", driver: "lmstudio", baseUrl: "http://localhost:1234", apiKey: "", hasApiKey: false, models: [] }]); }
+  function removeConnection(id: string) { if (draft.connections.length < 2) return; replaceConnections(draft.connections.filter((connection) => connection.id !== id)); }
+  function moveConnection(sourceId: string, targetId: string) { if (!sourceId || sourceId === targetId) return; const next = [...draft.connections]; const from = next.findIndex((item) => item.id === sourceId); const to = next.findIndex((item) => item.id === targetId); if (from < 0 || to < 0) return; const [moved] = next.splice(from, 1); next.splice(to, 0, moved); replaceConnections(next); }
+  function nudgeConnection(index: number, offset: number) { const target = index + offset; if (target < 0 || target >= draft.connections.length) return; const next = [...draft.connections]; [next[index], next[target]] = [next[target], next[index]]; replaceConnections(next); }
+  return <div className="settings-section wide"><SectionTitle icon={<Server size={19} />} title={c.serverTitle} description={c.serverDesc} action={<button className="subtle-action" onClick={addConnection}><Plus size={16} /> {c.addConnection}</button>} />
+    <label className="field compact"><span>{c.displayName}</span><input value={draft.profile.name} onChange={(event) => setDraft((current) => ({ ...current, profile: { name: event.target.value } }))} /></label>
+    <div className="connection-list">{draft.connections.map((connection, index) => { const detecting = detectingConnectionId === connection.id; return <article className="connection-card" key={connection.id} draggable onDragStart={(event) => event.dataTransfer.setData("text/plain", connection.id)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); moveConnection(event.dataTransfer.getData("text/plain"), connection.id); }}>
+      <div className="connection-card-head"><span className="connection-grip" title={c.priorityHelp}><GripVertical size={18} /></span><strong>{index + 1}. {connection.name}</strong>{index === 0 && <em>{c.priorityHelp}</em>}<button aria-label={c.moveUp} title={c.moveUp} disabled={index === 0} onClick={() => nudgeConnection(index, -1)}><ChevronUp size={15} /></button><button aria-label={c.moveDown} title={c.moveDown} disabled={index === draft.connections.length - 1} onClick={() => nudgeConnection(index, 1)}><ChevronDown size={15} /></button><button aria-label={c.removeConnection} title={c.removeConnection} disabled={draft.connections.length < 2} onClick={() => removeConnection(connection.id)}><Trash2 size={15} /></button></div>
+      <div className="form-grid"><label className="field"><span>{c.connectionName}</span><input value={connection.name} onChange={(event) => patchConnection(connection.id, { name: event.target.value })} /></label><label className="field"><span>{c.driver}</span><select value={connection.driver} onChange={(event) => { const driver = event.target.value as "openai" | "lmstudio"; patchConnection(connection.id, { driver, baseUrl: driver === "lmstudio" && connection.baseUrl === "http://localhost:8888/v1" ? "http://localhost:1234" : connection.baseUrl }); }}><option value="openai">OpenAI API</option><option value="lmstudio">LM Studio</option></select></label></div>
+      <label className="field"><span>{c.baseUrl}</span><input value={connection.baseUrl} onChange={(event) => patchConnection(connection.id, { baseUrl: event.target.value })} placeholder={connection.driver === "lmstudio" ? "http://localhost:1234" : "http://localhost:8888/v1"} /><small>{connection.driver === "lmstudio" ? "LM Studio REST API /api/v1" : c.baseUrlHelp}</small></label>
+      <label className="field"><span>{c.apiKey}</span><div className="field-with-icon"><KeyRound size={16} /><input type="password" value={connection.apiKey} onChange={(event) => patchConnection(connection.id, { apiKey: event.target.value })} placeholder={connection.hasApiKey ? c.savedKey : connection.driver === "lmstudio" ? "Optional" : c.requiredKey} /></div><small>{c.apiKeyHelp}</small></label>
+      <div className="connection-test"><div><strong>{c.discover}</strong><small>{connection.models.length} {c.models} · {c.discoverDesc}</small></div><button onClick={() => onDetect(connection.id)} disabled={Boolean(detectingConnectionId)}><RefreshCw size={16} className={detecting ? "spin" : ""} />{detecting ? c.detecting : c.detectModels}</button></div>
+    </article>; })}</div>
+  </div>;
 }
 
 type ModelEditorProps = { draft: PublicConfig; activeModelId: string; setActiveModelId: (id: string) => void; activeModel?: ModelConfig };

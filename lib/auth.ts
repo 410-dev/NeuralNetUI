@@ -122,8 +122,9 @@ export async function createFirstUser(input: { username?: string; displayName?: 
     const storedConfig = db.prepare("SELECT value FROM app_config WHERE id = 1").get() as { value: string } | undefined;
     if (storedConfig) {
       try {
-        const config = JSON.parse(storedConfig.value) as { models?: Array<{ isAlias?: boolean; ownerId?: string; isPublic?: boolean; reasoningPresets?: Array<{ kind?: string; ownerId?: string }> }> };
-        for (const model of config.models || []) {
+        type StoredModel = { isAlias?: boolean; ownerId?: string; isPublic?: boolean; reasoningPresets?: Array<{ kind?: string; ownerId?: string }> };
+        const config = JSON.parse(storedConfig.value) as { models?: StoredModel[]; connections?: Array<{ models?: StoredModel[] }> };
+        for (const model of [...(config.models || []), ...(config.connections || []).flatMap((connection) => connection.models || [])]) {
           if (model.isAlias && !model.ownerId) { model.ownerId = id; model.isPublic = false; }
           for (const preset of model.reasoningPresets || []) if (preset.kind === "custom" && !preset.ownerId) preset.ownerId = id;
         }
@@ -193,12 +194,10 @@ export async function deleteManagedUser(actor: AuthUser, userId: string) {
     const stored = db.prepare("SELECT value FROM app_config WHERE id = 1").get() as { value: string } | undefined;
     if (stored) {
       try {
+        type StoredModel = { isAlias?: boolean; ownerId?: string; reasoningPresets?: Array<{ ownerId?: string }> };
         const config = JSON.parse(stored.value) as {
-          models?: Array<{
-            isAlias?: boolean;
-            ownerId?: string;
-            reasoningPresets?: Array<{ ownerId?: string }>;
-          }>;
+          models?: StoredModel[];
+          connections?: Array<{ models?: StoredModel[] }>;
         };
         if (Array.isArray(config.models)) {
           config.models = config.models
@@ -209,9 +208,10 @@ export async function deleteManagedUser(actor: AuthUser, userId: string) {
                 ? model.reasoningPresets.filter((preset) => preset.ownerId !== userId)
                 : model.reasoningPresets,
             }));
-          db.prepare("UPDATE app_config SET value = ?, updated_at = ? WHERE id = 1")
-            .run(JSON.stringify(config), new Date().toISOString());
         }
+        for (const connection of config.connections || []) if (Array.isArray(connection.models)) connection.models = connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets?.filter((preset) => preset.ownerId !== userId) }));
+        db.prepare("UPDATE app_config SET value = ?, updated_at = ? WHERE id = 1")
+          .run(JSON.stringify(config), new Date().toISOString());
       } catch { /* invalid config is recovered by the config module */ }
     }
 

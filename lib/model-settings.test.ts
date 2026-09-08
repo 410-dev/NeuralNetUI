@@ -13,6 +13,7 @@ const model: ModelConfig = {
   reasoningEfforts: ["low", "high"],
   reasoningPresets: [{ id: "high", name: "High", kind: "builtin", effort: "high", ownerId: "private-preset-owner" }],
   ownerId: "private-model-owner",
+  connectionId: "private-connection-id",
 };
 
 test("model settings export is two-space JSON and strips ownership metadata", () => {
@@ -20,6 +21,7 @@ test("model settings export is two-space JSON and strips ownership metadata", ()
   assert.match(text, /\n  "version": 1,/);
   assert.match(text, /\n    "modelId": "served-model"/);
   assert.doesNotMatch(text, /ownerId/);
+  assert.doesNotMatch(text, /connectionId|private-connection-id/);
   assert.equal(parseModelSettings(text).models[0].reasoningPresets[0].effort, "high");
 });
 

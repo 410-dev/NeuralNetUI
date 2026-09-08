@@ -40,7 +40,7 @@ const exportSchema = z.object({
 export type ModelSettingsExport = z.infer<typeof exportSchema>;
 
 function portableModel(model: ModelConfig): ModelSettingsExport["models"][number] {
-  const { ownerId: _ownerId, reasoningPresets, ...rest } = model;
+  const { ownerId: _ownerId, connectionId: _connectionId, reasoningPresets, ...rest } = model;
   return {
     ...rest,
     reasoningPresets: reasoningPresets.map(({ ownerId: _presetOwnerId, ...preset }) => preset),
