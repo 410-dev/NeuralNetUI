@@ -30,3 +30,4 @@
 - Deleted conversations/users discard their chat jobs. Background saves validate task ownership and conversation existence inside the SQLite transaction. Terminal jobs release full histories and expire after 60 seconds, with at most 64 terminal jobs retained.
 - Persisted tool call/result pairs are restored for follow-up requests. Interrupted questions recover on conversation read; active questions can be stopped. SSE errors and incomplete streams are surfaced, and failed client saves restore the unsent draft.
 - LM Studio loaded-instance context limits are reflected in the UI, and shared loads have independently cancellable waiters; the upstream load is cancelled when all waiters leave.
+- The 1.8.1 x64 MSI was rebuilt and its Windows Installer metadata verified on 2026-09-08. Artifact: `installer/output/NeuralNetUI-1.8.1-x64.msi`; it is currently unsigned (Authenticode `NotSigned`).
