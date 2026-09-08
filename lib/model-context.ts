@@ -20,6 +20,10 @@ export function inferApiContextWindowTokens(record: Record<string, unknown>): nu
   const capabilities = objectValue(record, "capabilities");
   const limits = objectValue(record, "limits");
   const candidates = [
+    ...(Array.isArray(record.loaded_instances) ? record.loaded_instances.flatMap(instance => {
+      if (!instance || typeof instance !== "object") return [];
+      return [objectValue(instance as Record<string, unknown>, "config")?.context_length];
+    }) : []),
     record.context_window_tokens,
     record.context_window,
     record.context_length,

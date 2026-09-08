@@ -1,3 +1,7 @@
+import { registerChatDisposal } from "./chat-disposal";
+import { reasoningEffort } from "./model-edits";
+import { restoreToolHistory, settlePendingTools } from "./conversation-messages";
+import { readSsePayload } from "./stream-protocol";
 import { canUseModel, readConfig } from "./config";
 import { readConversation, writeConversation } from "./conversations";
 import { readUploadModelContent } from "./uploads";
@@ -9,7 +13,7 @@ import { closeBrowserSessions, executeBrowserTool } from "./browser-tool";
 import type { Conversation, StoredMessage, ToolEvent, ToolSettings } from "./types";
 import type { ModelContentPart } from "./document-processing";
 
-type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; attachments?: Array<{ id: string }> };
+type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
 type UpstreamMessage = { role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string };
 type ToolCall = { id: string; function: { name: string; arguments: string }; type: "function" };
 type JobStatus = "running" | "waiting" | "completed" | "stopped" | "error";
@@ -45,6 +49,9 @@ type ChatJob = {
   subscribers: Set<ReadableStreamDefaultController<Uint8Array>>;
   waiting: Map<string, (value: unknown) => void>;
   error?: string;
+  discarded?: boolean;
+  unregister?: () => void;
+  expiryTimer?: ReturnType<typeof setTimeout>;
   persistTimer?: ReturnType<typeof setTimeout>;
   broadcastTimer?: ReturnType<typeof setTimeout>;
 };
@@ -81,6 +88,7 @@ function send(controller: ReadableStreamDefaultController<Uint8Array>, value: Ch
 }
 
 function broadcast(job: ChatJob, immediate = false) {
+  if (job.discarded) return;
   if (job.status === "running" || job.status === "waiting") schedulePersist(job);
   if (!immediate) {
     if (!job.broadcastTimer) job.broadcastTimer = setTimeout(() => { job.broadcastTimer = undefined; broadcast(job, true); }, 80);
@@ -107,7 +115,7 @@ function conversationWithMessage(job: ChatJob) {
 async function persist(job: ChatJob) {
   if (job.persistTimer) { clearTimeout(job.persistTimer); job.persistTimer = undefined; }
   job.conversation = conversationWithMessage(job);
-  await writeConversation(job.conversation, job.userId);
+  await writeConversation(job.conversation, job.userId, () => !job.discarded && jobs.get(job.input.conversationId) === job);
 }
 
 function schedulePersist(job: ChatJob) {
@@ -123,15 +131,15 @@ function finishSubscribers(job: ChatJob) {
 }
 
 async function upstreamMessages(input: StartChatJobInput, userId: string, systemPrompt: string, settings: ToolSettings): Promise<UpstreamMessage[]> {
-  const converted = await Promise.all(input.messages.filter((message) => message.content || message.attachments?.length).map(async (message) => {
+  const converted = await Promise.all(input.messages.filter((message) => message.content || message.attachments?.length || message.toolEvents?.length).map(async (message) => {
     const attachments = message.role === "user" ? message.attachments || [] : [];
     const content = attachments.length ? [
       ...(message.content ? [{ type: "text", text: message.content }] : []),
       ...(await Promise.all(attachments.map(({ id }) => readUploadModelContent(id, userId, settings)))).flat(),
     ] : message.content;
-    return { role: message.role, content, ...(input.sendReasoning && message.role === "assistant" && message.reasoning_content ? { reasoning_content: message.reasoning_content } : {}) };
+    return restoreToolHistory({ role: message.role, content, toolEvents: message.toolEvents, ...(input.sendReasoning && message.role === "assistant" && message.reasoning_content ? { reasoning_content: message.reasoning_content } : {}) });
   }));
-  return [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...converted];
+  return [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...converted.flat()];
 }
 
 async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>) {
@@ -144,9 +152,12 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
   const calls = new Map<number, ToolCall>(); let content = ""; let reasoning = ""; let usage: Record<string, number | undefined> = {};
   let visibleStarted: number | undefined; let visibleEnded: number | undefined; let reasoningStarted: number | undefined; let reasoningEnded: number | undefined;
+  let terminated = false; let sawPayload = false; let finishReason = false;
   const readPayload = (payload: Record<string, unknown>) => {
+    sawPayload = true;
     usage = { ...usage, ...usageFrom(payload) };
-    const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown> }> : [];
+    const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }> : [];
+    if (choices[0]?.finish_reason) finishReason = true;
     const delta = choices[0]?.delta || {};
     const contentDelta = typeof delta.content === "string" ? delta.content : "";
     const reasoningDelta = typeof (delta.reasoning_content ?? delta.reasoning) === "string" ? String(delta.reasoning_content ?? delta.reasoning) : "";
@@ -169,17 +180,24 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
       });
     }
   };
-  while (true) {
-    const { done, value } = await reader.read(); if (done) break;
-    buffer += decoder.decode(value, { stream: true }); const records = buffer.split(/\r?\n\r?\n/); buffer = records.pop() || "";
-    for (const record of records) for (const line of record.split(/\r?\n/)) {
-      if (!line.startsWith("data:")) continue; const data = line.slice(5).trim(); if (!data || data === "[DONE]") continue;
-      try { readPayload(JSON.parse(data)); } catch { /* keep-alive or vendor extension */ }
+  const consume = (record: string) => {
+    const data = record.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n").trim();
+    if (!data) return;
+    const payload = readSsePayload(data);
+    if (payload === "done") terminated = true;
+    else readPayload(payload);
+  };
+  try {
+    while (!terminated) {
+      const { done, value } = await reader.read(); if (done) break;
+      buffer += decoder.decode(value, { stream: true }); const records = buffer.split(/\r?\n\r?\n/); buffer = records.pop() || "";
+      for (const record of records) { consume(record); if (terminated) break; }
     }
-  }
-  if (buffer.trim()) for (const line of buffer.split(/\r?\n/)) {
-    if (!line.startsWith("data:")) continue; const data = line.slice(5).trim(); if (!data || data === "[DONE]") continue;
-    try { readPayload(JSON.parse(data)); } catch { /* ignore */ }
+    buffer += decoder.decode();
+    if (!terminated && buffer.trim()) consume(buffer);
+    if (!sawPayload || !terminated && !finishReason) throw new Error("The model response stream ended before completion.");
+  } finally {
+    await reader.cancel().catch(() => undefined); reader.releaseLock();
   }
   return {
     content, reasoning, calls: [...calls.values()], usage,
@@ -205,10 +223,12 @@ function updateToolEvent(job: ChatJob, id: string, patch: Partial<ToolEvent>) {
 }
 
 function waitForBrowser(job: ChatJob, call: ToolCall) {
+  job.controller.signal.throwIfAborted();
   job.status = "waiting"; updateToolEvent(job, call.id, { status: "waiting" });
   return new Promise<unknown>((resolve, reject) => {
-    job.waiting.set(call.id, (value) => { job.waiting.delete(call.id); job.status = "running"; resolve(value); });
-    job.controller.signal.addEventListener("abort", () => reject(new DOMException("Stopped", "AbortError")), { once: true });
+    const abort = () => { job.waiting.delete(call.id); reject(new DOMException("Stopped", "AbortError")); };
+    job.waiting.set(call.id, (value) => { job.controller.signal.removeEventListener("abort", abort); job.waiting.delete(call.id); job.status = "running"; resolve(value); });
+    job.controller.signal.addEventListener("abort", abort, { once: true });
   });
 }
 
@@ -253,7 +273,8 @@ async function run(job: ChatJob) {
     if (!model || !canUseModel(model, { id: job.userId } as never)) throw new Error("The selected model is unavailable.");
     const connection = connectionForModel(config.connections, model);
     if (!connection) throw new Error("The selected model's connection is unavailable.");
-    const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId);
+    const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId && (item.kind === "builtin" || !item.ownerId || item.ownerId === job.userId));
+    const effort = reasoningEffort(model, preset);
     const modelPrompt = model.systemPrompt?.trim() || ""; const presetPrompt = preset?.kind === "custom" ? preset.systemPrompt?.trim() || "" : "";
     let systemPrompt = modelPrompt;
     if (presetPrompt) systemPrompt = preset?.systemPromptMode === "replace" ? presetPrompt : preset?.systemPromptMode === "prepend" ? [presetPrompt, modelPrompt].filter(Boolean).join("\n\n") : [modelPrompt, presetPrompt].filter(Boolean).join("\n\n");
@@ -275,7 +296,7 @@ async function run(job: ChatJob) {
     };
     const tools = toolDefinitions(enabled);
     for (let turn = 0; turn < config.toolSettings.maxToolRounds; turn += 1) {
-      const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, stream: true, stream_options: { include_usage: true }, ...(preset?.effort ? { reasoning_effort: preset.effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
+      const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
       const result = await streamTurn(job, body, headers); reasoningSeconds += result.reasoningDurationSeconds;
       if (!result.calls.length) {
         job.message = { ...job.message, ...result.usage, reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,
@@ -303,25 +324,49 @@ async function run(job: ChatJob) {
     throw new Error("The model repeated tool calls too many times.");
   } catch (error) {
     const stopped = (error as Error).name === "AbortError" || job.controller.signal.aborted;
+    job.message = settlePendingTools([job.message])[0];
     job.status = stopped ? "stopped" : "error"; job.error = stopped ? undefined : error instanceof Error ? error.message : "Chat generation failed.";
     if (job.message.reasoning) job.message.reasoningDurationSeconds ||= Math.max(1, reasoningSeconds);
     await persist(job).catch(() => undefined); broadcast(job, true); finishSubscribers(job);
   } finally {
-    await closeBrowserSessions(`${job.userId}:${job.input.conversationId}:${job.message.id}`);
+    await closeBrowserSessions(`${job.userId}:${job.input.conversationId}:${job.message.id}`).catch(() => undefined);
+    job.waiting.clear();
+    job.input = { ...job.input, messages: [] };
+    job.conversation = { ...job.conversation, branches: [] };
+    if (!job.discarded && jobs.get(job.input.conversationId) === job) {
+      job.expiryTimer = setTimeout(() => discardJob(job), 60_000);
+      job.expiryTimer.unref();
+      const completed = [...jobs.values()].filter(item => item.expiryTimer);
+      for (const stale of completed.slice(0, Math.max(0, completed.length - 64))) discardJob(stale);
+    }
   }
 }
 
 export async function startChatJob(input: StartChatJobInput, userId: string) {
-  const existing = jobs.get(input.conversationId);
+  let existing = jobs.get(input.conversationId);
   if (existing && existing.userId === userId && ["running", "waiting"].includes(existing.status)) return snapshot(existing);
   const conversation = await readConversation(input.conversationId, userId);
   if (!conversation) throw new Error("Conversation not found.");
   if (!conversation.branches.some((branch) => branch.id === input.branchId)) throw new Error("Conversation branch not found.");
+  existing = jobs.get(input.conversationId);
+  if (existing && existing.userId === userId && ["running", "waiting"].includes(existing.status)) return snapshot(existing);
   const job: ChatJob = {
     userId, input, conversation, status: "running", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
     message: { id: input.assistantMessageId, revisionGroupId: input.revisionGroupId, role: "assistant", content: "", reasoning: "", toolEvents: [], createdAt: new Date().toISOString() },
   };
-  jobs.set(input.conversationId, job); void run(job); return snapshot(job);
+  if (existing) discardJob(existing);
+  jobs.set(input.conversationId, job);
+  job.unregister = registerChatDisposal(input.conversationId, userId, () => discardJob(job));
+  void run(job); return snapshot(job);
+}
+
+function discardJob(job: ChatJob) {
+  job.discarded = true; job.controller.abort();
+  if (job.persistTimer) clearTimeout(job.persistTimer);
+  if (job.broadcastTimer) clearTimeout(job.broadcastTimer);
+  if (job.expiryTimer) clearTimeout(job.expiryTimer);
+  finishSubscribers(job); job.waiting.clear(); job.unregister?.();
+  if (jobs.get(job.input.conversationId) === job) jobs.delete(job.input.conversationId);
 }
 
 export function getChatJob(conversationId: string, userId: string) {

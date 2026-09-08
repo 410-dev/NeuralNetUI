@@ -11,6 +11,7 @@
 - Present connections, models, and reasoning presets as reorderable selections with drag-and-drop plus adjacent up/down controls; the saved order must match the chat pickers.
 - Limit drag initiation to dedicated handles whenever a reorderable item contains editable text or form controls.
 - Keep long settings sidebars independently scrollable while the selected item's editor remains visible.
+- Settings dialogs trap keyboard focus, make the background inert, close with Escape, and restore focus to the opener. Icon controls and switches have accessible names.
 
 ## Tool activity
 
@@ -27,4 +28,5 @@
 - Let the model choose single selection, multiple selection, or ranked selection according to the question.
 - Render submitted question-and-answer pairs as right-aligned user message bubbles before the model continues.
 - Keep the regular message composer visually secondary and unavailable while an answer is required.
+- Keep generation cancellation available while a question is waiting; restore ordinary input when the task stops or is no longer available.
 - Use motion only for active status indicators; completed and failed states must remain legible without animation.

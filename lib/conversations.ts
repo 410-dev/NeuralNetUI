@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { ChatBranch, Conversation, ConversationSummary, StoredAttachment, StoredMessage } from "./types";
 import { completeStorageMigration, dataDir, db, storageMigrationCompleted } from "./database";
 import { deleteUploadFiles, ensureLegacyUploadsMigrated } from "./uploads";
+import { discardChatJobs } from "./chat-disposal";
 
 const messageSchema = z.object({
   id: z.string().min(1),
@@ -96,9 +97,10 @@ const insertMessage = db.prepare(`
 const insertBranchMessage = db.prepare("INSERT INTO branch_messages(branch_id, message_id, position) VALUES (?, ?, ?)");
 const insertAttachment = db.prepare("INSERT OR IGNORE INTO message_attachments(message_id, upload_id, position) VALUES (?, ?, ?)");
 
-function storeConversation(record: Conversation, userId: string) {
+function storeConversation(record: Conversation, userId: string, guard?: () => boolean) {
   db.transaction(() => {
     const owner = db.prepare("SELECT user_id FROM conversations WHERE id = ?").get(record.id) as { user_id: string | null } | undefined;
+    if (guard && (!guard() || !owner)) throw new Error("Conversation was deleted or its task was replaced.");
     if (owner && owner.user_id !== userId) throw new Error("Conversation not found.");
     db.prepare("DELETE FROM conversations WHERE id = ? AND user_id = ?").run(record.id, userId);
     insertConversation.run({ ...record, userId, reasoningPresetId: record.reasoningPresetId ?? null });
@@ -290,14 +292,14 @@ export async function readConversation(id: string, userId: string): Promise<Conv
   });
 }
 
-export async function writeConversation(input: unknown, userId: string): Promise<Conversation> {
+export async function writeConversation(input: unknown, userId: string, guard?: () => boolean): Promise<Conversation> {
   await Promise.all([ensureLegacyConversationsMigrated(userId), ensureLegacyUploadsMigrated()]);
   const parsed = conversationSchema.parse(input);
   const attachmentIds = parsed.branches.flatMap((branch) => branch.messages.flatMap((message) => message.attachments?.map((attachment) => attachment.id) || []));
   for (const uploadId of new Set(attachmentIds)) {
     if (!db.prepare("SELECT 1 FROM uploads WHERE id = ? AND user_id = ?").get(uploadId, userId)) throw new Error("Conversation contains an inaccessible attachment.");
   }
-  storeConversation(parsed, userId);
+  storeConversation(parsed, userId, guard);
   return parsed;
 }
 
@@ -320,6 +322,7 @@ export async function deleteConversation(id: string, userId: string) {
     for (const { id: uploadId } of orphaned) db.prepare("DELETE FROM uploads WHERE id = ?").run(uploadId);
     return orphaned.map(({ id: uploadId }) => uploadId);
   })();
+  discardChatJobs(userId, id);
   await Promise.all(orphanedIds.map((uploadId) => deleteUploadFiles(uploadId)));
 }
 

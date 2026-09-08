@@ -22,8 +22,8 @@ export function lmStudioEndpoint(baseUrl: string, action: "load" | "unload") {
   return `${connectionRoot(baseUrl)}/api/v1/models/${action}`;
 }
 
-export function connectionHeaders(connection: Pick<ConnectionConfig, "apiKey">, fallbackKey = "") {
-  const apiKey = connection.apiKey || fallbackKey;
+export function connectionHeaders(connection: Pick<ConnectionConfig, "apiKey" | "clearApiKey">, fallbackKey = "") {
+  const apiKey = connection.clearApiKey ? "" : connection.apiKey || fallbackKey;
   return { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) };
 }
 
@@ -39,7 +39,8 @@ export function resolveConnectionModels(connections: ConnectionConfig[], aliases
   }
   for (const alias of aliases.filter((model) => model.isAlias)) {
     const base = models.find((model) => model.sourceModel === alias.sourceModel || model.id === alias.sourceModel);
-    models.push({ ...alias, connectionId: alias.connectionId || base?.connectionId });
+    const connection = connectionForModel(connections, alias);
+    models.push({ ...alias, connectionId: connection?.id || base?.connectionId });
   }
   return applyPreferredOrder(models, preferredOrder);
 }
@@ -47,7 +48,13 @@ export function resolveConnectionModels(connections: ConnectionConfig[], aliases
 export function connectionForModel(connections: ConnectionConfig[], model: ModelConfig) {
   if (model.connectionId) {
     const direct = connections.find((connection) => connection.id === model.connectionId);
-    if (direct) return direct;
+    if (direct && (!model.isAlias || direct.models.some(candidate => candidate.sourceModel === model.sourceModel || candidate.id === model.sourceModel))) return direct;
   }
   return connections.find((connection) => connection.models.some((candidate) => candidate.sourceModel === model.sourceModel || candidate.id === model.sourceModel || candidate.id === model.id));
+}
+
+/** Merge unsaved model edits before rebuilding the connection-derived picker list. */
+export function reconcileConnectionEdits<T extends ConnectionConfig>(connections: T[], models: ModelConfig[]): T[] {
+  const edits = new Map(models.filter(m => !m.isAlias && m.connectionId).map(m => [`${m.connectionId}\0${m.id}`, m]));
+  return connections.map(c => ({ ...c, models: c.models.map(m => ({ ...m, ...edits.get(`${c.id}\0${m.id}`), connectionId: c.id })) }));
 }

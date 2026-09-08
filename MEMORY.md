@@ -12,7 +12,7 @@
 - Client-side IDs use Web Crypto when available and a collision-resistant fallback on non-secure LAN/Tailscale HTTP origins where browsers hide Web Crypto.
 - Frontend design guidance lives in `design/MASTER.md`.
 - Per-user default model and reasoning preset are applied on a fresh app session; in-app New Chat preserves the current selection.
-- Admins can unload the inference server's currently loaded model from the model picker; the server-side proxy reads the active model identifier first, sends the required `model_path` JSON body, allows long GGUF teardown, keeps the configured API key out of the browser, and disables the action during local generation.
+- Admins can unload models from the picker even during generation. This is intentional: reducing inference-server load takes priority. Do not add a generation guard to either the UI or unload API.
 - User message bubbles use a 17px desktop font and a readable 16px mobile font.
 - General settings can export/import validated `neuralnetui-model-settings` v1 JSON with two-space indentation; ownership metadata is never exported and imports save immediately.
 - Assistant Markdown supports KaTeX inline and display math. Appearance settings persist per user and control model identifier visibility plus both single- and double-tilde strikethrough rendering; disabling strikethrough preserves the source tildes.
@@ -26,4 +26,7 @@
 - LM Studio discovery and model management use its native `/api/v1` REST API. Chat streaming uses LM Studio's OpenAI-compatible endpoint to retain custom tool calls and full assistant history.
 - LM Studio on-demand loading checks `loaded_instances` before calling the load endpoint and coalesces concurrent loads for the same model, preventing duplicate instances across messages.
 - Current release version: 1.8.1.
-- Unresolved UI/LM Studio audit findings and reproduction evidence are recorded in `docs/audits/2026-09-08-ui-lmstudio.md`; the audit is documentation only, not a set of fixes.
+- The UI/LM Studio audit in `docs/audits/2026-09-08-ui-lmstudio.md` has 14 addressed findings; #7 is intentional behavior per the user. Settings preserve protected presets and unsaved model edits; aliases resolve their base connection; API-key removal explicitly disables fallback credentials.
+- Deleted conversations/users discard their chat jobs. Background saves validate task ownership and conversation existence inside the SQLite transaction. Terminal jobs release full histories and expire after 60 seconds, with at most 64 terminal jobs retained.
+- Persisted tool call/result pairs are restored for follow-up requests. Interrupted questions recover on conversation read; active questions can be stopped. SSE errors and incomplete streams are surfaced, and failed client saves restore the unsent draft.
+- LM Studio loaded-instance context limits are reflected in the UI, and shared loads have independently cancellable waiters; the upstream load is cancelled when all waiters leave.

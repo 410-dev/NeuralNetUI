@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { db } from "./database";
+import { discardChatJobs } from "./chat-disposal";
 import { deleteUploadFiles } from "./uploads";
 import type { AccountInfo, UserRole, UserSummary } from "./types";
 
@@ -219,6 +220,7 @@ export async function deleteManagedUser(actor: AuthUser, userId: string) {
     if (!deleted.changes) throw new AuthError("최고 관리자 계정은 삭제할 수 없습니다.", 409);
   })();
 
+  discardChatJobs(userId);
   const cleanup = await Promise.allSettled(uploadIds.map((id) => deleteUploadFiles(id)));
   for (const result of cleanup) if (result.status === "rejected") console.error("Unable to remove deleted user's upload files", result.reason);
 }

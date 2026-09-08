@@ -42,3 +42,33 @@ test("concurrent on-demand requests share one LM Studio load operation", async (
   await Promise.all([ensureLmStudioModelLoaded(options), ensureLmStudioModelLoaded(options)]);
   assert.deepEqual(calls, ["GET", "POST"]);
 });
+
+test("cancelling either waiter does not abort the remaining caller", async () => {
+  for (const cancelled of [0, 1]) {
+    let finish!: () => void;
+    let upstreamSignal: AbortSignal | undefined;
+    const request = (async (_url: unknown, init: RequestInit) => {
+      upstreamSignal = init.signal!;
+      await new Promise<void>(resolve => { finish = resolve; });
+      return Response.json({ models: [{ key: "shared", loaded_instances: [{ id: "shared" }] }] });
+    }) as typeof fetch;
+    const controllers = [new AbortController(), new AbortController()];
+    const pending = controllers.map(controller => ensureLmStudioModelLoaded({ baseUrl: "http://localhost:1234", headers: {}, sourceModel: "shared", modelId: "shared", signal: controller.signal, request }));
+    controllers[cancelled].abort();
+    await assert.rejects(pending[cancelled], { name: "AbortError" });
+    assert.equal(upstreamSignal?.aborted, false);
+    finish(); await pending[1 - cancelled];
+  }
+});
+
+test("the upstream operation is cancelled when all callers leave", async () => {
+  let upstreamSignal: AbortSignal | undefined;
+  const request = (async (_url: unknown, init: RequestInit) => {
+    upstreamSignal = init.signal!;
+    return new Promise<Response>((_resolve, reject) => init.signal!.addEventListener("abort", () => reject(init.signal!.reason), { once: true }));
+  }) as typeof fetch;
+  const controller = new AbortController();
+  const pending = ensureLmStudioModelLoaded({ baseUrl: "http://localhost:1234", headers: {}, sourceModel: "alone", modelId: "alone", signal: controller.signal, request });
+  controller.abort(); await assert.rejects(pending, { name: "AbortError" });
+  assert.equal(upstreamSignal?.aborted, true);
+});

@@ -1,13 +1,21 @@
 import { NextResponse } from "next/server";
 import { deleteConversation, readConversation, writeConversation } from "@/lib/conversations";
 import { authErrorResponse, requireUser } from "@/lib/auth";
+import { getChatJob } from "@/lib/chat-runtime";
+import { settlePendingTools } from "@/lib/conversation-messages";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   let user; try { user = requireUser(request); } catch (error) { return authErrorResponse(error); }
-  const conversation = await readConversation(id, user.id);
+  let conversation = await readConversation(id, user.id);
+  const active = () => { const job = getChatJob(id, user.id); return job && (job.status === "running" || job.status === "waiting"); };
+  if (conversation && !active() && conversation.branches.some(branch => branch.messages.some(message => message.toolEvents?.some(event => event.status === "waiting" || event.status === "calling")))) {
+    const recovered = { ...conversation, branches: conversation.branches.map(branch => ({ ...branch, messages: settlePendingTools(branch.messages) })) };
+    await writeConversation(recovered, user.id, () => !active()).catch(() => undefined);
+    conversation = await readConversation(id, user.id);
+  }
   return conversation ? NextResponse.json(conversation) : NextResponse.json({ error: "대화를 찾지 못했습니다." }, { status: 404 });
 }
 

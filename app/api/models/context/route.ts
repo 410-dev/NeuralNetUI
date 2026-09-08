@@ -24,7 +24,7 @@ export async function POST(request: Request) {
 
     const connection = connectionForModel(config.connections, base);
     if (!connection) return NextResponse.json({ error: "모델 연결을 찾을 수 없습니다." }, { status: 404 });
-    const apiKey = connection.apiKey || (connection.driver === "openai" ? process.env.OPENAI_API_KEY : "") || "";
+    const apiKey = connection.clearApiKey ? "" : connection.apiKey || (connection.driver === "openai" ? process.env.OPENAI_API_KEY : "") || "";
     const response = await fetch(modelsEndpoint(connection.driver, connection.baseUrl), {
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
       signal: AbortSignal.timeout(10_000),

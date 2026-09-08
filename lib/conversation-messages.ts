@@ -43,3 +43,22 @@ export function multipleChoiceAnswers(event: ToolEvent): MultipleChoiceAnswer[] 
     }];
   });
 }
+
+export function settlePendingTools(messages: StoredMessage[]): StoredMessage[] {
+  return messages.map(message => ({ ...message, toolEvents: message.toolEvents?.map(event =>
+    event.status === "waiting" || event.status === "calling"
+      ? { ...event, status: "error", completedAt: new Date().toISOString(), result: { error: "The previous task was interrupted. Please retry." } }
+      : event) }));
+}
+
+/** Reconstruct complete call/result pairs. Pending calls are never sent upstream. */
+export function restoreToolHistory(message: { role: string; content: unknown; toolEvents?: ToolEvent[]; reasoning_content?: string }) {
+  const events = message.role === "assistant" ? (message.toolEvents || []).filter(e => e.status === "completed" || e.status === "error") : [];
+  const result: Array<{ role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string }> = [];
+  if (events.length) {
+    result.push({ role: "assistant", content: null, tool_calls: events.map(e => ({ id: e.id, type: "function", function: { name: e.name, arguments: JSON.stringify(e.arguments ?? {}) } })) });
+    for (const event of events) result.push({ role: "tool", tool_call_id: event.id, name: event.name, content: JSON.stringify(event.result ?? { error: "No tool result was saved." }) });
+  }
+  if (message.content || !events.length) result.push({ role: message.role, content: message.content, ...(message.reasoning_content ? { reasoning_content: message.reasoning_content } : {}) });
+  return result;
+}

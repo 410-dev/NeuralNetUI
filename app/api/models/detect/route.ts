@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     const saved = config.connections.find((connection) => connection.id === body.id);
     const driver = body.driver === "lmstudio" ? "lmstudio" : "openai";
     const baseUrl = String(body.baseUrl || saved?.baseUrl || "");
-    const apiKey = String(body.apiKey || saved?.apiKey || (driver === "openai" ? process.env.OPENAI_API_KEY : "") || "");
+    const apiKey = (body.clearApiKey ?? saved?.clearApiKey) ? "" : String(body.apiKey || saved?.apiKey || (driver === "openai" ? process.env.OPENAI_API_KEY : "") || "");
     const response = await fetch(modelsEndpoint(driver, baseUrl), {
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
       signal: AbortSignal.timeout(10_000),

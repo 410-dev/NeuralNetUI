@@ -40,6 +40,8 @@ export interface ConnectionConfig {
   driver: ConnectionDriver;
   baseUrl: string;
   apiKey: string;
+  /** Explicitly disable saved and environment credentials until a replacement is entered. */
+  clearApiKey?: boolean;
   models: ModelConfig[];
 }
 

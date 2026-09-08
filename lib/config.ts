@@ -6,11 +6,12 @@ import type { AuthUser } from "./auth";
 import { updateUserPreferences } from "./auth";
 import { dataDir, db } from "./database";
 import { inferApiContextWindowTokens } from "./model-context";
+import { mergeModelPresets } from "./model-edits";
 import { resolveConnectionModels } from "./connection-drivers";
 
 const presetSchema = z.object({ id: z.string().min(1), name: z.string().min(1), kind: z.enum(["builtin", "custom"]), effort: z.string().optional(), systemPrompt: z.string().optional(), systemPromptMode: z.enum(["replace", "prepend", "append"]).default("append"), ownerId: z.string().optional() });
 const modelSchema = z.object({ id: z.string().min(1), name: z.string().min(1), sourceModel: z.string().min(1), description: z.string().optional(), systemPrompt: z.string().optional(), isAlias: z.boolean(), visible: z.boolean().default(true), reasoningSupported: z.boolean(), reasoningEfforts: z.array(z.string()).optional(), reasoningPresets: z.array(presetSchema), contextWindowTokens: z.number().int().positive().optional(), apiContextWindowTokens: z.number().int().positive().optional(), ownerId: z.string().optional(), isPublic: z.boolean().optional(), connectionId: z.string().min(1).optional() });
-const connectionSchema = z.object({ id: z.string().min(1), name: z.string().min(1), driver: z.enum(["openai", "lmstudio"]), baseUrl: z.string().url(), apiKey: z.string(), models: z.array(modelSchema).default([]) });
+const connectionSchema = z.object({ id: z.string().min(1), name: z.string().min(1), driver: z.enum(["openai", "lmstudio"]), baseUrl: z.string().url(), apiKey: z.string(), clearApiKey: z.boolean().optional(), models: z.array(modelSchema).default([]) });
 
 export const DEFAULT_TOOL_SETTINGS: ToolSettings = { maxToolRounds: 8, maxAttachmentsPerMessage: 12, textDownloadLimitMb: 1, textCharacterLimit: 24_000, imageDownloadLimitMb: 10, imageUploadLimitMb: 20, pdfSizeLimitMb: 25, pdfPageLimit: 100, pdfTextCharacterLimit: 100_000, pdfVisionPageLimit: 6, pdfProcessingTimeoutSeconds: 30, temporaryFileTtlMinutes: 60, orphanUploadTtlHours: 24 };
 const toolSettingsSchema = z.object({ maxToolRounds: z.number().int().min(1).max(32), maxAttachmentsPerMessage: z.number().int().min(1).max(50), textDownloadLimitMb: z.number().min(0.0625).max(10), textCharacterLimit: z.number().int().min(1_000).max(1_000_000), imageDownloadLimitMb: z.number().min(1).max(50), imageUploadLimitMb: z.number().min(1).max(50), pdfSizeLimitMb: z.number().min(1).max(100), pdfPageLimit: z.number().int().min(1).max(500), pdfTextCharacterLimit: z.number().int().min(1_000).max(1_000_000), pdfVisionPageLimit: z.number().int().min(0).max(20), pdfProcessingTimeoutSeconds: z.number().int().min(5).max(120), temporaryFileTtlMinutes: z.number().int().min(5).max(1_440), orphanUploadTtlHours: z.number().min(1).max(168) }).default(DEFAULT_TOOL_SETTINGS);
@@ -57,18 +58,13 @@ function visiblePreset(preset: ReasoningPreset, user: AuthUser) { return preset.
 
 export function publicConfig(config: AppConfig, user: AuthUser): PublicConfig {
   const preferences: AppConfig["preferences"] = { ...config.preferences, sendReasoningToModel: typeof user.preferences.sendReasoningToModel === "boolean" ? user.preferences.sendReasoningToModel : config.preferences.sendReasoningToModel, exportReasoning: typeof user.preferences.exportReasoning === "boolean" ? user.preferences.exportReasoning : config.preferences.exportReasoning, language: user.preferences.language === "ko" || user.preferences.language === "en" ? user.preferences.language : config.preferences.language, showModelIdentifiers: typeof user.preferences.showModelIdentifiers === "boolean" ? user.preferences.showModelIdentifiers : config.preferences.showModelIdentifiers, renderStrikethrough: typeof user.preferences.renderStrikethrough === "boolean" ? user.preferences.renderStrikethrough : config.preferences.renderStrikethrough, defaultModelId: typeof user.preferences.defaultModelId === "string" ? user.preferences.defaultModelId : config.preferences.defaultModelId, defaultReasoningPresetId: typeof user.preferences.defaultReasoningPresetId === "string" ? user.preferences.defaultReasoningPresetId : config.preferences.defaultReasoningPresetId };
-  return { ...config, profile: { name: user.displayName }, preferences, models: config.models.filter((model) => canUseModel(model, user)).map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), connections: config.connections.map((connection) => ({ ...connection, models: connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), apiKey: "", hasApiKey: Boolean(connection.apiKey || (connection.driver === "openai" && process.env.OPENAI_API_KEY)) })), account: { id: user.id, username: user.username, displayName: user.displayName, role: user.role } };
+  return { ...config, profile: { name: user.displayName }, preferences, models: config.models.filter((model) => canUseModel(model, user)).map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), connections: config.connections.map((connection) => ({ ...connection, models: connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), apiKey: "", hasApiKey: Boolean(!connection.clearApiKey && (connection.apiKey || (connection.driver === "openai" && process.env.OPENAI_API_KEY))) })), account: { id: user.id, username: user.username, displayName: user.displayName, role: user.role } };
 }
 
 export async function writeConfigForUser(input: unknown, user: AuthUser): Promise<AppConfig> {
   const incoming = normalizeConfig(configSchema.parse(input)); const current = await readConfig(); const admin = isAdmin(user);
   updateUserPreferences(user.id, admin ? incoming.profile.name : user.displayName, { sendReasoningToModel: incoming.preferences.sendReasoningToModel, exportReasoning: incoming.preferences.exportReasoning, language: incoming.preferences.language, showModelIdentifiers: incoming.preferences.showModelIdentifiers, renderStrikethrough: incoming.preferences.renderStrikethrough, defaultModelId: incoming.preferences.defaultModelId, defaultReasoningPresetId: incoming.preferences.defaultReasoningPresetId });
-  const mergePrivatePresets = (existing: ModelConfig, candidate?: ModelConfig) => {
-    if (!candidate) return existing;
-    const protectedPresets = existing.reasoningPresets.filter((preset) => preset.kind === "custom" && preset.ownerId && preset.ownerId !== user.id);
-    const editablePresets = candidate.reasoningPresets.filter((preset) => preset.kind === "builtin" ? admin : !preset.ownerId || preset.ownerId === user.id).map((preset) => preset.kind === "custom" ? { ...preset, ownerId: user.id } : preset);
-    return { ...(admin ? candidate : existing), reasoningPresets: [...editablePresets, ...protectedPresets.filter((preset) => !editablePresets.some((item) => item.id === preset.id))] };
-  };
+  const mergePrivatePresets = (existing: ModelConfig, candidate?: ModelConfig) => mergeModelPresets(existing, candidate, user.id, admin);
   const incomingConnections = new Map(incoming.connections.map((connection) => [connection.id, connection]));
   if (!admin) {
     const connections = current.connections.map((connection) => { const candidate = incomingConnections.get(connection.id); return { ...connection, models: connection.models.map((model) => mergePrivatePresets(model, candidate?.models.find((item) => item.id === model.id))) }; });
@@ -76,11 +72,11 @@ export async function writeConfigForUser(input: unknown, user: AuthUser): Promis
     return writeConfig({ ...current, connections, models: aliases });
   }
   const existing = new Map(current.connections.map((connection) => [connection.id, connection]));
-  const connections = incoming.connections.map((connection) => { const previous = existing.get(connection.id); return { ...connection, apiKey: connection.apiKey || previous?.apiKey || "", models: connection.models.map((model) => mergePrivatePresets(previous?.models.find((item) => item.id === model.id) || model, model)) }; });
+  const connections = incoming.connections.map((connection) => { const previous = existing.get(connection.id); return { ...connection, apiKey: connection.clearApiKey ? "" : connection.apiKey || previous?.apiKey || "", models: connection.models.map((model) => mergePrivatePresets(previous?.models.find((item) => item.id === model.id) || model, model)) }; });
   const incomingAliases = incoming.models.filter((model) => model.isAlias).map((model) => { const previous = current.models.find((item) => item.isAlias && item.id === model.id); return mergePrivatePresets(previous || model, { ...model, ownerId: previous?.ownerId || user.id }); });
   const protectedAliases = current.models.filter((model) => model.isAlias && model.ownerId && model.ownerId !== user.id && !incomingAliases.some((candidate) => candidate.id === model.id));
   const aliasesById = new Map(incomingAliases.map((model) => [model.id, model]));
-  const orderedIncoming = incoming.models.map((model) => model.isAlias ? aliasesById.get(model.id) : model).filter((model): model is ModelConfig => Boolean(model));
+  const orderedIncoming = incoming.models.map((model) => model.isAlias ? aliasesById.get(model.id) : connections.find(c => c.id === model.connectionId)?.models.find(m => m.id === model.id)).filter((model): model is ModelConfig => Boolean(model));
   return writeConfig({ ...incoming, connections, models: [...orderedIncoming, ...protectedAliases], profile: current.profile, preferences: { ...current.preferences, ...incoming.preferences } });
 }
 
