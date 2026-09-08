@@ -2,7 +2,8 @@ import { canUseModel, readConfig } from "./config";
 import { readConversation, writeConversation } from "./conversations";
 import { readUploadModelContent } from "./uploads";
 import { inferenceEndpoint } from "./inference-control";
-import { chatEndpoint, connectionForModel, connectionHeaders, lmStudioEndpoint } from "./connection-drivers";
+import { chatEndpoint, connectionForModel, connectionHeaders } from "./connection-drivers";
+import { ensureLmStudioModelLoaded } from "./lm-studio-control";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
 import { closeBrowserSessions, executeBrowserTool } from "./browser-tool";
 import type { Conversation, StoredMessage, ToolEvent, ToolSettings } from "./types";
@@ -260,8 +261,7 @@ async function run(job: ChatJob) {
     const headers = connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "");
     if (config.preferences.onDemand) {
       if (connection.driver === "lmstudio") {
-        const loadResponse = await fetch(lmStudioEndpoint(connection.baseUrl, "load"), { method: "POST", headers, body: JSON.stringify({ model: model.sourceModel, ...(model.contextWindowTokens ? { context_length: model.contextWindowTokens } : {}) }), signal: job.controller.signal });
-        if (!loadResponse.ok && loadResponse.status !== 409) throw new Error((await loadResponse.text()) || `Model load failed with ${loadResponse.status}`);
+        await ensureLmStudioModelLoaded({ baseUrl: connection.baseUrl, headers, sourceModel: model.sourceModel, modelId: model.id, contextWindowTokens: model.contextWindowTokens, signal: job.controller.signal });
       } else {
         const target = loadBody(model.sourceModel); const statusUrl = inferenceEndpoint(connection.baseUrl, "status");
         const statusResponse = await fetch(statusUrl, { headers, signal: job.controller.signal, cache: "no-store" }); const status = statusResponse.ok ? await statusResponse.json().catch(() => ({})) : {};

@@ -444,8 +444,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .connection-editor .connection-card { min-height: 100%; align-content: start; }
 .preset-editor { transition: border-color .15s, background .15s; }
 .preset-editor.active { border-color: rgba(112,160,255,.4); background: rgba(112,160,255,.045); }
-.preset-editor[draggable="true"] .kind-icon { cursor: grab; }
-.preset-editor[draggable="true"]:active .kind-icon { cursor: grabbing; }
+.preset-editor .kind-icon[draggable="true"] { cursor: grab; }
+.preset-editor .kind-icon[draggable="true"]:active { cursor: grabbing; }
 
 .mini-dialog-layer { position: fixed; z-index: 130; inset: 0; display: grid; place-items: center; padding: 18px; }
 .export-dialog { position: relative; width: min(440px, 100%); border: 1px solid var(--border-strong); border-radius: 19px; padding: 18px; background: #171b18; box-shadow: var(--shadow); }

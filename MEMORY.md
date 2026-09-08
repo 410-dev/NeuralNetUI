@@ -24,4 +24,5 @@
 - Windows x64 MSI packaging is driven by `installer/build-msi.ps1` and bundles the standalone Next.js app, Node.js, embedded Python search/PDF dependencies, service host, and tray host.
 - Connections are ordered and support OpenAI API or LM Studio drivers. Connections, models, and reasoning presets use drag-and-drop or adjacent up/down controls; their independently scrollable settings lists persist the order shown by chat pickers. Each connection preserves its own discovered model metadata and reasoning presets; duplicate served identifiers resolve to the highest-priority connection.
 - LM Studio discovery and model management use its native `/api/v1` REST API. Chat streaming uses LM Studio's OpenAI-compatible endpoint to retain custom tool calls and full assistant history.
+- LM Studio on-demand loading checks `loaded_instances` before calling the load endpoint and coalesces concurrent loads for the same model, preventing duplicate instances across messages.
 - Current release version: 1.8.1.

@@ -9,6 +9,7 @@
 - Keep settings categories in a horizontally scrollable tab row on narrow screens so every panel remains reachable without compressing its icon target.
 - Group display-only preferences under Appearance; model identifiers and Markdown strikethrough are personal presentation choices.
 - Present connections, models, and reasoning presets as reorderable selections with drag-and-drop plus adjacent up/down controls; the saved order must match the chat pickers.
+- Limit drag initiation to dedicated handles whenever a reorderable item contains editable text or form controls.
 - Keep long settings sidebars independently scrollable while the selected item's editor remains visible.
 
 ## Tool activity
