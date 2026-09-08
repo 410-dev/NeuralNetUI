@@ -75,7 +75,7 @@ try {
   let personal = await json('/api/config', 'GET', undefined, userCookie);
   personal.models[0].reasoningPresets.push({ id: 'own', name: 'Own', kind: 'custom' });
   await json('/api/config', 'PUT', personal, userCookie);
-  config = await json('/api/config'); assert.equal(config.models[0].reasoningPresets[0].id, 'high');
+  config = await json('/api/config'); assert.equal(config.models[0].reasoningPresets[0].id, 'default');
   await json('/api/config', 'PUT', config);
   personal = await json('/api/config', 'GET', undefined, userCookie); assert.ok(personal.models[0].reasoningPresets.some(p => p.id === 'own'));
   console.log('PASS: ordinary and admin saves preserve protected presets');
@@ -110,6 +110,28 @@ try {
   for (let i = 0; i < 66; i++) { const c = await conversation('Cache'); first ||= c; last = c; await start(c); await terminal(c); }
   await delay(100); assert.equal((await api(`/api/chat/${first.id}`)).status, 404); assert.equal((await api(`/api/chat/${last.id}`)).status, 200);
   console.log('PASS: completed job cache is bounded');
+  config = await json('/api/config');
+  config.models = config.models.map(m => m.id === 'model-b' ? { ...m, reasoningSupported: true, reasoningEfforts: ['off', 'low', 'medium', 'xhigh', 'on'] } : m);
+  config = await json('/api/config', 'PUT', config);
+  const effortAlias = config.models.find(m => m.id === 'alias');
+  assert.deepEqual(effortAlias.reasoningPresets.filter(p => p.kind === 'builtin').map(p => p.effort), ['off', 'low', 'medium', 'xhigh']);
+  for (const effort of ['off', 'low', 'medium', 'xhigh']) {
+    const c = await conversation('effort'); await start(c, { modelId: 'alias', reasoningPresetId: effort });
+    assert.equal((await terminal(c)).status, 'completed');
+    assert.equal(requests.filter(r => r.url.endsWith('/chat/completions')).at(-1).body.reasoning_effort, effort === 'off' ? 'none' : effort);
+  }
+  config.models = config.models.map(m => m.id === 'model-b' ? { ...m, reasoningEfforts: ['off', 'on'] } : m.id === 'alias' ? { ...m, systemPrompt: 'Base prompt', reasoningPresets: [...m.reasoningPresets, ...['replace', 'prepend', 'append'].map(mode => ({ id: mode, name: mode, kind: 'custom', effort: 'high', systemPrompt: 'Custom prompt', systemPromptMode: mode }))] } : m);
+  config = await json('/api/config', 'PUT', config);
+  assert.deepEqual(config.models.find(m => m.id === 'alias').reasoningPresets.filter(p => p.kind === 'builtin').map(p => p.name), ['Fast', 'Thinking']);
+  for (const mode of ['replace', 'prepend', 'append', 'on']) {
+    const c = await conversation('template'); await start(c, { modelId: 'alias', reasoningPresetId: mode });
+    assert.equal((await terminal(c)).status, 'completed');
+    const body = requests.filter(r => r.url.endsWith('/chat/completions')).at(-1).body;
+    assert.equal(body.reasoning_effort, mode === 'on' ? 'medium' : undefined);
+    const prompt = body.messages.find(m => m.role === 'system').content;
+    assert.equal(prompt, mode === 'replace' ? 'Custom prompt' : mode === 'prepend' ? 'Custom prompt\n\nBase prompt' : mode === 'append' ? 'Base prompt\n\nCustom prompt' : 'Base prompt');
+  }
+  console.log('PASS: alias effort/toggle inheritance, wire values, unsupported effort omission, and all custom prompt modes');
   console.log(`Integration checks passed. Test data: ${data}`);
   if (process.argv.includes('--keep-open')) { console.log(`QA_URL=${root}\nQA_USER=audit\nQA_PASSWORD=LocalAudit-20260908`); await new Promise(() => {}); }
 } catch (error) { console.error(logs); throw error; }

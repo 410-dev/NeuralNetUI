@@ -13,6 +13,11 @@
 - Keep long settings sidebars independently scrollable while the selected item's editor remains visible.
 - Settings dialogs trap keyboard focus, make the background inert, close with Escape, and restore focus to the opener. Icon controls and switches have accessible names.
 
+## Reasoning controls
+
+- Generate built-in reasoning choices from model capabilities: Fast / Thinking for toggles, Fast plus advertised effort levels when supported; omit unsupported controls.
+- Aliases display inherited capabilities as read-only. Custom templates retain prompt replacement, prepend, and append controls; their native selector offers only supported values.
+
 ## Tool activity
 
 - Group all tool calls from one assistant message under one top-level disclosure with a wrench icon and aggregate state.

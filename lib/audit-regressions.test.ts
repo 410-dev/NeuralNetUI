@@ -9,7 +9,7 @@ import { saveConversationRequest } from "./client-persistence.ts";
 import { registerChatDisposal, discardChatJobs } from "./chat-disposal.ts";
 import type { ModelConfig, StoredMessage } from "./types.ts";
 
-const model: ModelConfig = { id: "a", sourceModel: "a", name: "A", isAlias: false, visible: true, reasoningSupported: true, connectionId: "A", reasoningPresets: [{ id: "high", name: "High", kind: "builtin", effort: "high" }, { id: "private", name: "Private", kind: "custom", ownerId: "other" }] };
+const model: ModelConfig = { id: "a", sourceModel: "a", name: "A", isAlias: false, visible: true, reasoningSupported: true, reasoningEfforts: ["high"], connectionId: "A", reasoningPresets: [{ id: "high", name: "High", kind: "builtin", effort: "high" }, { id: "private", name: "Private", kind: "custom", ownerId: "other" }] };
 const connections = [{ id: "A", name: "A", driver: "lmstudio" as const, baseUrl: "http://localhost:1234", apiKey: "", models: [model] }, { id: "B", name: "B", driver: "lmstudio" as const, baseUrl: "http://localhost:1235", apiKey: "", models: [{ ...model, id: "b", sourceModel: "b", connectionId: "B" }] }];
 
 test("ordinary saves preserve builtin and other users' presets, including colliding IDs", () => {

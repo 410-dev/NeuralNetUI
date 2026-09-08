@@ -1,5 +1,6 @@
 import type { ConnectionConfig, ConnectionDriver, ModelConfig } from "./types";
 import { applyPreferredOrder } from "./ordered-list.ts";
+import { inheritReasoning } from "./reasoning-capabilities.ts";
 
 export function connectionRoot(baseUrl: string) {
   const url = new URL(baseUrl);
@@ -38,9 +39,9 @@ export function resolveConnectionModels(connections: ConnectionConfig[], aliases
     }
   }
   for (const alias of aliases.filter((model) => model.isAlias)) {
-    const base = models.find((model) => model.sourceModel === alias.sourceModel || model.id === alias.sourceModel);
     const connection = connectionForModel(connections, alias);
-    models.push({ ...alias, connectionId: connection?.id || base?.connectionId });
+    const base = connection?.models.find((model) => !model.isAlias && (model.sourceModel === alias.sourceModel || model.id === alias.sourceModel));
+    models.push({ ...inheritReasoning(alias, base), connectionId: connection?.id });
   }
   return applyPreferredOrder(models, preferredOrder);
 }

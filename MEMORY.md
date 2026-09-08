@@ -25,9 +25,12 @@
 - Connections are ordered and support OpenAI API or LM Studio drivers. Connections, models, and reasoning presets use drag-and-drop or adjacent up/down controls; their independently scrollable settings lists persist the order shown by chat pickers. Each connection preserves its own discovered model metadata and reasoning presets; duplicate served identifiers resolve to the highest-priority connection.
 - LM Studio discovery and model management use its native `/api/v1` REST API. Chat streaming uses LM Studio's OpenAI-compatible endpoint to retain custom tool calls and full assistant history.
 - LM Studio on-demand loading checks `loaded_instances` before calling the load endpoint and coalesces concurrent loads for the same model, preventing duplicate instances across messages.
-- Current release version: 1.8.1.
+- Current release version: 1.8.2.
 - The UI/LM Studio audit in `docs/audits/2026-09-08-ui-lmstudio.md` has 14 addressed findings; #7 is intentional behavior per the user. Settings preserve protected presets and unsaved model edits; aliases resolve their base connection; API-key removal explicitly disables fallback credentials.
 - Deleted conversations/users discard their chat jobs. Background saves validate task ownership and conversation existence inside the SQLite transaction. Terminal jobs release full histories and expire after 60 seconds, with at most 64 terminal jobs retained.
 - Persisted tool call/result pairs are restored for follow-up requests. Interrupted questions recover on conversation read; active questions can be stopped. SSE errors and incomplete streams are surfaced, and failed client saves restore the unsent draft.
 - LM Studio loaded-instance context limits are reflected in the UI, and shared loads have independently cancellable waiters; the upstream load is cancelled when all waiters leave.
-- The 1.8.1 x64 MSI was rebuilt and its Windows Installer metadata verified on 2026-09-08. Artifact: `installer/output/NeuralNetUI-1.8.1-x64.msi`; it is currently unsigned (Authenticode `NotSigned`).
+- Reasoning presets use authoritative server options: off/none becomes Fast, on becomes Thinking only without effort levels, and unsupported models use Default. Chat Completions maps off/on to none/medium; unsupported preset values are omitted.
+- Alias reasoning capabilities follow the actual base connection, including base changes and rediscovery. Custom prompt templates, ownership, and ordering survive capability updates. Existing installations should detect models again and save to refresh legacy metadata.
+- OpenAI-compatible discovery optionally enriches records from the same server's LM Studio native models endpoint, preserving served identifiers; unavailable native endpoints fall back to standard discovery.
+- Version 1.8.2 MSI built and Windows Installer metadata verified on 2026-09-08; unsigned. Output: `installer/output/NeuralNetUI-1.8.2-x64.msi`.

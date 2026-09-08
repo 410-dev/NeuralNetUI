@@ -12,6 +12,7 @@ export function mergeModelPresets(existing: ModelConfig, candidate: ModelConfig 
 
 export function reasoningEffort(model: ModelConfig, preset?: ReasoningPreset) {
   if (!model.reasoningSupported || !preset?.effort) return undefined;
-  if (model.reasoningEfforts?.length && !model.reasoningEfforts.includes(preset.effort)) return undefined;
-  return preset.effort;
+  if (!model.reasoningEfforts?.includes(preset.effort)) return undefined;
+  // LM Studio advertises off/on natively; Chat Completions accepts OpenAI values.
+  return preset.effort === "off" ? "none" : preset.effort === "on" ? "medium" : preset.effort;
 }

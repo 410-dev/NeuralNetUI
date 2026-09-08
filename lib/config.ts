@@ -7,6 +7,7 @@ import { updateUserPreferences } from "./auth";
 import { dataDir, db } from "./database";
 import { inferApiContextWindowTokens } from "./model-context";
 import { mergeModelPresets } from "./model-edits";
+import { inferReasoning, normalizeReasoning } from "./reasoning-capabilities";
 import { resolveConnectionModels } from "./connection-drivers";
 
 const presetSchema = z.object({ id: z.string().min(1), name: z.string().min(1), kind: z.enum(["builtin", "custom"]), effort: z.string().optional(), systemPrompt: z.string().optional(), systemPromptMode: z.enum(["replace", "prepend", "append"]).default("append"), ownerId: z.string().optional() });
@@ -23,7 +24,7 @@ const configPath = path.join(dataDir, "config.json");
 
 function normalizeConfig(config: AppConfig): AppConfig {
   const edited = new Map(config.models.filter((model) => !model.isAlias && model.connectionId).map((model) => [`${model.connectionId}\0${model.id}`, model]));
-  const connections = config.connections.map((connection) => ({ ...connection, models: connection.models.filter((model) => !model.isAlias).map((model) => ({ ...model, ...edited.get(`${connection.id}\0${model.id}`), connectionId: connection.id })) }));
+  const connections = config.connections.map((connection) => ({ ...connection, models: connection.models.filter((model) => !model.isAlias).map((model) => normalizeReasoning({ ...model, ...edited.get(`${connection.id}\0${model.id}`), connectionId: connection.id })) }));
   return { ...config, connections, models: resolveConnectionModels(connections, config.models.filter((model) => model.isAlias), config.models.map((model) => model.id)) };
 }
 
@@ -82,12 +83,10 @@ export async function writeConfigForUser(input: unknown, user: AuthUser): Promis
 
 export function inferModel(input: string | Record<string, unknown>, driver: "openai" | "lmstudio" = "openai", connectionId?: string): ModelConfig {
   const record = typeof input === "string" ? {} : input; const modelId = typeof input === "string" ? input : String(record.key || record.id || ""); const id = modelId.toLowerCase();
-  const capabilities = typeof record.capabilities === "object" && record.capabilities ? record.capabilities as Record<string, unknown> : {}; const reasoning = typeof capabilities.reasoning === "object" && capabilities.reasoning ? capabilities.reasoning as Record<string, unknown> : {};
-  const advertised = record.reasoning_efforts || record.supported_reasoning_efforts || reasoning.allowed_options || capabilities.reasoning_efforts; const knownQwen = /qwen3\.8/i.test(modelId); const efforts = Array.isArray(advertised) ? advertised.map(String) : knownQwen ? ["none", "low", "medium", "high", "xhigh"] : [];
-  const reasoningSupported = Boolean(record.reasoning_supported ?? (typeof capabilities.reasoning === "boolean" ? capabilities.reasoning : Object.keys(reasoning).length) ?? efforts.length) || /(reason|o1|o3|o4|gpt-5|qwen3|deepseek-r1|thinking)/i.test(id);
+  const knownQwen = /qwen3\.8/i.test(modelId);
+  const capability = inferReasoning(record, modelId, driver);
   const knownGemma = /gemma4.*31b/i.test(modelId);
   const friendlyName = typeof record.display_name === "string" ? record.display_name : knownQwen ? "Qwen3.8 27B" : knownGemma ? "Gemma 4 31B" : modelId.split(/[\/_-]/).filter(Boolean).slice(-2).join(" ").replace(/\b\w/g, (c) => c.toUpperCase());
   const sourceModel = driver === "openai" && knownQwen && /esatapedico/i.test(modelId) ? `${modelId}:Qwen3.8-27B-NVFP4-MTP-HIGH` : driver === "openai" && knownGemma && record.quant ? `${modelId}:${String(record.quant)}` : modelId;
-  const normalizedEfforts = efforts.length ? efforts : reasoningSupported ? ["low", "medium", "high"] : [];
-  return { id: modelId, name: friendlyName, sourceModel, description: `Language model from ${driver === "lmstudio" ? "LM Studio" : "OpenAI API"}`, isAlias: false, visible: true, reasoningSupported, reasoningEfforts: normalizedEfforts, apiContextWindowTokens: inferApiContextWindowTokens(record), connectionId, reasoningPresets: normalizedEfforts.length ? normalizedEfforts.map((effort) => ({ id: effort.replaceAll("_", "-"), name: effort === "xhigh" ? "Extra High" : effort.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase()), kind: "builtin" as const, effort })) : [{ id: "default", name: "Default", kind: "custom" as const }] };
+  return normalizeReasoning({ id: modelId, name: friendlyName, sourceModel, description: `Language model from ${driver === "lmstudio" ? "LM Studio" : "OpenAI API"}`, isAlias: false, visible: true, ...capability, apiContextWindowTokens: inferApiContextWindowTokens(record), connectionId, reasoningPresets: [] });
 }

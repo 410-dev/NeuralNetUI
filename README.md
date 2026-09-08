@@ -2,6 +2,14 @@
 
 `llm-chat-ui.html`의 디자인 언어를 이어 만든 다중 서버 채팅 UI입니다. OpenAI API와 LM Studio 드라이버, 서버별 모델 설정, 우선순위 라우팅을 지원하며 Next.js 프론트엔드와 스트리밍 프록시 백엔드를 한 프로세스에서 실행합니다.
 
+## 모델별 추론 설정 (1.8.2)
+
+- 서버가 토글만 제공하면 **Fast / Thinking**, effort를 제공하면 **Fast / 지원되는 effort**를 기본 제공합니다. 끄기를 지원하지 않는 모델에는 Fast를 만들지 않으며, 추론 제어가 없는 모델은 Default와 커스텀 템플릿을 사용합니다.
+- LM Studio의 `capabilities.reasoning.allowed_options`를 모델 이름보다 우선합니다. OpenAI 호환 연결도 같은 서버의 LM Studio 모델 메타데이터가 있으면 사용합니다.
+- Alias의 추론 기능은 실제 연결된 기반 모델에서 상속합니다. 기반 모델 변경과 재감지 시 지원 프리셋을 다시 구성하고 커스텀 템플릿과 순서를 유지합니다.
+- 커스텀 시스템 프롬프트의 대체/앞에 추가/뒤에 추가를 계속 지원합니다. 기반 모델에서 지원하지 않는 과거 effort 값은 요청에서 제외합니다.
+- **기존 설치를 업데이트한 경우 설정 → 연결에서 모델 감지를 실행하고 저장**하여 저장된 추론 메타데이터를 갱신하세요. Qwen3.8 파생 모델도 서버가 `off/on`만 광고하면 Fast / Thinking으로 표시됩니다.
+
 ## 로컬 실행
 
 ```bash
@@ -52,7 +60,7 @@ chmod +x host-linux.sh
 
 ## Windows MSI 설치
 
-`installer/output/NeuralNetUI-1.8.1-x64.msi`는 Node.js, 앱 런타임, 헤드리스 Chromium, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
+`installer/output/NeuralNetUI-1.8.2-x64.msi`는 Node.js, 앱 런타임, 헤드리스 Chromium, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
 
 트레이 아이콘을 두 번 누르면 Web UI를 다시 열 수 있습니다. 우클릭 메뉴에는 **설정 파일 수정**, **재시작**, **종료하기**가 있으며, 종료는 서비스와 트레이 앱을 함께 중지합니다. 시작 메뉴의 **NeuralNetUI**를 누르면 중지된 서비스를 다시 시작하고 Web UI를 호스팅하며 트레이 아이콘도 복원합니다. 서비스 제어와 보호된 설정 파일 편집에는 Windows 관리자 권한 확인이 표시될 수 있습니다.
 
@@ -61,7 +69,7 @@ chmod +x host-linux.sh
 무인 설치에서도 같은 공개 MSI 속성을 사용할 수 있습니다.
 
 ```powershell
-msiexec /i NeuralNetUI-1.8.1-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
+msiexec /i NeuralNetUI-1.8.2-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
 ```
 
 MSI를 다시 빌드하려면 Node.js, .NET 8 SDK가 있는 Windows x64 개발 환경에서 다음을 실행합니다. WiX 5 도구는 처음 빌드할 때 `installer/.tools`에 로컬 설치됩니다.
