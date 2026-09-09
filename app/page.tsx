@@ -9,7 +9,7 @@ import { NeuralMark } from "./neural-mark";
 import { ACCENT_PALETTES, accentColorOf, accentVariables, DEFAULT_APPEARANCE, defaultReasoningNote, normalizeHexColor, reasoningNote, REASONING_NOTE_KEYS, revealStep } from "@/lib/appearance";
 import { capabilitySummary, driverCapabilities } from "@/lib/driver-capabilities";
 import { lastContentStep, reasoningStepIsWhole, stepToolEvents, transcriptSteps } from "@/lib/transcript";
-import { greetingFor } from "@/lib/greetings";
+import { greetingFor, greetingsFor, BAND_STARTS, timeBandFor } from "@/lib/greetings";
 import { chatWaitLabel } from "@/lib/chat-progress";
 import { normalizeReasoning, reasoningOptionName, isReasoningToggle } from "@/lib/reasoning-capabilities";
 
@@ -37,7 +37,7 @@ import { formatReasoningForDisplay, getToolGroupLabel, getToolGroupState, getToo
 import { APP_VERSION } from "@/lib/version";
 import { isNearScrollBottom } from "@/lib/chat-scroll";
 import { parseModelSettings, serializeModelSettings } from "@/lib/model-settings";
-import { copyTextToClipboard } from "@/lib/client-clipboard";
+import { copyTextToClipboard, clipboardImages } from "@/lib/client-clipboard";
 import { hasMobileComposerInput, shouldSubmitComposerOnEnter } from "@/lib/composer-keyboard";
 import { literalStrikethroughSource } from "@/lib/markdown-rendering";
 import { saveConversationRequest } from "@/lib/client-persistence";
@@ -95,7 +95,7 @@ const translations = {
     nativeSupport: "Native reasoning support", noEffortMetadata: "No native reasoning controls advertised. Custom prompt templates remain available.", builtIn: "Built-in",
     customTemplate: "Custom template", nativeEffort: "Native reasoning setting sent to API", doNotSend: "Do not send", additionalPrompt: "Additional system prompt",
     promptHandling: "System prompt handling", replace: "Replace", prepend: "Prepend", append: "Append", noPresets: "No presets yet. Add one to control this model's reasoning.",
-    language: "Language", general: "General", generalTitle: "General settings", generalDesc: "Choose interface and inference behavior.", appearance: "Appearance", appearanceTitle: "Appearance", appearanceDesc: "Choose how model names and Markdown content are displayed.", interfaceLanguage: "Interface language", languageHelp: "The selected language is saved for future visits.", english: "English", korean: "Korean", onDemand: "On demand", onDemandHelp: "Load the selected model through /api/inference/load before each inference request.", showModelIdentifiers: "Show model identifiers", showModelIdentifiersHelp: "Show served identifiers below model names in model lists.", renderStrikethrough: "Render strikethrough", renderStrikethroughHelp: "Render text surrounded by one or two tildes as strikethrough. When off, the tildes remain visible.", appVersion: "Version", saved: "Saved.", detectSaved: "models and capabilities detected. Save changes to apply.", detectFirst: "Detect a server model first.", useAsDefault: "Use as default", defaultModelActive: "Default model", defaultReasoningActive: "Default reasoning", modelSettingsTransfer: "Model and reasoning settings", modelSettingsTransferDesc: "Export these settings as two-space JSON, or import a compatible file and apply it immediately.", exportModelSettings: "Export JSON", importModelSettings: "Import JSON", importedModelSettings: "Imported and applied model settings.", invalidModelSettings: "This is not a valid NeuralNetUI model settings file.",
+    language: "Language", general: "General", generalTitle: "General settings", generalDesc: "Choose interface and inference behavior.", appearance: "Appearance", appearanceTitle: "Appearance", appearanceDesc: "Customize colors, greetings, and response display.", interfaceLanguage: "Interface language", languageHelp: "The selected language is saved for future visits.", english: "English", korean: "Korean", onDemand: "On demand", onDemandHelp: "Load the selected model through /api/inference/load before each inference request.", showModelIdentifiers: "Show model identifiers", showModelIdentifiersHelp: "Show served identifiers below model names in model lists.", renderStrikethrough: "Render strikethrough", renderStrikethroughHelp: "Render text surrounded by one or two tildes as strikethrough. When off, the tildes remain visible.", appVersion: "Version", saved: "Saved.", detectSaved: "models and capabilities detected. Save changes to apply.", detectFirst: "Detect a server model first.", useAsDefault: "Use as default", defaultModelActive: "Default model", defaultReasoningActive: "Default reasoning", modelSettingsTransfer: "Model and reasoning settings", modelSettingsTransferDesc: "Export these settings as two-space JSON, or import a compatible file and apply it immediately.", exportModelSettings: "Export JSON", importModelSettings: "Import JSON", importedModelSettings: "Imported and applied model settings.", invalidModelSettings: "This is not a valid NeuralNetUI model settings file.",
     attachImages: "Attach images or PDFs", uploadingImages: "Preparing and uploading files…", removeImage: "Remove attachment", loadEarlier: "Load earlier messages",
     imagesAttached: "files attached", imageChat: "File chat", imageUploadFailed: "File upload failed.", maxImages: "You have reached the configured attachment limit.",
     thinking: "Thinking…", compactingNow: "Compacting context…", compactionThought: "Compaction reasoning", compactionSummary: "Summary kept in context", editResponse: "Edit response", saveEdit: "Save", thoughtFor: "Thought for", useWrapping: "Use wrapping", copied: "Copied",
@@ -109,7 +109,7 @@ const translations = {
     streamPacingTitle: "Response pacing", streamPacingHelp: "Servers deliver text in bursts. Pacing spreads each burst out evenly.", streamImmediate: "Every token", streamImmediateDesc: "Show everything the moment it arrives.", streamChunked: "Even pace", streamChunkedDesc: "Release a fixed slice per frame so text reads as steady typing.", streamChunkSize: "Characters per step",
     nativePresetNote: "Built-in native levels cannot be renamed or removed, so they are offered only in the chat reasoning picker.",
     temporaryChat: "Temporary chat", saveChat: "Save this chat", savingChat: "Saving…", chatSaved: "Saved to your history.", chatSaveFailed: "This chat could not be saved.",
-    temporaryChatHint: "This chat stays out of your history and is discarded when you leave it. Save it to keep it.",
+    returnToRegularChat: "Return to regular chat", temporaryGreeting: "Hello, traveler", temporaryChatHint: "Chats are not saved",
     reasoningNotesTitle: "Reasoning descriptions", reasoningNotesHelp: "Show a short line under each reasoning choice in the chat picker, and word it however you like.", reasoningNotesReset: "Leave a field empty to use the built-in wording.",
     experimental: "Experimental", experimentalTitle: "Experimental features", experimentalDesc: "Unfinished capabilities. Switch one on to offer it in the chat tool menu.", experimentalBrowser: "Browser tool", experimentalBrowserDesc: "Let the model drive a headless browser: render JavaScript pages, interact with elements and take screenshots. Sessions are isolated and close at the end of each response.", experimentalHelp: "While a feature is off, the tool is hidden from the chat menu and refused by the server even if a client asks for it.",
     outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token",
@@ -137,7 +137,7 @@ const translations = {
     nativeSupport: "Native Reasoning 지원", noEffortMetadata: "서버가 내장 추론 제어를 제공하지 않습니다. 커스텀 프롬프트 템플릿은 사용할 수 있습니다.", builtIn: "내장",
     customTemplate: "커스텀 템플릿", nativeEffort: "API로 전송할 추론 설정", doNotSend: "전송하지 않음", additionalPrompt: "추가 시스템 프롬프트",
     promptHandling: "시스템 프롬프트 처리", replace: "대체", prepend: "앞에 추가", append: "뒤에 추가", noPresets: "아직 프리셋이 없습니다. 템플릿을 추가해 주세요.",
-    language: "언어", general: "일반", generalTitle: "일반 설정", generalDesc: "인터페이스와 추론 동작을 설정합니다.", appearance: "모양", appearanceTitle: "모양", appearanceDesc: "모델 이름과 Markdown 콘텐츠가 표시되는 방식을 설정합니다.", interfaceLanguage: "인터페이스 언어", languageHelp: "선택한 언어는 저장되어 다음 접속에도 유지됩니다.", english: "영어", korean: "한국어", onDemand: "On demand", onDemandHelp: "추론 요청 전에 /api/inference/load를 호출해 선택한 모델을 로드합니다.", showModelIdentifiers: "모델 identifier 표시", showModelIdentifiersHelp: "모델 목록에서 모델 이름 아래에 서빙 identifier를 표시합니다.", renderStrikethrough: "취소선 렌더링", renderStrikethroughHelp: "물결표 한 개 또는 두 개로 감싼 텍스트를 취소선으로 표시합니다. 끄면 물결표를 그대로 표시합니다.", appVersion: "버전", saved: "저장했습니다.", detectSaved: "개 모델과 기능을 감지했습니다. 저장을 눌러 적용하세요.", detectFirst: "먼저 서버 모델을 감지해 주세요.", useAsDefault: "기본으로 사용", defaultModelActive: "기본 모델", defaultReasoningActive: "기본 추론 강도", modelSettingsTransfer: "모델 및 추론 강도 설정", modelSettingsTransferDesc: "2칸 들여쓰기 JSON으로 내보내거나 호환 파일을 가져와 즉시 적용합니다.", exportModelSettings: "JSON 내보내기", importModelSettings: "JSON 가져오기", importedModelSettings: "모델 설정을 가져와 적용했습니다.", invalidModelSettings: "올바른 NeuralNetUI 모델 설정 파일이 아닙니다.",
+    language: "언어", general: "일반", generalTitle: "일반 설정", generalDesc: "인터페이스와 추론 동작을 설정합니다.", appearance: "모양", appearanceTitle: "모양", appearanceDesc: "색상, 환영 메시지, 응답 표시 방식을 설정합니다.", interfaceLanguage: "인터페이스 언어", languageHelp: "선택한 언어는 저장되어 다음 접속에도 유지됩니다.", english: "영어", korean: "한국어", onDemand: "On demand", onDemandHelp: "추론 요청 전에 /api/inference/load를 호출해 선택한 모델을 로드합니다.", showModelIdentifiers: "모델 identifier 표시", showModelIdentifiersHelp: "모델 목록에서 모델 이름 아래에 서빙 identifier를 표시합니다.", renderStrikethrough: "취소선 렌더링", renderStrikethroughHelp: "물결표 한 개 또는 두 개로 감싼 텍스트를 취소선으로 표시합니다. 끄면 물결표를 그대로 표시합니다.", appVersion: "버전", saved: "저장했습니다.", detectSaved: "개 모델과 기능을 감지했습니다. 저장을 눌러 적용하세요.", detectFirst: "먼저 서버 모델을 감지해 주세요.", useAsDefault: "기본으로 사용", defaultModelActive: "기본 모델", defaultReasoningActive: "기본 추론 강도", modelSettingsTransfer: "모델 및 추론 강도 설정", modelSettingsTransferDesc: "2칸 들여쓰기 JSON으로 내보내거나 호환 파일을 가져와 즉시 적용합니다.", exportModelSettings: "JSON 내보내기", importModelSettings: "JSON 가져오기", importedModelSettings: "모델 설정을 가져와 적용했습니다.", invalidModelSettings: "올바른 NeuralNetUI 모델 설정 파일이 아닙니다.",
     attachImages: "이미지 또는 PDF 첨부", uploadingImages: "파일 준비 및 업로드 중…", removeImage: "첨부 제거", loadEarlier: "이전 메시지 불러오기",
     imagesAttached: "개 파일 첨부", imageChat: "파일 대화", imageUploadFailed: "파일 업로드에 실패했습니다.", maxImages: "설정된 첨부 개수 제한에 도달했습니다.",
     thinking: "생각 중…", compactingNow: "컨텍스트 압축 중…", compactionThought: "압축 모델의 사고", compactionSummary: "맥락으로 유지되는 요약", editResponse: "응답 편집", saveEdit: "저장", thoughtFor: "동안 생각함", useWrapping: "줄 바꿈 사용", copied: "복사됨",
@@ -151,7 +151,7 @@ const translations = {
     streamPacingTitle: "응답 표시 속도", streamPacingHelp: "서버는 글자를 뭉치로 보냅니다. 속도 조절은 그 뭉치를 고르게 나눠 표시합니다.", streamImmediate: "전부 표시", streamImmediateDesc: "도착한 내용을 한 번에 모두 표시합니다.", streamChunked: "일정한 속도", streamChunkedDesc: "프레임마다 정해진 만큼만 내보내 타이핑처럼 보이게 합니다.", streamChunkSize: "한 번에 표시할 글자 수",
     nativePresetNote: "기본 제공 Native 추론 수준은 이름 변경과 삭제가 불가능하므로 채팅의 추론 선택 창에서만 제공됩니다.",
     temporaryChat: "임시 채팅", saveChat: "이 채팅 저장", savingChat: "저장 중…", chatSaved: "채팅 기록에 저장했습니다.", chatSaveFailed: "채팅을 저장하지 못했습니다.",
-    temporaryChatHint: "이 채팅은 기록에 남지 않으며 다른 채팅으로 이동하면 사라집니다. 저장하면 일반 채팅이 됩니다.",
+    returnToRegularChat: "일반 채팅으로 돌아가기", temporaryGreeting: "안녕하세요, 여행자", temporaryChatHint: "채팅이 저장되지 않습니다",
     reasoningNotesTitle: "추론 강도 설명", reasoningNotesHelp: "채팅의 추론 선택 창에서 각 항목 아래에 짧은 설명을 표시하고, 문구를 직접 바꿉니다.", reasoningNotesReset: "비워 두면 기본 문구를 사용합니다.",
     experimental: "실험적 기능", experimentalTitle: "실험적 기능", experimentalDesc: "아직 완성되지 않은 기능입니다. 켜면 채팅의 도구 메뉴에 나타납니다.", experimentalBrowser: "브라우저 도구", experimentalBrowserDesc: "모델이 헤드리스 브라우저를 직접 조작합니다. JavaScript 페이지 렌더링, 요소 상호작용, 스크린샷을 지원하며 세션은 격리되고 응답이 끝나면 닫힙니다.", experimentalHelp: "기능이 꺼져 있으면 채팅 메뉴에서 도구가 숨겨지고, 클라이언트가 요청해도 서버가 거부합니다.",
     outputTokens: "출력 토큰", reasoningTokens: "reasoning", tokensPerSecond: "토큰/초", timeToFirstToken: "첫 토큰 도착 시간",
@@ -330,6 +330,7 @@ export default function Home() {
     const navigateHistory = () => {
       const routeId = decodeURIComponent(window.location.pathname).match(/^\/chat\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
       if (routeId) void loadConversation(routeId, false, true);
+      else newChat(true);
     };
     window.addEventListener("popstate", navigateHistory);
     return () => window.removeEventListener("popstate", navigateHistory);
@@ -424,10 +425,21 @@ export default function Home() {
   }, [conversation]);
   const userFirstName = config.profile.name.trim().split(/\s+/)[0];
   const temporaryActive = temporaryMode || conversation?.temporary === true;
-  const greeting = useMemo(() => {
-    if (!config.account || !userFirstName) return locale === "ko" ? "안녕하세요." : "Hello";
-    return greetingFor(locale, userFirstName, new Date());
-  }, [config.account, userFirstName, locale]);
+  const [greeting, setGreeting] = useState("");
+  const [mainVisit, setMainVisit] = useState(0);
+  const lastGreetings = useRef(new Map<string, string>());
+  const mainVisible = messages.length === 0;
+  useEffect(() => {
+    if (!config.account || !mainVisible || temporaryActive) return;
+    const at = new Date();
+    const key = `neural-greeting:${config.account.id}:${locale}:${timeBandFor(at.getHours())}`;
+    let previous = lastGreetings.current.get(key);
+    try { previous = sessionStorage.getItem(key) || previous; } catch { /* Storage can be disabled. */ }
+    const next = greetingFor(locale, userFirstName, at, { overrides: appearance.greetings, previous });
+    lastGreetings.current.set(key, next);
+    try { sessionStorage.setItem(key, next); } catch { /* In-memory rotation still works. */ }
+    setGreeting(next);
+  }, [config.account?.id, userFirstName, locale, mainVisible, temporaryActive, mainVisit, appearance.greetings]);
 
   async function refreshHistories() {
     const keep = temporaryIdRef.current ? `?keepTemporary=${encodeURIComponent(temporaryIdRef.current)}` : "";
@@ -440,6 +452,7 @@ export default function Home() {
       const saved = await saveConversationRequest(next, create);
       temporaryIdRef.current = saved.temporary ? saved.id : "";
       setConversation(saved);
+      if (create) navigateToChat(saved.id, true);
       await refreshHistories().catch(() => undefined);
       return true;
     } catch (caught) {
@@ -517,11 +530,13 @@ export default function Home() {
   }
 
   function newChat(replaceUrl = false, temporary = false) {
+    setMainVisit(value => value + 1);
     abandonRef.current = true; abortRef.current?.abort();
     clearQueuedPrompts();
     draftAttachments.forEach((attachment) => fetch(`/api/uploads/${attachment.id}`, { method: "DELETE" }).catch(() => undefined));
     const abandoned = temporaryIdRef.current;
-    const id = uid("conversation"); pendingConversationIdRef.current = id; navigateToChat(id, replaceUrl);
+    pendingConversationIdRef.current = uid("conversation");
+    window.history[replaceUrl ? "replaceState" : "pushState"]({}, "", "/");
     autoFollowThreadRef.current = true;
     temporaryIdRef.current = ""; setTemporaryMode(temporary); setPromoting(false);
     setDraftAttachments([]); setRenderedMessageCount(60); setIsGenerating(false); setPendingWait(null); setConversation(null); setMessages([]); setDraft(""); setError(""); setMobileOpen(false);
@@ -542,7 +557,7 @@ export default function Home() {
       abandonRef.current = true; abortRef.current?.abort(); clearQueuedPrompts();
       const response = await fetch(`/api/conversations/${id}`); const body = await response.json();
       if (!response.ok) {
-        if (response.status === 404 && allowNew) { pendingConversationIdRef.current = id; setConversation(null); setMessages([]); setError(""); return; }
+        if (response.status === 404 && allowNew) { newChat(true); return; }
         throw new Error(body.error);
       }
       const next = normalizeConversationRevisions(body as Conversation);
@@ -897,7 +912,7 @@ export default function Home() {
     requestAnimationFrame(() => { if (element) element.scrollTop += element.scrollHeight - previousHeight; });
   }
   return (
-    <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"}`}>
+    <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""}`}>
       <button className="mobile-menu" aria-label={locale === "ko" ? "메뉴 열기" : "Open menu"} onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
       <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-visible" : ""}`}>
         <section className="side-panel">
@@ -921,18 +936,19 @@ export default function Home() {
         <div className="ambient-glow" />
         <div className="model-switcher">
           <button className="model-trigger" onClick={() => { if (!modelMenuOpen) setModelControlNotice(null); setModelMenuOpen((value) => !value); }}><span>{selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
-          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span><small>{visibleModels.length}</small></div>{visibleModels.map((model) => <button className="model-option" key={model.id} onClick={() => chooseModel(model)}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span className="model-option-mark">{model.isAlias ? <Pencil size={15} /> : <NeuralMark size={18} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{model.isAlias && <b>ALIAS</b>}</button>)}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
+          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span><small>{visibleModels.length}</small></div>{visibleModels.map((model) => <button className="model-option" key={model.id} onClick={() => chooseModel(model)}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{model.isAlias && <b>ALIAS</b>}</button>)}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
         </div>
 
         <div className="surface-actions">
           {temporaryActive
-            ? <button className="surface-action active" disabled={promoting || conversation?.temporary !== true} title={c.saveChat} aria-label={c.saveChat} onClick={() => void promoteTemporaryChat()}><Save size={16} /><span>{promoting ? c.savingChat : c.saveChat}</span></button>
-            : <button className="surface-action" title={c.temporaryChat} aria-label={c.temporaryChat} onClick={() => newChat(false, true)}><MessageSquareDashed size={16} /><span>{c.temporaryChat}</span></button>}
-          {temporaryActive && <p className="temporary-note" role="status">{c.temporaryChatHint}</p>}
+            ? conversation?.temporary !== true && messages.length === 0
+              ? <button className="surface-action active icon-only" title={c.returnToRegularChat} aria-label={c.returnToRegularChat} onClick={() => setTemporaryMode(false)}><MessageSquareDashed size={16} /></button>
+              : <button className="surface-action active" disabled={promoting || conversation?.temporary !== true} title={c.saveChat} aria-label={c.saveChat} onClick={() => void promoteTemporaryChat()}><Save size={16} /><span>{promoting ? c.savingChat : c.saveChat}</span></button>
+            : <button className="surface-action icon-only" title={c.temporaryChat} aria-label={c.temporaryChat} onClick={() => newChat(false, true)}><MessageSquareDashed size={16} /></button>}
         </div>
 
         <div className="conversation-stage">
-          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{greeting}</h1><p>{c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} /></div> : <>
+          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} /></div> : <>
             <div className="thread" ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
               {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
               {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
@@ -1071,7 +1087,12 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
       </div>
       <div className="composer-field">
         <span className="composer-measure" ref={measureRef} aria-hidden="true">{draft || " "}</span>
-        <textarea ref={textRef} aria-label={pendingChoice ? c.choiceWaiting : c.messagePlaceholder} enterKeyHint="enter" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} placeholder={pendingChoice ? c.choiceWaiting : c.messagePlaceholder} disabled={Boolean(pendingChoice)} />
+        <textarea ref={textRef} aria-label={pendingChoice ? c.choiceWaiting : c.messagePlaceholder} enterKeyHint="enter" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} onPaste={(event) => {
+          const images = clipboardImages(event.clipboardData);
+          if (!images.length) return;
+          event.preventDefault();
+          if (!uploadingImages && !pendingChoice) onFiles(images);
+        }} placeholder={pendingChoice ? c.choiceWaiting : c.messagePlaceholder} disabled={Boolean(pendingChoice)} />
       </div>
       <div className="composer-trail" ref={trailRef}>
         <ContextWindowIndicator c={c} locale={locale} model={selectedModel} models={models} usage={contextBreakdown} includeReasoning={sendReasoning} />
@@ -1444,7 +1465,7 @@ function SettingsPanel({ initial, onClose, onSaved, onLogout, onAccentPreview }:
     } catch (error) { setNotice(error instanceof Error ? error.message : c.invalidModelSettings); }
     finally { setSaving(false); }
   }
-  return createPortal(<div ref={modalRef} tabIndex={-1} className="settings-layer" role="dialog" aria-modal="true" aria-label={c.settings}><button tabIndex={-1} className="settings-backdrop" onClick={onClose} aria-label={c.cancel} /><section className="settings-panel"><header><div><span>{c.workspace}</span><h2>{c.settings}</h2></div><button aria-label={c.cancel} onClick={onClose}><X size={20} /></button></header><div className="settings-body"><nav aria-label={c.settings}><button className={tab === "general" ? "active" : ""} onClick={() => setTab("general")}><Settings2 size={17} /> {c.general}</button><button className={tab === "appearance" ? "active" : ""} onClick={() => setTab("appearance")}><Palette size={17} /> {c.appearance}</button>{admin && <button className={tab === "connection" ? "active" : ""} onClick={() => setTab("connection")}><Server size={17} /> {c.connection}</button>}{admin && <button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><Wrench size={17} /> {c.toolsSettings}</button>}{admin && <button className={tab === "experimental" ? "active" : ""} onClick={() => setTab("experimental")}><FlaskConical size={17} /> {c.experimental}</button>}<button className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><NeuralMark size={18} /> {c.models}</button><button className={tab === "reasoning" ? "active" : ""} onClick={openReasoning}><BrainCircuit size={17} /> {c.reasoningLevel}</button>{admin && <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}><Users size={17} /> {c.users}</button>}<button className={tab === "account" ? "active" : ""} onClick={() => setTab("account")}><UserRound size={17} /> {c.account}</button></nav><div className="settings-content">{tab === "general" && <GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving} />}{tab === "appearance" && <AppearanceSettings c={c} draft={draft} setDraft={setDraft} />}{tab === "connection" && admin && <ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} />}{tab === "tools" && admin && <><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><ToolsSettings c={c} draft={draft} setDraft={setDraft} /></>}{tab === "experimental" && admin && <ExperimentalSettings c={c} draft={draft} setDraft={setDraft} />}{tab === "models" && <ModelSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account} />}{tab === "reasoning" && <ReasoningSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account} />}{tab === "users" && admin && <UsersSettings c={c} />}{tab === "account" && <AccountSettings c={c} account={initial.account} onLogout={onLogout} />}</div></div><footer><span>{notice}</span><div><button className="secondary-button" onClick={onClose}>{dirty ? c.cancel : c.close}</button>{tab !== "users" && tab !== "account" && <button className="save-button" onClick={save} disabled={saving || !dirty}>{saving ? c.saving : c.saveChanges}</button>}</div></footer></section></div>, document.body);
+  return createPortal(<div ref={modalRef} tabIndex={-1} className="settings-layer" role="dialog" aria-modal="true" aria-label={c.settings}><button tabIndex={-1} className="settings-backdrop" onClick={onClose} aria-label={c.cancel} /><section className="settings-panel"><header><div><span>{c.workspace}</span><h2>{c.settings}</h2></div><button aria-label={c.cancel} onClick={onClose}><X size={20} /></button></header><div className="settings-body"><nav aria-label={c.settings}><button className={tab === "general" ? "active" : ""} onClick={() => setTab("general")}><Settings2 size={17} /> {c.general}</button><button className={tab === "appearance" ? "active" : ""} onClick={() => setTab("appearance")}><Palette size={17} /> {c.appearance}</button>{admin && <button className={tab === "connection" ? "active" : ""} onClick={() => setTab("connection")}><Server size={17} /> {c.connection}</button>}{admin && <button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><Wrench size={17} /> {c.toolsSettings}</button>}{admin && <button className={tab === "experimental" ? "active" : ""} onClick={() => setTab("experimental")}><FlaskConical size={17} /> {c.experimental}</button>}<button className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><NeuralMark size={18} /> {c.models}</button><button className={tab === "reasoning" ? "active" : ""} onClick={openReasoning}><BrainCircuit size={17} /> {c.reasoningLevel}</button>{admin && <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}><Users size={17} /> {c.users}</button>}<button className={tab === "account" ? "active" : ""} onClick={() => setTab("account")}><UserRound size={17} /> {c.account}</button></nav><div className="settings-content">{tab === "general" && <GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving} />}{tab === "appearance" && <AppearanceSettings c={c} draft={draft} setDraft={setDraft} />}{tab === "connection" && admin && <ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} />}{tab === "tools" && admin && <><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><ToolsSettings c={c} draft={draft} setDraft={setDraft} /></>}{tab === "experimental" && admin && <ExperimentalSettings c={c} draft={draft} setDraft={setDraft} />}{tab === "models" && <ModelSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account} />}{tab === "reasoning" && <ReasoningSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account} />}{tab === "users" && admin && <UsersSettings c={c} />}{tab === "account" && <AccountSettings c={c} account={initial.account} draft={draft} setDraft={setDraft} onLogout={onLogout} />}</div></div><footer><span>{notice}</span><div><button className="secondary-button" onClick={onClose}>{dirty ? c.cancel : c.close}</button>{tab !== "users" && <button className="save-button" onClick={save} disabled={saving || !dirty}>{saving ? c.saving : c.saveChanges}</button>}</div></footer></section></div>, document.body);
 }
 
 function ExperimentalSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>> }) {
@@ -1535,6 +1556,21 @@ function AppearanceSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicC
         <input type="text" aria-label={c.accentHex} maxLength={7} spellCheck={false} value={hexText} onChange={(event) => { setHexText(event.target.value); const valid = normalizeHexColor(event.target.value, ""); if (valid) patch({ accentColor: valid }); }} onBlur={() => setHexText(appearance.accentColor)} />
       </div>}
     </div>
+    <div className="general-setting-card greeting-settings">
+      <div><strong>{locale === "ko" ? "환영 메시지" : "Greetings"}</strong><small>{locale === "ko" ? "메인 화면을 열 때마다 시간대에 맞는 문구를 무작위로 표시합니다." : "Show a random greeting for the time of day whenever the home screen opens."}</small></div>
+      <p className="settings-help">{locale === "ko" ? "현재 언어의 문구를 편집합니다. {name}은 이름으로 바뀌며, 비워 두면 기본 문구를 사용합니다." : "Edit greetings for the current language. {name} becomes your name; leave blank to use the default."}</p>
+      {BAND_STARTS.map(([band, start], bandIndex) => {
+        const names = locale === "ko" ? ["이른 새벽", "아침", "점심", "오후", "저녁", "밤", "늦은 밤"] : ["Early dawn", "Morning", "Midday", "Afternoon", "Evening", "Night", "Late night"];
+        const end = BAND_STARTS[(bandIndex + 1) % BAND_STARTS.length][1];
+        return <details key={band}><summary>{names[bandIndex]} <span>{String(start).padStart(2, "0")}:00–{String(end).padStart(2, "0")}:00</span></summary>
+          <div className="greeting-fields">{greetingsFor(locale, band).map((fallback, index) => <label className="field" key={index}><span>{locale === "ko" ? "문구" : "Greeting"} {index + 1}</span><input maxLength={200} value={appearance.greetings?.[locale]?.[band]?.[index] ?? fallback} onChange={(event) => {
+            const lines = [...(appearance.greetings?.[locale]?.[band] || greetingsFor(locale, band))];
+            lines[index] = event.target.value;
+            patch({ greetings: { ...appearance.greetings, [locale]: { ...appearance.greetings?.[locale], [band]: lines } } });
+          }} placeholder={fallback} /></label>)}</div>
+        </details>;
+      })}
+    </div>
     <div className="general-setting-card">
       <div><strong>{c.reasoningNotesTitle}</strong><small>{c.reasoningNotesHelp}</small></div>
       <div className="reasoning-notes-head">
@@ -1596,7 +1632,6 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
     return { value: driver, label: name, info: { title: name, rows, summary: `${name} — ${capabilitySummary(rows, locale)}` } };
   });
   return <div className="settings-section wide"><SectionTitle icon={<Server size={19} />} title={c.serverTitle} description={c.serverDesc} />
-    <label className="field compact"><span>{c.displayName}</span><input value={draft.profile.name} onChange={(event) => setDraft((current) => ({ ...current, profile: { name: event.target.value } }))} /></label>
     <div className="split-model-editor connection-editor">
       <ModelColumn c={c} label={c.connection} items={draft.connections.map((connection) => ({ id: connection.id, name: connection.name, detail: `${connection.models.length} ${c.models}`, icon: <Server size={13} /> }))} active={activeConnection?.id || ""} onChange={setActiveConnectionId} onMove={moveConnection} action={actions} />
       <div className="model-editor-pane">{activeConnection ? <div className="editor-card connection-card">{(() => { const detecting = detectingConnectionId === activeConnection.id; return <>
@@ -1707,7 +1742,7 @@ function UsersSettings({ c }: { c: CopySet }) {
   return <div className="settings-section"><SectionTitle icon={<Users size={19} />} title={c.userManagement} description={c.userManagementDesc} /><form className="user-create-card" onSubmit={add}><div className="form-grid"><label className="field"><span>{c.username}</span><input value={username} onChange={(event) => setUsername(event.target.value)} required /></label><label className="field"><span>{c.displayName}</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label></div><div className="form-grid"><label className="field"><span>{c.password}</span><input type="password" minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} required /></label><label className="field"><span>{c.role}</span><SelectMenu label={c.role} value={role} options={[{ value: "user", label: c.standardUser }, { value: "admin", label: c.administrator }]} onChange={(value) => setRole(value as "user" | "admin")} /></label></div><button className="subtle-action" disabled={busy}><Plus size={16} />{c.addUser}</button>{notice && <small className="settings-notice">{notice}</small>}</form><div className="user-list">{users.map((user) => <div key={user.id}><span className="avatar-mini">{(names[user.id] || user.displayName).charAt(0).toUpperCase()}</span><span className="managed-user-name"><input disabled={user.id === currentUserId} value={names[user.id] ?? user.displayName} onChange={(event) => setNames((current) => ({ ...current, [user.id]: event.target.value }))} aria-label={`${c.displayName}: ${user.username}`} /><small>@{user.username}</small></span>{user.role === "superadmin" || user.id === currentUserId ? <b>{user.role}</b> : <span className="managed-user-role"><SelectMenu compact label={`${c.role}: ${user.username}`} value={roles[user.id] || user.role} options={[{ value: "user", label: c.standardUser }, { value: "admin", label: c.administrator }]} onChange={(value) => setRoles((current) => ({ ...current, [user.id]: value as "user" | "admin" }))} /></span>}<span className="managed-user-actions">{user.id !== currentUserId && <button title={c.saveDisplayName} aria-label={c.saveDisplayName} disabled={activeUserId === user.id || !names[user.id]?.trim() || (names[user.id].trim() === user.displayName && (user.role === "superadmin" || roles[user.id] === user.role))} onClick={() => void saveUser(user)}><Check size={15} /></button>}{user.role !== "superadmin" && user.id !== currentUserId && <button className="delete-user" title={c.deleteUser} aria-label={c.deleteUser} disabled={activeUserId === user.id} onClick={() => void remove(user)}><Trash2 size={15} /></button>}</span></div>)}</div></div>;
 }
 
-function AccountSettings({ c, account, onLogout }: { c: CopySet; account?: AccountInfo; onLogout: () => Promise<void> }) {
+function AccountSettings({ c, account, draft, setDraft, onLogout }: { c: CopySet; account?: AccountInfo; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; onLogout: () => Promise<void> }) {
   const [currentPassword, setCurrentPassword] = useState(""); const [newPassword, setNewPassword] = useState(""); const [notice, setNotice] = useState(""); const [busy, setBusy] = useState(false);
   async function change(event: FormEvent) {
     event.preventDefault(); setBusy(true); setNotice("");
@@ -1715,7 +1750,7 @@ function AccountSettings({ c, account, onLogout }: { c: CopySet; account?: Accou
     catch (error) { setNotice(error instanceof Error ? error.message : "Unable to change password."); }
     finally { setBusy(false); }
   }
-  return <div className="settings-section"><SectionTitle icon={<UserRound size={19} />} title={account?.displayName || c.account} description={`@${account?.username || ""} · ${account?.role || ""}`} /><form className="account-card" onSubmit={change}><label className="field"><span>{c.currentPassword}</span><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></label><label className="field"><span>{c.newPassword}</span><input type="password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></label><button className="save-button" disabled={busy}>{c.changePassword}</button>{notice && <small className="settings-notice">{notice}</small>}</form><button className="sign-out-button" onClick={() => void onLogout()}><LogOut size={16} />{c.signOut}</button></div>;
+  return <div className="settings-section"><SectionTitle icon={<UserRound size={19} />} title={account?.displayName || c.account} description={`@${account?.username || ""} · ${account?.role || ""}`} /><div className="account-card"><label className="field"><span>{c.displayName}</span><input value={draft.profile.name} onChange={(event) => setDraft((current) => ({ ...current, profile: { name: event.target.value } }))} /></label></div><form className="account-card" onSubmit={change}><label className="field"><span>{c.currentPassword}</span><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></label><label className="field"><span>{c.newPassword}</span><input type="password" minLength={8} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required /></label><button className="save-button" disabled={busy}>{c.changePassword}</button>{notice && <small className="settings-notice">{notice}</small>}</form><button className="sign-out-button" onClick={() => void onLogout()}><LogOut size={16} />{c.signOut}</button></div>;
 }
 
 function EmptyState({ text }: { text: string }) { return <div className="empty-state"><UserRound size={22} /><p>{text}</p></div>; }

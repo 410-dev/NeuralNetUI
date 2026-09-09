@@ -1,3 +1,4 @@
+import { normalizeGreetings } from "./greetings.ts";
 import type { AppearancePreferences, AccentPaletteId, Locale } from "./types.ts";
 
 /** Named accent choices. The custom entry carries no colour of its own; the saved hex supplies it. */
@@ -19,6 +20,7 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   streamChunkSize: 3,
   showReasoningNotes: true,
   reasoningNotes: {},
+  greetings: {},
 };
 
 /** Effort keys that share one description. "off" and "none" are both the fast path. */
@@ -137,6 +139,7 @@ export function normalizeAppearance(input: Partial<AppearancePreferences> | unde
     streamChunkSize: clamp(Math.floor(Number(input?.streamChunkSize) || DEFAULT_APPEARANCE.streamChunkSize), 1, 24),
     showReasoningNotes: input?.showReasoningNotes !== false,
     reasoningNotes: normalizeReasoningNotes(input?.reasoningNotes),
+    greetings: normalizeGreetings(input?.greetings),
   };
 }
 

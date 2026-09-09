@@ -57,7 +57,7 @@ test("stored notes keep only known keys and trim them", () => {
 });
 
 test("appearance preferences fall back to defaults and clamp the chunk size", () => {
-  assert.deepEqual(normalizeAppearance(undefined), { lmStudioProgress: "both", accentPalette: "blue", accentColor: "#4d7fd8", streamReveal: "instant", streamPacing: "immediate", streamChunkSize: 3, showReasoningNotes: true, reasoningNotes: {} });
+  assert.deepEqual(normalizeAppearance(undefined), { lmStudioProgress: "both", accentPalette: "blue", accentColor: "#4d7fd8", streamReveal: "instant", streamPacing: "immediate", streamChunkSize: 3, showReasoningNotes: true, reasoningNotes: {}, greetings: {} });
   const normalized = normalizeAppearance({ accentPalette: "nope" as never, streamReveal: "fade", streamPacing: "chunked", streamChunkSize: 999 });
   assert.equal(normalized.accentPalette, "blue");
   assert.equal(normalized.streamChunkSize, 24);

@@ -3,7 +3,7 @@ import type { Locale } from "./types.ts";
 export type TimeBand = "earlyDawn" | "morning" | "midday" | "afternoon" | "evening" | "night" | "lateNight";
 
 /** Start hour of each band, ordered through the day. The last band wraps past midnight. */
-const BAND_STARTS: Array<[TimeBand, number]> = [
+export const BAND_STARTS: Array<[TimeBand, number]> = [
   ["earlyDawn", 4], ["morning", 6], ["midday", 11], ["afternoon", 14], ["evening", 17], ["night", 21], ["lateNight", 23],
 ];
 
@@ -123,14 +123,32 @@ const GREETINGS: Record<Locale, Record<TimeBand, string[]>> = {
 
 export const greetingsFor = (locale: Locale, band: TimeBand) => GREETINGS[locale][band];
 
-/**
- * Picks one greeting for the given moment. The choice is keyed to the calendar day and band so it
- * stays put while a tab is open but differs from one day to the next.
- */
-export function greetingFor(locale: Locale, name: string, at = new Date()): string {
+export type GreetingOverrides = Partial<Record<Locale, Partial<Record<TimeBand, string[]>>>>;
+
+export function normalizeGreetings(input: unknown): GreetingOverrides {
+  const source = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const result: GreetingOverrides = {};
+  for (const locale of ["ko", "en"] as const) {
+    const bands = source[locale];
+    if (!bands || typeof bands !== "object") continue;
+    for (const [band] of BAND_STARTS) {
+      const values = (bands as Record<string, unknown>)[band];
+      if (!Array.isArray(values)) continue;
+      const lines = Array.from({ length: 5 }, (_, index) => typeof values[index] === "string" ? values[index].trim().slice(0, 200) : "");
+      if (lines.some(Boolean)) (result[locale] ??= {})[band] = lines;
+    }
+  }
+  return result;
+}
+
+/** Random per visit; exclude the previous visible line when there is another choice. */
+export function greetingFor(locale: Locale, name: string, at = new Date(), settings: {
+  overrides?: GreetingOverrides; previous?: string; random?: () => number;
+} = {}): string {
   const band = timeBandFor(at.getHours());
-  const options = GREETINGS[locale][band];
-  const day = Math.floor((at.getTime() - at.getTimezoneOffset() * 60_000) / 86_400_000);
-  const index = ((day + band.length) % options.length + options.length) % options.length;
-  return options[index].replace("{name}", name);
+  const options = [...new Set(GREETINGS[locale][band].map((fallback, index) =>
+    (settings.overrides?.[locale]?.[band]?.[index]?.trim() || fallback).replaceAll("{name}", () => name)))];
+  const alternatives = options.filter(line => line !== settings.previous);
+  const choices = alternatives.length ? alternatives : options;
+  return choices[Math.min(choices.length - 1, Math.max(0, Math.floor((settings.random || Math.random)() * choices.length)))];
 }

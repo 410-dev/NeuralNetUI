@@ -80,9 +80,9 @@
 
 ## Product mark and greetings
 
-- One drawn mark stands for a model: a 2-3-2 node-and-edge network in `currentColor`, used in the model lists, the chat picker, the settings sidebar and the favicon.
+- One drawn mark stands for a model: a 2-3-2 node-and-edge network in `currentColor`, used in the model settings lists, settings sidebar and favicon. The chat model dropdown omits model icons and centres its selection check vertically.
 - Space the mark's layers so the network reads as layers rather than a cluster of touching circles: small nodes, wide gaps, and edges trimmed short of each node so the mark needs no plate behind it.
-- The idle greeting varies by time of day across seven bands with several lines each. Pick deterministically from the calendar day so a line holds still while a tab is open.
+- The idle greeting varies by time of day across seven bands with several lines each. Pick randomly on each main-screen entry, excluding the previous visible line, and hold it still while typing. Appearance settings provides expandable time bands with five editable lines per language.
 - Headings that carry Korean use `word-break: keep-all`; breaking between syllables reads as a typo.
 - On narrow screens the greeting wraps inside 70% of the viewport rather than the full width.
 
@@ -140,3 +140,9 @@
 - Context disclosure shows input, response and reasoning in aligned white/grey rows. Identify history/draft values as estimates and recalculate immediately when prior reasoning is toggled.
 
 - Context compaction places compact/resume prompt editors side by side on desktop and vertically on mobile. Show template placeholders and the per-response resume cap alongside the threshold. Keep compaction activity on the existing wait line.
+
+## 2.1.5 refinements
+
+- Temporary chat backgrounds use neutral grey without recolouring interactive accents. The idle heading is “안녕하세요, 여행자” and subtitle “채팅이 저장되지 않습니다”; omit the separate explanation above it.
+- An empty temporary chat offers an icon-only Return to regular chat control (with title and accessible name), preserving its draft; a started temporary chat offers Save this chat.
+- Display name belongs in its own account settings group with the same border, padding and input alignment as the password group.

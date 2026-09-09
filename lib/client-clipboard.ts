@@ -1,3 +1,9 @@
+/** Leave text insertion (including selection and undo) to the browser. */
+export function clipboardImages(data: { getData: (format: string) => string; files: ArrayLike<File> }): File[] {
+  if (data.getData("text/plain")) return [];
+  return Array.from(data.files).filter((file) => file.type.startsWith("image/"));
+}
+
 type ClipboardAdapter = {
   isSecureContext: boolean;
   writeText?: (text: string) => Promise<void>;

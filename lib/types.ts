@@ -1,3 +1,5 @@
+import type { GreetingOverrides } from "./greetings.ts";
+
 export type ReasoningKind = "builtin" | "custom";
 export type SystemPromptMode = "replace" | "prepend" | "append";
 export type Locale = "en" | "ko";
@@ -22,6 +24,7 @@ export interface AppearancePreferences {
   showReasoningNotes: boolean;
   /** Per-effort description overrides. An absent key falls back to the built-in wording. */
   reasoningNotes: Record<string, string>;
+  greetings: GreetingOverrides;
 }
 
 export interface ReasoningPreset {

@@ -27,6 +27,10 @@ const appearanceSchema = z.object({
   streamPacing: z.enum(["immediate", "chunked"]).default("immediate"),
   streamChunkSize: z.number().int().min(1).max(24).default(DEFAULT_APPEARANCE.streamChunkSize),
   showReasoningNotes: z.boolean().default(true),
+  greetings: z.object({
+    ko: z.partialRecord(z.enum(["earlyDawn", "morning", "midday", "afternoon", "evening", "night", "lateNight"]), z.array(z.string().max(200)).max(5)).optional(),
+    en: z.partialRecord(z.enum(["earlyDawn", "morning", "midday", "afternoon", "evening", "night", "lateNight"]), z.array(z.string().max(200)).max(5)).optional(),
+  }).default({}),
   reasoningNotes: z.record(z.string(), z.string().max(200)).default({}),
 }).default(DEFAULT_APPEARANCE);
 const preferencesSchema = z.object({ sendReasoningToModel: z.boolean(), exportReasoning: z.boolean(), language: z.enum(["en", "ko"]).default("en"), onDemand: z.boolean().default(false), showModelIdentifiers: z.boolean().default(true), renderStrikethrough: z.boolean().default(true), defaultModelId: z.string().min(1).optional(), defaultReasoningPresetId: z.string().min(1).optional(), appearance: appearanceSchema }).default({ sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE });
@@ -87,7 +91,7 @@ export function publicConfig(config: AppConfig, user: AuthUser): PublicConfig {
 
 export async function writeConfigForUser(input: unknown, user: AuthUser): Promise<AppConfig> {
   const incoming = normalizeConfig(configSchema.parse(input)); const current = await readConfig(); const admin = isAdmin(user);
-  updateUserPreferences(user.id, admin ? incoming.profile.name : user.displayName, { sendReasoningToModel: incoming.preferences.sendReasoningToModel, exportReasoning: incoming.preferences.exportReasoning, language: incoming.preferences.language, showModelIdentifiers: incoming.preferences.showModelIdentifiers, renderStrikethrough: incoming.preferences.renderStrikethrough, defaultModelId: incoming.preferences.defaultModelId, defaultReasoningPresetId: incoming.preferences.defaultReasoningPresetId, appearance: incoming.preferences.appearance });
+  updateUserPreferences(user.id, incoming.profile.name, { sendReasoningToModel: incoming.preferences.sendReasoningToModel, exportReasoning: incoming.preferences.exportReasoning, language: incoming.preferences.language, showModelIdentifiers: incoming.preferences.showModelIdentifiers, renderStrikethrough: incoming.preferences.renderStrikethrough, defaultModelId: incoming.preferences.defaultModelId, defaultReasoningPresetId: incoming.preferences.defaultReasoningPresetId, appearance: incoming.preferences.appearance });
   const mergePrivatePresets = (existing: ModelConfig, candidate?: ModelConfig) => mergeModelPresets(existing, candidate, user.id, admin);
   const incomingConnections = new Map(incoming.connections.map((connection) => [connection.id, connection]));
   if (!admin) {

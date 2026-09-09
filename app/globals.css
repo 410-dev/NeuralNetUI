@@ -38,7 +38,7 @@ input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-i
 button:disabled { cursor: not-allowed; opacity: .55; }
 ::selection { background: rgb(var(--accent-rgb) / .55); color: white; }
 
-.app-shell { height: var(--app-height, 100dvh); display: flex; gap: 10px; padding: 12px; overflow: hidden; background: radial-gradient(circle at 72% 55%, rgb(var(--accent-rgb) / .16), transparent 34%), var(--bg); }
+.app-shell { height: var(--app-height, 100dvh); display: flex; gap: 10px; padding: 12px; overflow: hidden; background: radial-gradient(circle at 72% 55%, rgb(var(--background-accent-rgb, var(--accent-rgb)) / .16), transparent 34%), var(--bg); }
 .sidebar { width: 254px; flex: 0 0 254px; display: flex; flex-direction: column; gap: 10px; z-index: 30; transition: width .46s var(--spring), flex-basis .46s var(--spring); }
 .side-panel, .profile-card { background: rgba(22,22,26,.94); border: 1px solid var(--border); box-shadow: inset 0 1px rgba(255,255,255,.025); }
 .side-panel { flex: 1; min-height: 0; overflow: hidden; border-radius: var(--radius-xl); padding: 10px; display: flex; flex-direction: column; transition: padding .46s var(--spring); }
@@ -74,7 +74,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .profile-card > svg { color: var(--muted); }
 
 .chat-surface { flex: 1; min-width: 0; position: relative; overflow: hidden; display: flex; flex-direction: column; border-radius: 34px; }
-.ambient-glow { pointer-events: none; position: absolute; width: min(960px, 90%); height: min(650px, 82%); left: 50%; top: 52%; transform: translate(-50%, -50%); background: radial-gradient(ellipse, rgb(var(--accent-rgb) / .38) 0%, rgb(var(--accent-rgb) / .2) 29%, transparent 69%); filter: blur(4px); transition: opacity .5s; }
+.ambient-glow { pointer-events: none; position: absolute; width: min(960px, 90%); height: min(650px, 82%); left: 50%; top: 52%; transform: translate(-50%, -50%); background: radial-gradient(ellipse, rgb(var(--background-accent-rgb, var(--accent-rgb)) / .38) 0%, rgb(var(--background-accent-rgb, var(--accent-rgb)) / .2) 29%, transparent 69%); filter: blur(4px); transition: opacity .5s; }
 .app-shell.chat-active .chat-surface { background: #08080a; }
 .chat-active .ambient-glow { display: none; opacity: 0; }
 .model-switcher { position: relative; z-index: 20; align-self: flex-start; margin: 6px 0 0 12px; }
@@ -797,12 +797,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .surface-action:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
 .surface-action.active { color: var(--text); border-color: rgb(var(--accent-bright-rgb) / .45); background: var(--accent-soft); }
 .surface-action:disabled { opacity: .55; }
-.temporary-note { margin: 0; padding: 0 4px; color: var(--dim); font-size: 9.5px; line-height: 1.5; text-align: right; }
 
 /* The model mark reads as a drawn glyph, so give it room without a plate. */
-.model-option { grid-template-columns: 18px 20px minmax(0,1fr) auto; }
-.model-option-mark { display: grid; place-items: center; color: var(--muted); }
-.model-option:hover .model-option-mark, .model-column-list > button.active .model-type-icon { color: var(--text); }
+.temporary-chat { --background-accent-rgb: 128 128 128; }
+.model-option .selection-dot { align-self: center; }
+.model-column-list > button.active .model-type-icon { color: var(--text); }
 
 /* Item 9: one editable line per reasoning choice. */
 .reasoning-notes-head { display: flex; justify-content: flex-end; margin-top: -30px; }
@@ -814,7 +813,6 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .surface-actions { top: 10px; right: 10px; max-width: calc(100% - 150px); }
   .surface-action span { display: none; }
   .surface-action { width: 34px; padding: 0; justify-content: center; }
-  .temporary-note { display: none; }
 }
 @media (max-width: 620px) {
   .reasoning-notes { grid-template-columns: 1fr; }
@@ -854,3 +852,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 .harness-dialog-help { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 
+
+.greeting-settings details { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+.greeting-settings summary { cursor: pointer; font-size: 13px; }
+.greeting-settings summary span { color: var(--muted); font-size: 11px; margin-left: 8px; }
+.greeting-fields { display: grid; gap: 10px; margin-top: 14px; min-width: 0; }
+.greeting-fields .field { margin: 0; min-width: 0; }
+.account-card + .account-card { margin-top: 16px; }
+.account-card .field { margin-bottom: 0; }
+
+.surface-action.icon-only { width: 36px; padding: 0; justify-content: center; }

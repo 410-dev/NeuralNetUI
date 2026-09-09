@@ -25,8 +25,8 @@
 - Connections are ordered and support OpenAI API or LM Studio drivers. Connections, models, and reasoning presets use drag-and-drop or adjacent up/down controls; their independently scrollable settings lists persist the order shown by chat pickers. Each connection preserves its own discovered model metadata and reasoning presets; duplicate served identifiers resolve to the highest-priority connection.
 - LM Studio discovery uses native `/api/v1` REST. Version 2.1.1 uses request-scoped SDK loading and supported chat inference for progress, with Chat Completions fallback for unsupported SDK semantics.
 - Chat admission uses a server-wide residency manager: inventory checks and load/unload mutations are serialized; aliases use their base model. Dispatched mutations retain the lock through completion even if the caller cancels.
-- Current release version: 2.1.4.1.
-- Version 2.1.4.1 MSI built and metadata verified on 2026-09-09; unsigned. Output: `installer/output/NeuralNetUI-2.1.4.1-x64.msi`. Validation notes: `docs/audits/2026-09-09-release-2.1.4.1.md`.
+- Current release version: 2.1.5.
+- Version 2.1.5 MSI built and metadata verified on 2026-09-09; unsigned. Output: `installer/output/NeuralNetUI-2.1.5-x64.msi`. Validation notes: `docs/audits/2026-09-09-release-2.1.5.md`.
 - Windows Installer compares only the first three version fields, so revision-only releases need `MajorUpgrade AllowSameVersionUpgrades="yes"` to replace the installed product. `package.json` carries the four-field version, which is not valid semver; the package is private and never published.
 - The context donut starts at the most recent compacted turn and counts the summary in place of the history it covers, so compaction is visible there. The composer leaves its pill shape whenever anything takes a row of its own — queued messages, attachments or an upload in progress.
 - Version 2.1.4 MSI built and metadata verified on 2026-09-09; unsigned. Output: `installer/output/NeuralNetUI-2.1.4-x64.msi`. Validation notes: `docs/audits/2026-09-09-release-2.1.4.md`.
@@ -57,7 +57,7 @@
 - `harnessSettings.maxOutputTokens` caps a response; 0 means the whole remaining context window. Before 2.1.0 `lib/chat-runtime.ts` hardcoded a 4096-token ceiling, which truncated long answers.
 - The settings footer tracks a JSON snapshot of the saved config: save is disabled while clean and the secondary button reads Close instead of Cancel.
 - Temporary chats use migration 9's `conversations.temporary` flag: excluded from history and search, swept by `discardTemporaryConversations` when the client's history fetch no longer names them via `keepTemporary`, and skipped while a chat job is registered. Only `PATCH { promote: true }` clears the flag; ordinary saves carry it forward.
-- Greetings live in `lib/greetings.ts`: seven time bands, five lines each per language, chosen by calendar day so a line holds still while a tab is open.
+- Greetings live in `lib/greetings.ts`: seven time bands and five editable lines per language in appearance.greetings. Main-screen entries choose randomly, excluding the previous visible line stored per account/language/band in sessionStorage; typing does not reroll. Empty lines fall back to defaults; {name} inserts the first name.
 - Reasoning descriptions come from `lib/appearance.ts`; an empty override falls back to the built-in wording for the active language, so switching language keeps untouched notes readable.
 - The tray host opens the Web UI only when launched without `--startup`; the Run key passes `--startup` so signing in never opens a browser, while the Start menu shortcut passes `--open`.
 - The browser tool is gated by `experimental.browserTool` in app config: an admin switches it on in the Experimental settings tab, and `lib/chat-runtime.ts` refuses it server-side regardless of what a client sends.
@@ -76,3 +76,8 @@
 - Harness resumePrompt supports literal single-pass %COMPRESSED% and %USER_PROMPT%; maxCompactionResumes defaults to 3 (0–100), per response, excluding pre-send compaction. Resume retries do not consume tool rounds. Original prompts/attachments and visible partial output are retained; impossible post-compaction input fails before dispatch.
 - Summary requests split oversized serialized history into bounded fragments, including prior summary in each request. Branch summary fingerprints still protect reuse. New settings have schema defaults for existing installations.
 - Version 2.1.3 unsigned MSI built and metadata verified: `installer/output/NeuralNetUI-2.1.3-x64.msi` (400025433 bytes); release notes and hash in `docs/audits/2026-09-09-release-2.1.3.md`.
+
+- Release 2.1.5 temporary chats override only background accent channels with neutral grey. Idle temporary copy is fixed; both empty-chat mode controls are icon-only; before the first message the action returns to regular mode preserving the draft, afterwards it promotes the chat.
+- New Chat opens `/`; only a successful conversation creation replaces it with `/chat/:id`. Popstate to `/` resets the draft; missing historical draft URLs recover to `/`.
+- Composer paste leaves plain text insertion native and routes image-only clipboard files through the attachment uploader. Mixed text/image clipboard data prioritizes text.
+- Account settings owns the display-name editor in its own account-card, aligned with the password card, using the shared Save Changes footer. All roles may update their own display name via existing config persistence.

@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { copyTextWithAdapter } from "./client-clipboard.ts";
+import { copyTextWithAdapter, clipboardImages } from "./client-clipboard.ts";
+
+test("text and rich text paste remain native, including mixed text/image clipboard data", () => {
+  const image = new File(["image"], "image.png", { type: "image/png" });
+  assert.deepEqual(clipboardImages({ getData: () => "hello\n여행자", files: [image] }), []);
+  assert.deepEqual(clipboardImages({ getData: () => "", files: [] }), []);
+});
+
+test("image-only paste accepts images and excludes non-image files", () => {
+  const image = new File(["image"], "image.png", { type: "image/png" });
+  const pdf = new File(["pdf"], "file.pdf", { type: "application/pdf" });
+  assert.deepEqual(clipboardImages({ getData: () => "", files: [image, pdf] }), [image]);
+});
 
 test("secure clipboard writes without invoking the fallback", async () => {
   const calls: string[] = [];

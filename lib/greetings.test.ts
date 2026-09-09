@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { greetingFor, greetingsFor, timeBandFor } from "./greetings.ts";
+import { greetingFor, greetingsFor, timeBandFor, normalizeGreetings } from "./greetings.ts";
 import type { Locale } from "./types.ts";
 import type { TimeBand } from "./greetings.ts";
 
@@ -30,19 +30,29 @@ test("each band offers five distinct greetings in both languages", () => {
   }
 });
 
-test("a greeting is stable within a day and rotates across days", () => {
-  const morning = new Date(2026, 8, 9, 8, 0, 0);
-  const later = new Date(2026, 8, 9, 10, 30, 0);
-  assert.equal(greetingFor("ko", "호윤", morning), greetingFor("ko", "호윤", later));
-  assert.ok(greetingFor("ko", "호윤", morning).includes("호윤"));
-  assert.ok(!greetingFor("en", "Hoyoun", morning).includes("{name}"));
-  const seen = new Set<string>();
-  for (let day = 0; day < 5; day++) seen.add(greetingFor("en", "Hoyoun", new Date(2026, 8, 9 + day, 8, 0, 0)));
-  assert.equal(seen.size, 5, "five consecutive days use all five morning greetings");
+test("visits choose randomly and exclude the previous greeting", () => {
+  const at = new Date(2026, 8, 9, 8);
+  const first = greetingFor("ko", "호윤", at, { random: () => 0 });
+  assert.notEqual(first, greetingFor("ko", "호윤", at, { previous: first, random: () => 0 }));
+  assert.equal(new Set([0, .2, .4, .6, .8].map(value => greetingFor("en", "Name", at, { random: () => value }))).size, 5);
+});
+
+test("custom greetings replace all name slots and fall back on blanks in the active language", () => {
+  const at = new Date(2026, 8, 9, 8);
+  const overrides = { ko: { morning: ["{name}님, {name}님!", ""] } };
+  assert.equal(greetingFor("ko", "호윤", at, { overrides, random: () => 0 }), "호윤님, 호윤님!");
+  assert.equal(greetingFor("ko", "호윤", at, { overrides, random: () => .2 }), greetingsFor("ko", "morning")[1].replaceAll("{name}", "호윤"));
+  assert.equal(greetingFor("en", "Name", at, { overrides, random: () => 0 }), "Good morning, Name.");
+  assert.equal(greetingFor("ko", "호윤", at, { overrides: { ko: { morning: Array(5).fill("same") } }, previous: "same" }), "same");
 });
 
 test("the band changes the greeting at the same time of day", () => {
   const day = 12;
   const bands = new Set([2, 5, 8, 12, 15, 19, 22].map((hour) => greetingFor("ko", "호윤", new Date(2026, 8, day, hour, 0, 0))));
   assert.equal(bands.size, 7, "each band produced its own line");
+});
+
+test("stored greeting overrides are bounded and ignore malformed or unknown entries", () => {
+  assert.deepEqual(normalizeGreetings(null), {});
+  assert.deepEqual(normalizeGreetings({ ko: { morning: ["  hello  ", 42, null, "", "x".repeat(201), "extra"], invalid: ["x"] }, bad: {} }), { ko: { morning: ["hello", "", "", "", "x".repeat(200)] } });
 });
