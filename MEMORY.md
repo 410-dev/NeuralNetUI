@@ -25,7 +25,7 @@
 - Connections are ordered and support OpenAI API or LM Studio drivers. Connections, models, and reasoning presets use drag-and-drop or adjacent up/down controls; their independently scrollable settings lists persist the order shown by chat pickers. Each connection preserves its own discovered model metadata and reasoning presets; duplicate served identifiers resolve to the highest-priority connection.
 - LM Studio discovery uses native `/api/v1` REST. Version 2.1.1 uses request-scoped SDK loading and supported chat inference for progress, with Chat Completions fallback for unsupported SDK semantics.
 - Chat admission uses a server-wide residency manager: inventory checks and load/unload mutations are serialized; aliases use their base model. Dispatched mutations retain the lock through completion even if the caller cancels.
-- Current release version: 2.1.1.
+- Current release version: 2.1.2.
 - The UI/LM Studio audit in `docs/audits/2026-09-08-ui-lmstudio.md` has 14 addressed findings; #7 is intentional behavior per the user. Settings preserve protected presets and unsaved model edits; aliases resolve their base connection; API-key removal explicitly disables fallback credentials.
 - Deleted conversations/users discard their chat jobs. Background saves validate task ownership and conversation existence inside the SQLite transaction. Terminal jobs release full histories and expire after 60 seconds, with at most 64 terminal jobs retained.
 - Persisted tool call/result pairs are restored for follow-up requests. Interrupted questions recover on conversation read; active questions can be stopped. SSE errors and incomplete streams are surfaced, and failed client saves restore the unsent draft.
@@ -63,3 +63,4 @@
 - Admin-only experimental.openAIProgress defaults false; when enabled, OpenAI connections probe their own native LM Studio inventory before native inference. Other hosts remain standard Chat Completions with progress unavailable. Standard token usage is never interpreted as prompt completion percentage.
 - Validation script scripts/test-progress-integration.mjs uses an isolated DB; --live opts into localhost:1234 and --keep leaves the QA server running for browser checks.
 - Final 2.1.1 unsigned MSI built and metadata verified: installer/output/NeuralNetUI-2.1.1-x64.msi (400009049 bytes); audit docs/audits/2026-09-09-release-2.1.1.md includes hash and validation. Staged standalone native inference smoke passed.
+- Version 2.1.2 MSI built and metadata verified on 2026-09-09; unsigned. Output: `installer/output/NeuralNetUI-2.1.2-x64.msi`. Validation notes: `docs/audits/2026-09-09-release-2.1.2.md`.
