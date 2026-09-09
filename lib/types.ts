@@ -17,6 +17,10 @@ export interface AppearancePreferences {
   streamPacing: StreamPacing;
   /** Characters released per step while pacing is "chunked". */
   streamChunkSize: number;
+  /** Show each reasoning choice's description in the chat picker. */
+  showReasoningNotes: boolean;
+  /** Per-effort description overrides. An absent key falls back to the built-in wording. */
+  reasoningNotes: Record<string, string>;
 }
 
 export interface ReasoningPreset {
@@ -208,6 +212,8 @@ export interface ChatBranch {
 export interface Conversation {
   id: string;
   title: string;
+  /** Kept out of history and removed when the chat ends unless the user promotes it. */
+  temporary?: boolean;
   modelId: string;
   reasoningPresetId?: string;
   activeBranchId: string;

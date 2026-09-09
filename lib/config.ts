@@ -25,6 +25,8 @@ const appearanceSchema = z.object({
   streamReveal: z.enum(["instant", "fade"]).default("instant"),
   streamPacing: z.enum(["immediate", "chunked"]).default("immediate"),
   streamChunkSize: z.number().int().min(1).max(24).default(DEFAULT_APPEARANCE.streamChunkSize),
+  showReasoningNotes: z.boolean().default(true),
+  reasoningNotes: z.record(z.string(), z.string().max(200)).default({}),
 }).default(DEFAULT_APPEARANCE);
 const preferencesSchema = z.object({ sendReasoningToModel: z.boolean(), exportReasoning: z.boolean(), language: z.enum(["en", "ko"]).default("en"), onDemand: z.boolean().default(false), showModelIdentifiers: z.boolean().default(true), renderStrikethrough: z.boolean().default(true), defaultModelId: z.string().min(1).optional(), defaultReasoningPresetId: z.string().min(1).optional(), appearance: appearanceSchema }).default({ sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE });
 const harnessSettingsSchema = z.object({

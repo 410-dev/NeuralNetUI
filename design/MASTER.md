@@ -78,6 +78,24 @@
 - Stack the composer as soon as the leftover space is too narrow to type in, not only when the draft overflows it. On a phone that means the stacked layout from the start.
 - Centre single-line rows. A row taller than its content must centre it; reserve top alignment for options that genuinely have several lines, where the marker belongs beside the first one.
 
+## Product mark and greetings
+
+- One drawn mark stands for a model: a three-layer node-and-edge network in `currentColor`, used in the model lists, the chat picker and the favicon.
+- The idle greeting varies by time of day across seven bands with several lines each. Pick deterministically from the calendar day so a line holds still while a tab is open.
+- Headings that carry Korean use `word-break: keep-all`; breaking between syllables reads as a typo.
+- On narrow screens the greeting wraps inside 70% of the viewport rather than the full width.
+
+## Gestures and scrolling
+
+- The shell owns its scrolling, so `html` and `body` set `overscroll-behavior: none` and every inner scroller sets `contain`. A downward drag inside the app must never become a browser refresh.
+- A popover anchored to an edge must cap its height against the viewport and scroll inside itself; a long list of choices cannot be allowed to run off screen.
+
+## Temporary chats
+
+- A temporary chat stays out of history and search, and is discarded when the user opens another chat, starts a new one, or reloads onto a different route. It exists server-side only because the streaming pipeline needs somewhere to write.
+- Never sweep a temporary chat that still has a live chat job; another tab may be streaming into it.
+- Promoting one clears the flag and titles it from the first exchange through the same harness settings the automatic path uses.
+
 ## Experimental features
 
 - Unfinished capabilities live behind an administrator switch in their own settings tab, listed after the harness tab.

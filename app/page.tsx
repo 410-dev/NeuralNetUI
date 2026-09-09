@@ -4,7 +4,9 @@ import { HarnessSettingsPanel, TextDialog } from "./harness-settings";
 import { HistorySearch } from "./history-search";
 import { SectionTitle } from "./section-title";
 import { SelectMenu, usePopoverPresence } from "./select-menu";
-import { ACCENT_PALETTES, accentColorOf, accentVariables, DEFAULT_APPEARANCE, normalizeHexColor, revealStep } from "@/lib/appearance";
+import { NeuralMark } from "./neural-mark";
+import { ACCENT_PALETTES, accentColorOf, accentVariables, DEFAULT_APPEARANCE, defaultReasoningNote, normalizeHexColor, reasoningNote, REASONING_NOTE_KEYS, revealStep } from "@/lib/appearance";
+import { greetingFor } from "@/lib/greetings";
 import { chatWaitLabel } from "@/lib/chat-progress";
 import { normalizeReasoning, reasoningOptionName, isReasoningToggle } from "@/lib/reasoning-capabilities";
 
@@ -13,7 +15,7 @@ import {
   FileText, GitBranch, GripVertical, ImagePlus, KeyRound, LoaderCircle, Menu, MessageSquarePlus, Pencil, Plus, RefreshCw,
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
   LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload,
-  Palette, PanelLeftClose, PanelLeftOpen, Settings, Type, Zap, FlaskConical,
+  Palette, PanelLeftClose, PanelLeftOpen, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save,
 } from "lucide-react";
 import { FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -72,7 +74,7 @@ const translations = {
     historyEmpty: "Your conversations will appear here.", settingsConnections: "Settings & connections", selectModel: "Select a model",
     availableModels: "Available models", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
     messagePlaceholder: "Message to send", reasoningPreset: "Reasoning preset", native: "Native", template: "Template", default: "default",
-    sendPriorReasoning: "Send prior reasoning", sendPriorReasoningDesc: "Include reasoning_content in the next request",
+    sendPriorReasoning: "Remember its train of thought", sendPriorReasoningDesc: "Send the earlier reasoning back with the next request",
     disclaimer: "Responses may be inaccurate. Verify important information.", stop: "Stop generating", send: "Send message", addToQueue: "Add to queue", queuedMessages: "Queued messages", removeQueuedMessage: "Remove queued message",
     cancel: "Cancel", forkSend: "Fork & send", editBranch: "Edit and branch", reasoning: "Reasoning", copy: "Copy", regenerate: "Regenerate response", regenerateRequest: "Regenerate from this message", deleteMessage: "Delete message", confirmDeleteMessage: "Delete this message and its connected model response?", previousRevision: "Previous revision", nextRevision: "Next revision",
     exportConversation: "Export conversation", exportDescription: "Export every branch as JSON, or the selected branch as Markdown.",
@@ -103,6 +105,9 @@ const translations = {
     streamRevealTitle: "Response appearance", streamRevealHelp: "How finished text settles into the thread while a response streams.", streamInstant: "Plain", streamInstantDesc: "Text appears as soon as it arrives.", streamFade: "Soft fade", streamFadeDesc: "New passages fade in and the leading edge stays soft.",
     streamPacingTitle: "Response pacing", streamPacingHelp: "Servers deliver text in bursts. Pacing spreads each burst out evenly.", streamImmediate: "Every token", streamImmediateDesc: "Show everything the moment it arrives.", streamChunked: "Even pace", streamChunkedDesc: "Release a fixed slice per frame so text reads as steady typing.", streamChunkSize: "Characters per step",
     nativePresetNote: "Built-in native levels cannot be renamed or removed, so they are offered only in the chat reasoning picker.",
+    temporaryChat: "Temporary chat", saveChat: "Save this chat", savingChat: "Saving…", chatSaved: "Saved to your history.", chatSaveFailed: "This chat could not be saved.",
+    temporaryChatHint: "This chat stays out of your history and is discarded when you leave it. Save it to keep it.",
+    reasoningNotesTitle: "Reasoning descriptions", reasoningNotesHelp: "Show a short line under each reasoning choice in the chat picker, and word it however you like.", reasoningNotesReset: "Leave a field empty to use the built-in wording.",
     experimental: "Experimental", experimentalTitle: "Experimental features", experimentalDesc: "Unfinished capabilities. Switch one on to offer it in the chat tool menu.", experimentalBrowser: "Browser tool", experimentalBrowserDesc: "Let the model drive a headless browser: render JavaScript pages, interact with elements and take screenshots. Sessions are isolated and close at the end of each response.", experimentalHelp: "While a feature is off, the tool is hidden from the chat menu and refused by the server even if a client asks for it.",
     outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token",
   },
@@ -111,7 +116,7 @@ const translations = {
     historyEmpty: "대화를 시작하면 여기에 표시됩니다.", settingsConnections: "설정 및 연결", selectModel: "모델 선택",
     availableModels: "사용 가능한 모델", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
     messagePlaceholder: "보낼 메시지", reasoningPreset: "Reasoning 프리셋", native: "내장", template: "템플릿", default: "기본값",
-    sendPriorReasoning: "이전 Reasoning 전송", sendPriorReasoningDesc: "다음 요청에 reasoning_content를 포함합니다",
+    sendPriorReasoning: "생각 기록 기억하기", sendPriorReasoningDesc: "다음 요청에 이전 생각 기록을 함께 보냅니다",
     disclaimer: "응답이 부정확할 수 있습니다. 중요한 정보는 확인해 주세요.", stop: "생성 중단", send: "메시지 전송", addToQueue: "대기열에 추가", queuedMessages: "대기 중인 메시지", removeQueuedMessage: "대기열에서 제거",
     cancel: "취소", forkSend: "분기 후 전송", editBranch: "편집 후 분기", reasoning: "Reasoning", copy: "복사", regenerate: "응답 재생성", regenerateRequest: "이 메시지부터 재생성", deleteMessage: "메시지 삭제", confirmDeleteMessage: "이 메시지와 연결된 모델 응답을 함께 삭제할까요?", previousRevision: "이전 수정본", nextRevision: "다음 수정본",
     exportConversation: "대화 내보내기", exportDescription: "모든 브랜치를 JSON으로, 선택한 브랜치를 Markdown으로 내보냅니다.",
@@ -142,6 +147,9 @@ const translations = {
     streamRevealTitle: "응답 표시 방식", streamRevealHelp: "응답이 스트리밍되는 동안 글자가 화면에 자리 잡는 방식입니다.", streamInstant: "기본", streamInstantDesc: "도착한 글자를 그대로 즉시 표시합니다.", streamFade: "부드러운 페이드", streamFadeDesc: "새 문단이 서서히 나타나고 끝부분이 부드럽게 이어집니다.",
     streamPacingTitle: "응답 표시 속도", streamPacingHelp: "서버는 글자를 뭉치로 보냅니다. 속도 조절은 그 뭉치를 고르게 나눠 표시합니다.", streamImmediate: "전부 표시", streamImmediateDesc: "도착한 내용을 한 번에 모두 표시합니다.", streamChunked: "일정한 속도", streamChunkedDesc: "프레임마다 정해진 만큼만 내보내 타이핑처럼 보이게 합니다.", streamChunkSize: "한 번에 표시할 글자 수",
     nativePresetNote: "기본 제공 Native 추론 수준은 이름 변경과 삭제가 불가능하므로 채팅의 추론 선택 창에서만 제공됩니다.",
+    temporaryChat: "임시 채팅", saveChat: "이 채팅 저장", savingChat: "저장 중…", chatSaved: "채팅 기록에 저장했습니다.", chatSaveFailed: "채팅을 저장하지 못했습니다.",
+    temporaryChatHint: "이 채팅은 기록에 남지 않으며 다른 채팅으로 이동하면 사라집니다. 저장하면 일반 채팅이 됩니다.",
+    reasoningNotesTitle: "추론 강도 설명", reasoningNotesHelp: "채팅의 추론 선택 창에서 각 항목 아래에 짧은 설명을 표시하고, 문구를 직접 바꿉니다.", reasoningNotesReset: "비워 두면 기본 문구를 사용합니다.",
     experimental: "실험적 기능", experimentalTitle: "실험적 기능", experimentalDesc: "아직 완성되지 않은 기능입니다. 켜면 채팅의 도구 메뉴에 나타납니다.", experimentalBrowser: "브라우저 도구", experimentalBrowserDesc: "모델이 헤드리스 브라우저를 직접 조작합니다. JavaScript 페이지 렌더링, 요소 상호작용, 스크린샷을 지원하며 세션은 격리되고 응답이 끝나면 닫힙니다.", experimentalHelp: "기능이 꺼져 있으면 채팅 메뉴에서 도구가 숨겨지고, 클라이언트가 요청해도 서버가 거부합니다.",
     outputTokens: "출력 토큰", reasoningTokens: "reasoning", tokensPerSecond: "토큰/초", timeToFirstToken: "첫 토큰 도착 시간",
   },
@@ -238,6 +246,10 @@ export default function Home() {
   const [searching, setSearching] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [renameTarget, setRenameTarget] = useState<ConversationSummary | null>(null);
+  const [temporaryMode, setTemporaryMode] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+  // Names the temporary chat that is still open, so the server keeps it and sweeps any other.
+  const temporaryIdRef = useRef("");
   useEffect(() => { setCollapsed(localStorage.getItem("neural-sidebar-collapsed") === "true"); }, []);
   const appearance: AppearancePreferences = config.preferences.appearance || DEFAULT_APPEARANCE;
   const { mounted: modelMenuMounted, closing: modelMenuClosing } = usePopoverPresence(modelMenuOpen);
@@ -289,7 +301,8 @@ export default function Home() {
 
   useEffect(() => {
     if (!auth?.authenticated) return;
-    Promise.all([fetch("/api/config").then((r) => r.json()), fetch("/api/conversations").then((r) => r.json())])
+    const openedId = decodeURIComponent(window.location.pathname).match(/^\/chat\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
+    Promise.all([fetch("/api/config").then((r) => r.json()), fetch(`/api/conversations${openedId ? `?keepTemporary=${encodeURIComponent(openedId)}` : ""}`).then((r) => r.json())])
       .then(async ([next, stored]: [PublicConfig, { conversations: ConversationSummary[] }]) => {
         setConfig(next); setSendReasoning(next.preferences.sendReasoningToModel);
         setHistories(stored.conversations || []);
@@ -407,21 +420,22 @@ export default function Home() {
     return new Map([...groups].map(([groupId, revisions]) => [groupId, [...revisions.values()]]));
   }, [conversation]);
   const userFirstName = config.profile.name.trim().split(/\s+/)[0];
+  const temporaryActive = temporaryMode || conversation?.temporary === true;
   const greeting = useMemo(() => {
     if (!config.account || !userFirstName) return locale === "ko" ? "안녕하세요." : "Hello";
-    const hour = new Date().getHours();
-    if (locale === "ko") return `${hour < 12 ? "좋은 아침이에요" : hour < 18 ? "좋은 오후예요" : "좋은 저녁이에요"}, ${userFirstName}님.`;
-    return `Good ${hour < 12 ? "Morning" : hour < 18 ? "Afternoon" : "Evening"}, ${userFirstName}.`;
+    return greetingFor(locale, userFirstName, new Date());
   }, [config.account, userFirstName, locale]);
 
   async function refreshHistories() {
-    const result = await fetch("/api/conversations").then((r) => r.json());
+    const keep = temporaryIdRef.current ? `?keepTemporary=${encodeURIComponent(temporaryIdRef.current)}` : "";
+    const result = await fetch(`/api/conversations${keep}`).then((r) => r.json());
     setHistories(result.conversations || []);
   }
 
   async function persist(next: Conversation, create = false) {
     try {
       const saved = await saveConversationRequest(next, create);
+      temporaryIdRef.current = saved.temporary ? saved.id : "";
       setConversation(saved);
       await refreshHistories().catch(() => undefined);
       return true;
@@ -472,6 +486,23 @@ export default function Home() {
     }
   }
 
+  /** Promotes the open temporary chat, letting the harness title it from the first exchange. */
+  async function promoteTemporaryChat() {
+    const id = conversation?.id;
+    if (!id || conversation?.temporary !== true) { temporaryIdRef.current = ""; setTemporaryMode(false); return; }
+    setPromoting(true); setError("");
+    try {
+      const response = await fetch(`/api/conversations/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ promote: true }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || c.chatSaveFailed);
+      temporaryIdRef.current = ""; setTemporaryMode(false);
+      setConversation((current) => current && current.id === id ? { ...current, temporary: false, ...(body.title ? { title: body.title } : {}) } : current);
+      await refreshHistories();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : c.chatSaveFailed);
+    } finally { setPromoting(false); }
+  }
+
   function handleThreadScroll() {
     const element = threadRef.current;
     if (element) autoFollowThreadRef.current = isNearScrollBottom(element);
@@ -482,13 +513,17 @@ export default function Home() {
     window.history[method]({}, "", `/chat/${encodeURIComponent(id)}`);
   }
 
-  function newChat(replaceUrl = false) {
+  function newChat(replaceUrl = false, temporary = false) {
     abandonRef.current = true; abortRef.current?.abort();
     clearQueuedPrompts();
     draftAttachments.forEach((attachment) => fetch(`/api/uploads/${attachment.id}`, { method: "DELETE" }).catch(() => undefined));
+    const abandoned = temporaryIdRef.current;
     const id = uid("conversation"); pendingConversationIdRef.current = id; navigateToChat(id, replaceUrl);
     autoFollowThreadRef.current = true;
+    temporaryIdRef.current = ""; setTemporaryMode(temporary); setPromoting(false);
     setDraftAttachments([]); setRenderedMessageCount(60); setIsGenerating(false); setPendingWait(null); setConversation(null); setMessages([]); setDraft(""); setError(""); setMobileOpen(false);
+    // Leaving a temporary chat discards it; the refresh tells the server it is no longer open.
+    if (abandoned) void refreshHistories();
   }
 
   function resetWorkspaceForAuthChange() {
@@ -499,6 +534,7 @@ export default function Home() {
   }
 
   async function loadConversation(id: string, navigate = true, allowNew = false, selectedBranchId?: string) {
+    const abandoned = temporaryIdRef.current;
     try {
       abandonRef.current = true; abortRef.current?.abort(); clearQueuedPrompts();
       const response = await fetch(`/api/conversations/${id}`); const body = await response.json();
@@ -510,10 +546,12 @@ export default function Home() {
       const branch = next.branches.find((item: ChatBranch) => item.id === next.activeBranchId) || next.branches[0];
       autoFollowThreadRef.current = true;
       if (selectedBranchId && next.branches.some(item => item.id === selectedBranchId)) { next.activeBranchId = selectedBranchId; await saveConversationRequest(next, false); }
+      temporaryIdRef.current = next.temporary ? next.id : ""; setTemporaryMode(next.temporary === true); setPromoting(false);
       setConversation(next); setMessages((selectedBranchId ? next.branches.find(item => item.id === selectedBranchId) : branch)?.messages || []); selectedModelIdRef.current = next.modelId; setSelectedModelId(next.modelId);
       setRenderedMessageCount(60);
       setSelectedPresetId(next.reasoningPresetId || ""); setMobileOpen(false); setError("");
       pendingConversationIdRef.current = next.id; if (navigate) navigateToChat(next.id);
+      if (abandoned && abandoned !== next.id) void refreshHistories();
       if (!selectedBranchId || selectedBranchId === branch?.id) void watchChatJob(next, branch?.id || next.activeBranchId, true);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "대화를 불러오지 못했습니다."); }
   }
@@ -550,7 +588,7 @@ export default function Home() {
     const stamp = now(); const branchId = uid("branch");
     return {
       id: pendingConversationIdRef.current || uid("conversation"), title: firstMessage.content.trim() ? titleFrom(firstMessage.content) : c.imageChat, modelId: model.id,
-      reasoningPresetId: preset?.id, activeBranchId: branchId, createdAt: stamp, updatedAt: stamp,
+      reasoningPresetId: preset?.id, activeBranchId: branchId, temporary: temporaryMode, createdAt: stamp, updatedAt: stamp,
       branches: [{ id: branchId, name: "Main", messages: [firstMessage], createdAt: stamp, updatedAt: stamp }],
     };
   }
@@ -872,7 +910,7 @@ export default function Home() {
             {!visibleHistory.length && <p className="history-empty">{c.historyEmpty}</p>}
           </div>
         </section>
-        <button className="profile-card" title={c.settings} aria-label={c.settings} onClick={() => { setSettingsOpen(true); setMobileOpen(false); }}><span className="avatar">{config.profile.name.charAt(0).toUpperCase() || "U"}</span><span><strong>{config.profile.name}</strong><small>{c.settingsConnections}</small></span><Settings size={18} /></button>
+        <button className="profile-card" title={c.settings} aria-label={c.settings} onClick={() => { setSettingsOpen(true); setMobileOpen(false); }}><span className="avatar"><UserRound size={19} /></span><span><strong>{config.profile.name}</strong><small>{c.settingsConnections}</small></span><Settings size={18} /></button>
       </aside>
       {mobileOpen && <button className="mobile-scrim" aria-label="메뉴 닫기" onClick={() => setMobileOpen(false)} />}
 
@@ -880,16 +918,23 @@ export default function Home() {
         <div className="ambient-glow" />
         <div className="model-switcher">
           <button className="model-trigger" onClick={() => { if (!modelMenuOpen) setModelControlNotice(null); setModelMenuOpen((value) => !value); }}><span>{selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
-          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span><small>{visibleModels.length}</small></div>{visibleModels.map((model) => <button className="model-option" key={model.id} onClick={() => chooseModel(model)}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{model.isAlias && <b>ALIAS</b>}</button>)}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
+          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span><small>{visibleModels.length}</small></div>{visibleModels.map((model) => <button className="model-option" key={model.id} onClick={() => chooseModel(model)}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span className="model-option-mark">{model.isAlias ? <Pencil size={15} /> : <NeuralMark size={18} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{model.isAlias && <b>ALIAS</b>}</button>)}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
+        </div>
+
+        <div className="surface-actions">
+          {temporaryActive
+            ? <button className="surface-action active" disabled={promoting || conversation?.temporary !== true} title={c.saveChat} aria-label={c.saveChat} onClick={() => void promoteTemporaryChat()}><Save size={16} /><span>{promoting ? c.savingChat : c.saveChat}</span></button>
+            : <button className="surface-action" title={c.temporaryChat} aria-label={c.temporaryChat} onClick={() => newChat(false, true)}><MessageSquareDashed size={16} /><span>{c.temporaryChat}</span></button>}
+          {temporaryActive && <p className="temporary-note" role="status">{c.temporaryChatHint}</p>}
         </div>
 
         <div className="conversation-stage">
-          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{greeting}</h1><p>{c.welcome}</p></div><Composer c={c} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} /></div> : <>
+          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{greeting}</h1><p>{c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} /></div> : <>
             <div className="thread" ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
               {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
               {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
             </div>
-            <Composer c={c} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} />
+            <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} />
           </>}
         </div>
       </section>
@@ -939,8 +984,8 @@ const INLINE_COMPOSER_CHROME = 26;
 /** Below this the draft field is too cramped to type in, so the composer stacks instead. */
 const MIN_INLINE_DRAFT_WIDTH = 150;
 
-function Composer(props: { c: CopySet; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextUsedTokens?: number; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; sendReasoning: boolean; toggleSendReasoning: (value: boolean) => void; error: string; clearError: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onRemoveAttachment: (attachment: StoredAttachment) => void; internetSearchEnabled: boolean; setInternetSearchEnabled: (value: boolean) => void; pageVisitEnabled: boolean; setPageVisitEnabled: (value: boolean) => void; browserToolAvailable: boolean; browserEnabled: boolean; setBrowserEnabled: (value: boolean) => void; currentTimeEnabled: boolean; setCurrentTimeEnabled: (value: boolean) => void; locationEnabled: boolean; setLocationEnabled: (value: boolean) => void; multipleChoiceEnabled: boolean; setMultipleChoiceEnabled: (value: boolean) => void; pendingChoice?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean> }) {
-  const { c, draft, setDraft, sendMessage, keyDown, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextUsedTokens, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, sendReasoning, toggleSendReasoning, error, clearError, attachments, maxAttachments, uploadingImages, onFiles, onRemoveAttachment, internetSearchEnabled, setInternetSearchEnabled, pageVisitEnabled, setPageVisitEnabled, browserToolAvailable, browserEnabled, setBrowserEnabled, currentTimeEnabled, setCurrentTimeEnabled, locationEnabled, setLocationEnabled, multipleChoiceEnabled, setMultipleChoiceEnabled, pendingChoice, onChoiceSubmit } = props;
+function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextUsedTokens?: number; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; sendReasoning: boolean; toggleSendReasoning: (value: boolean) => void; error: string; clearError: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onRemoveAttachment: (attachment: StoredAttachment) => void; internetSearchEnabled: boolean; setInternetSearchEnabled: (value: boolean) => void; pageVisitEnabled: boolean; setPageVisitEnabled: (value: boolean) => void; browserToolAvailable: boolean; browserEnabled: boolean; setBrowserEnabled: (value: boolean) => void; currentTimeEnabled: boolean; setCurrentTimeEnabled: (value: boolean) => void; locationEnabled: boolean; setLocationEnabled: (value: boolean) => void; multipleChoiceEnabled: boolean; setMultipleChoiceEnabled: (value: boolean) => void; pendingChoice?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean> }) {
+  const { c, appearance, draft, setDraft, sendMessage, keyDown, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextUsedTokens, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, sendReasoning, toggleSendReasoning, error, clearError, attachments, maxAttachments, uploadingImages, onFiles, onRemoveAttachment, internetSearchEnabled, setInternetSearchEnabled, pageVisitEnabled, setPageVisitEnabled, browserToolAvailable, browserEnabled, setBrowserEnabled, currentTimeEnabled, setCurrentTimeEnabled, locationEnabled, setLocationEnabled, multipleChoiceEnabled, setMultipleChoiceEnabled, pendingChoice, onChoiceSubmit } = props;
   const fileRef = useRef<HTMLInputElement>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -961,6 +1006,7 @@ function Composer(props: { c: CopySet; draft: string; setDraft: (value: string) 
   const textRef = useRef<HTMLTextAreaElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [shellWidth, setShellWidth] = useState(0);
+  const locale: Locale = c === translations.ko ? "ko" : "en";
   const { mounted: addMenuMounted, closing: addMenuClosing } = usePopoverPresence(addMenuOpen);
   const { mounted: presetMounted, closing: presetClosing } = usePopoverPresence(presetOpen);
   const activeToolCount = Number(internetSearchEnabled) + Number(pageVisitEnabled) + Number(browserToolAvailable && browserEnabled) + Number(currentTimeEnabled) + Number(locationEnabled) + Number(multipleChoiceEnabled);
@@ -1016,8 +1062,8 @@ function Composer(props: { c: CopySet; draft: string; setDraft: (value: string) 
         <textarea ref={textRef} aria-label={pendingChoice ? c.choiceWaiting : c.messagePlaceholder} enterKeyHint="enter" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} placeholder={pendingChoice ? c.choiceWaiting : c.messagePlaceholder} disabled={Boolean(pendingChoice)} />
       </div>
       <div className="composer-trail" ref={trailRef}>
-        <ContextWindowIndicator c={c} locale={c === translations.ko ? "ko" : "en"} model={selectedModel} models={models} usedTokens={contextUsedTokens} />
-        <div className="preset-switcher"><button type="button" className="preset-trigger" disabled={!selectedModel?.reasoningPresets.length} onClick={() => setPresetOpen(!presetOpen)}><BrainCircuit size={16} /><span>{selectedPreset?.name || c.default}</span><ChevronDown size={14} className={presetOpen ? "rotate" : ""} /></button>{presetMounted && <div className={`popover preset-popover ${presetClosing ? "closing" : ""}`}><p>{c.reasoningPreset}</p>{selectedModel?.reasoningPresets.map((preset) => <button type="button" key={preset.id} onClick={() => { setPreset(preset.id); setPresetOpen(false); }}><span className="selection-dot">{preset.id === selectedPreset?.id && <Check size={12} />}</span><span>{preset.name}<small>{preset.kind === "builtin" ? `${c.native} · ${preset.effort || c.default}` : `${c.template}${preset.effort ? ` · ${preset.effort}` : ""}`}</small></span></button>)}<div className="reasoning-send-toggle"><span><strong>{c.sendPriorReasoning}</strong><small>{c.sendPriorReasoningDesc}</small></span><button type="button" role="switch" aria-label={c.sendPriorReasoning} aria-checked={sendReasoning} className={`toggle ${sendReasoning ? "on" : ""}`} onClick={() => toggleSendReasoning(!sendReasoning)}><i /></button></div><button type="button" className="default-choice-action" disabled={!selectedPreset || defaultReasoningPresetId === selectedPreset.id} onClick={setDefaultReasoning}><Check size={14} />{defaultReasoningPresetId === selectedPreset?.id ? c.defaultReasoningActive : c.useAsDefault}</button></div>}</div>
+        <ContextWindowIndicator c={c} locale={locale} model={selectedModel} models={models} usedTokens={contextUsedTokens} />
+        <div className="preset-switcher"><button type="button" className="preset-trigger" disabled={!selectedModel?.reasoningPresets.length} onClick={() => setPresetOpen(!presetOpen)}><BrainCircuit size={16} /><span>{selectedPreset?.name || c.default}</span><ChevronDown size={14} className={presetOpen ? "rotate" : ""} /></button>{presetMounted && <div className={`popover preset-popover ${presetClosing ? "closing" : ""}`}><p>{c.reasoningPreset}</p>{selectedModel?.reasoningPresets.map((preset) => { const note = appearance.showReasoningNotes ? reasoningNote(preset.effort, appearance, locale) : ""; return <button type="button" key={preset.id} onClick={() => { setPreset(preset.id); setPresetOpen(false); }}><span className="selection-dot">{preset.id === selectedPreset?.id && <Check size={12} />}</span><span>{preset.name}<small>{note || (preset.kind === "builtin" ? `${c.native} · ${preset.effort || c.default}` : `${c.template}${preset.effort ? ` · ${preset.effort}` : ""}`)}</small></span></button>; })}<div className="reasoning-send-toggle"><span><strong>{c.sendPriorReasoning}</strong><small>{c.sendPriorReasoningDesc}</small></span><button type="button" role="switch" aria-label={c.sendPriorReasoning} aria-checked={sendReasoning} className={`toggle ${sendReasoning ? "on" : ""}`} onClick={() => toggleSendReasoning(!sendReasoning)}><i /></button></div><button type="button" className="default-choice-action" disabled={!selectedPreset || defaultReasoningPresetId === selectedPreset.id} onClick={setDefaultReasoning}><Check size={14} />{defaultReasoningPresetId === selectedPreset?.id ? c.defaultReasoningActive : c.useAsDefault}</button></div>}</div>
         <button className={`send-button ${showStop ? "stopping" : ""}`} type="submit" disabled={!showStop && (uploadingImages || Boolean(pendingChoice))} aria-label={showStop ? c.stop : pendingChoice ? c.choiceWaiting : isGenerating ? c.addToQueue : c.send}>{showStop ? <Square size={14} fill="currentColor" /> : <ArrowUp size={20} />}</button>
       </div>
     </form>
@@ -1398,6 +1444,7 @@ function GeneralSettings({ c, draft, setDraft, admin, onExport, onImport, import
 
 function AppearanceSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>> }) {
   const appearance = draft.preferences.appearance || DEFAULT_APPEARANCE;
+  const locale: Locale = draft.preferences.language === "ko" ? "ko" : "en";
   const [hexText, setHexText] = useState(appearance.accentColor);
   useEffect(() => { setHexText(appearance.accentColor); }, [appearance.accentColor]);
   const togglePreference = (key: "showModelIdentifiers" | "renderStrikethrough") => setDraft((current) => ({
@@ -1429,6 +1476,22 @@ function AppearanceSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicC
         <input type="color" aria-label={c.accentCustom} value={appearance.accentColor} onChange={(event) => patch({ accentColor: normalizeHexColor(event.target.value) })} />
         <input type="text" aria-label={c.accentHex} maxLength={7} spellCheck={false} value={hexText} onChange={(event) => { setHexText(event.target.value); const valid = normalizeHexColor(event.target.value, ""); if (valid) patch({ accentColor: valid }); }} onBlur={() => setHexText(appearance.accentColor)} />
       </div>}
+    </div>
+    <div className="general-setting-card">
+      <div><strong>{c.reasoningNotesTitle}</strong><small>{c.reasoningNotesHelp}</small></div>
+      <div className="reasoning-notes-head">
+        <button role="switch" aria-checked={appearance.showReasoningNotes} aria-label={c.reasoningNotesTitle} className={`toggle ${appearance.showReasoningNotes ? "on" : ""}`} onClick={() => patch({ showReasoningNotes: !appearance.showReasoningNotes })}><i /></button>
+      </div>
+      {appearance.showReasoningNotes && <><div className="reasoning-notes">
+        {REASONING_NOTE_KEYS.map((key) => <label className="field" key={key}>
+          <span>{reasoningOptionName(key === "off" ? "off" : key)}</span>
+          <input value={appearance.reasoningNotes?.[key] || ""} maxLength={200} placeholder={defaultReasoningNote(key, locale)} onChange={(event) => {
+            const notes = { ...(appearance.reasoningNotes || {}) };
+            if (event.target.value.trim()) notes[key] = event.target.value; else delete notes[key];
+            patch({ reasoningNotes: notes });
+          }} />
+        </label>)}
+      </div><p className="settings-help">{c.reasoningNotesReset}</p></>}
     </div>
     <div className="general-setting-card">
       <div><strong>{c.streamRevealTitle}</strong><small>{c.streamRevealHelp}</small></div>
@@ -1481,8 +1544,8 @@ type ModelEditorProps = { draft: PublicConfig; activeModelId: string; setActiveM
 type ColumnItem = { id: string; name: string; detail?: string; icon: React.ReactNode; hidden?: boolean };
 function OrderActions({ c, onAdd, addLabel, onUp, onDown, disableUp, disableDown }: { c: CopySet; onAdd?: () => void; addLabel?: string; onUp: () => void; onDown: () => void; disableUp: boolean; disableDown: boolean }) { return <span className="order-actions">{onAdd && <button onClick={onAdd} title={addLabel} aria-label={addLabel}><Plus size={15} /></button>}<button onClick={onUp} title={c.moveUp} aria-label={c.moveUp} disabled={disableUp}><ChevronUp size={15} /></button><button onClick={onDown} title={c.moveDown} aria-label={c.moveDown} disabled={disableDown}><ChevronDown size={15} /></button></span>; }
 function ModelColumn({ c, models, items, label, active, onChange, showIdentifiers = false, onMove, action }: { c: CopySet; models?: ModelConfig[]; items?: ColumnItem[]; label?: string; active: string; onChange: (id: string) => void; showIdentifiers?: boolean; onMove?: (sourceId: string, targetId: string) => void; action?: React.ReactNode }) {
-  const rows: ColumnItem[] = items || (models || []).map((model) => ({ id: model.id, name: model.name, detail: showIdentifiers ? model.sourceModel : undefined, icon: model.isAlias ? <Pencil size={13} /> : <Server size={13} />, hidden: model.visible === false }));
-  return <aside className="model-column"><div className="model-column-head"><span>{label || c.models}</span>{action}</div><div className="model-column-list">{rows.map((item) => <button key={item.id} draggable={Boolean(onMove)} className={item.id === active ? "active" : ""} onClick={() => onChange(item.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", item.id); }} onDragOver={(event) => { if (onMove) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }} onDrop={(event) => { if (!onMove) return; event.preventDefault(); onMove(event.dataTransfer.getData("text/plain"), item.id); }}><span className="model-type-icon">{onMove ? <GripVertical size={14} /> : item.icon}</span><span><strong>{item.name}</strong>{item.detail && <small>{item.detail}</small>}</span>{item.hidden && <i className="hidden-model-dot" />}</button>)}</div></aside>;
+  const rows: ColumnItem[] = items || (models || []).map((model) => ({ id: model.id, name: model.name, detail: showIdentifiers ? model.sourceModel : undefined, icon: model.isAlias ? <Pencil size={14} /> : <NeuralMark size={17} />, hidden: model.visible === false }));
+  return <aside className="model-column"><div className="model-column-head"><span>{label || c.models}</span>{action}</div><div className="model-column-list">{rows.map((item) => <button key={item.id} draggable={Boolean(onMove)} className={item.id === active ? "active" : ""} onClick={() => onChange(item.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", item.id); }} onDragOver={(event) => { if (onMove) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }} onDrop={(event) => { if (!onMove) return; event.preventDefault(); onMove(event.dataTransfer.getData("text/plain"), item.id); }}><span className="model-type-icon">{item.icon}</span><span><strong>{item.name}</strong>{item.detail && <small>{item.detail}</small>}</span>{item.hidden && <i className="hidden-model-dot" />}</button>)}</div></aside>;
 }
 
 function ModelSettings({ c, draft, setDraft, activeModelId, setActiveModelId, activeModel, updateModel, addAlias, account }: ModelEditorProps & { c: CopySet; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; updateModel: (patch: Partial<ModelConfig>) => void; addAlias: () => void; account?: AccountInfo }) {
@@ -1501,7 +1564,7 @@ function ModelSettings({ c, draft, setDraft, activeModelId, setActiveModelId, ac
     updateModel({ contextWindowTokens: parsed && Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined });
   }
   return <div className="settings-section wide">
-    <SectionTitle icon={<SlidersHorizontal size={19} />} title={c.modelsTitle} description={c.modelsDesc} />
+    <SectionTitle icon={<NeuralMark size={21} />} title={c.modelsTitle} description={c.modelsDesc} />
     <div className="split-model-editor">
       <ModelColumn c={c} models={shownModels} active={activeModelId} onChange={setActiveModelId} showIdentifiers={draft.preferences.showModelIdentifiers !== false} onMove={moveModel} action={<OrderActions c={c} onAdd={addAlias} addLabel={c.newAlias} onUp={() => nudgeModel(-1)} onDown={() => nudgeModel(1)} disableUp={activeShownIndex <= 0} disableDown={activeShownIndex < 0 || activeShownIndex === shownModels.length - 1} />} />
       <div className="model-editor-pane">{activeModel && shownModels.some((model) => model.id === activeModel.id) ? <div className="editor-card">

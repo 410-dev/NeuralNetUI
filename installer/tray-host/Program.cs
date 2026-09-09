@@ -58,9 +58,10 @@ internal static class Program
             return 0;
         }
 
+        bool startup = args.Any(argument => argument.Equals("--startup", StringComparison.OrdinalIgnoreCase));
         ApplicationConfiguration.Initialize();
         using var openEvent = new EventWaitHandle(false, EventResetMode.AutoReset, openEventName);
-        using var context = new TrayApplicationContext(openEvent);
+        using var context = new TrayApplicationContext(openEvent, openOnLaunch: !startup);
         Application.Run(context);
         return 0;
     }
@@ -75,11 +76,12 @@ internal static class Program
         private readonly ToolStripMenuItem restartItem;
         private readonly ToolStripMenuItem exitItem;
         private bool busy;
-        private bool initialOpen = true;
+        private bool initialOpen;
 
-        public TrayApplicationContext(EventWaitHandle openEvent)
+        public TrayApplicationContext(EventWaitHandle openEvent, bool openOnLaunch)
         {
             this.openEvent = openEvent;
+            initialOpen = openOnLaunch;
             openItem = new ToolStripMenuItem("Web UI 열기", null, async (_, _) => await OpenUiAsync());
             settingsItem = new ToolStripMenuItem("설정 파일 수정", null, (_, _) => EditSettings());
             restartItem = new ToolStripMenuItem("재시작", null, async (_, _) => await RestartAsync());

@@ -242,6 +242,12 @@ function openDatabase() {
         fingerprint TEXT NOT NULL, covered_count INTEGER NOT NULL, summary TEXT NOT NULL);`);
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(8, new Date().toISOString());
   })();
+  const temporaryChatVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (temporaryChatVersion.version < 9) connection.transaction(() => {
+    connection.exec(`ALTER TABLE conversations ADD COLUMN temporary INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX conversations_temporary_idx ON conversations(user_id, temporary, updated_at);`);
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(9, new Date().toISOString());
+  })();
   return connection;
 }
 

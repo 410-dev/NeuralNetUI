@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { ChatBranch, Conversation, ConversationSummary, StoredAttachment, StoredMessage } from "./types";
 import { completeStorageMigration, dataDir, db, storageMigrationCompleted } from "./database";
 import { deleteUploadFiles, ensureLegacyUploadsMigrated } from "./uploads";
-import { discardChatJobs } from "./chat-disposal";
+import { discardChatJobs, hasChatDisposal } from "./chat-disposal";
 
 const messageSchema = z.object({
   id: z.string().min(1),
@@ -59,6 +59,7 @@ export const conversationSchema = z.object({
   modelId: z.string().min(1),
   reasoningPresetId: z.string().optional(),
   activeBranchId: z.string().min(1),
+  temporary: z.boolean().optional(),
   branches: z.array(branchSchema).min(1),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -79,8 +80,8 @@ const legacyMigrationName = "legacy-conversations-v1";
 let legacyMigration: Promise<void> | undefined;
 
 const insertConversation = db.prepare(`
-  INSERT INTO conversations(id, title, model_id, reasoning_preset_id, active_branch_id, created_at, updated_at, user_id)
-  VALUES (@id, @title, @modelId, @reasoningPresetId, @activeBranchId, @createdAt, @updatedAt, @userId)
+  INSERT INTO conversations(id, title, model_id, reasoning_preset_id, active_branch_id, created_at, updated_at, user_id, temporary)
+  VALUES (@id, @title, @modelId, @reasoningPresetId, @activeBranchId, @createdAt, @updatedAt, @userId, @temporary)
 `);
 const insertBranch = db.prepare(`
   INSERT INTO branches(id, conversation_id, name, parent_branch_id, forked_from_message_id, position, created_at, updated_at)
@@ -100,13 +101,15 @@ const insertAttachment = db.prepare("INSERT OR IGNORE INTO message_attachments(m
 
 function storeConversation(record: Conversation, userId: string, guard?: () => boolean) {
   db.transaction(() => {
-    const owner = db.prepare("SELECT user_id, title, title_managed FROM conversations WHERE id = ?").get(record.id) as { user_id: string | null; title: string; title_managed: number } | undefined;
+    const owner = db.prepare("SELECT user_id, title, title_managed, temporary FROM conversations WHERE id = ?").get(record.id) as { user_id: string | null; title: string; title_managed: number; temporary: number } | undefined;
     if (guard && (!guard() || !owner)) throw new Error("Conversation was deleted or its task was replaced.");
     if (owner && owner.user_id !== userId) throw new Error("Conversation not found.");
     const summaries = db.prepare("SELECT cs.* FROM context_summaries cs JOIN branches b ON b.id = cs.branch_id WHERE b.conversation_id = ?").all(record.id) as Array<{branch_id: string; fingerprint: string; covered_count: number; summary: string}>;
     if (owner?.title_managed) record.title = owner.title;
     db.prepare("DELETE FROM conversations WHERE id = ? AND user_id = ?").run(record.id, userId);
-    insertConversation.run({ ...record, userId, reasoningPresetId: record.reasoningPresetId ?? null });
+    const temporary = owner ? owner.temporary : Number(record.temporary === true);
+    insertConversation.run({ ...record, userId, reasoningPresetId: record.reasoningPresetId ?? null, temporary });
+    record.temporary = temporary === 1;
     for (const [branchPosition, branch] of record.branches.entries()) {
       insertBranch.run({
         ...branch,
@@ -164,13 +167,35 @@ async function ensureLegacyConversationsMigrated(userId: string) {
   await legacyMigration;
 }
 
+/**
+ * Removes the caller's temporary chats. A temporary chat only exists so the streaming pipeline has
+ * somewhere to write while it runs; leaving one, or abandoning the tab, discards it.
+ */
+export async function discardTemporaryConversations(userId: string, keepId?: string) {
+  const rows = db.prepare("SELECT id FROM conversations WHERE user_id = ? AND temporary = 1").all(userId) as Array<{ id: string }>;
+  // A chat still streaming in another tab is not abandoned, so leave it for the next sweep.
+  const doomed = rows.filter((row) => row.id !== keepId && !hasChatDisposal(row.id, userId));
+  for (const { id } of doomed) await deleteConversation(id, userId).catch(() => undefined);
+  return doomed.length;
+}
+
+/** Turns a temporary chat into an ordinary saved one. */
+export function promoteConversation(id: string, userId: string) {
+  return db.prepare("UPDATE conversations SET temporary = 0 WHERE id = ? AND user_id = ? AND temporary = 1").run(id, userId).changes > 0;
+}
+
+export function isTemporaryConversation(id: string, userId: string) {
+  const row = db.prepare("SELECT temporary FROM conversations WHERE id = ? AND user_id = ?").get(id, userId) as { temporary: number } | undefined;
+  return row?.temporary === 1;
+}
+
 export async function listConversations(userId: string): Promise<ConversationSummary[]> {
   await ensureLegacyConversationsMigrated(userId);
   return db.prepare(`
     SELECT c.id, c.title, c.active_branch_id AS activeBranchId, COUNT(b.id) AS branchCount, c.updated_at AS updatedAt
     FROM conversations c
     LEFT JOIN branches b ON b.conversation_id = c.id
-    WHERE c.user_id = ?
+    WHERE c.user_id = ? AND c.temporary = 0
     GROUP BY c.id
     ORDER BY c.updated_at DESC
   `).all(userId) as ConversationSummary[];
@@ -184,6 +209,7 @@ type ConversationRow = {
   active_branch_id: string;
   created_at: string;
   updated_at: string;
+  temporary: number;
 };
 type BranchRow = {
   id: string;
@@ -294,6 +320,7 @@ export async function readConversation(id: string, userId: string): Promise<Conv
     modelId: conversation.model_id,
     reasoningPresetId: conversation.reasoning_preset_id ?? undefined,
     activeBranchId: conversation.active_branch_id,
+    temporary: conversation.temporary === 1,
     branches,
     createdAt: conversation.created_at,
     updatedAt: conversation.updated_at,
@@ -337,6 +364,7 @@ export async function deleteConversation(id: string, userId: string) {
 export async function deleteAllConversations(userId: string) {
   const conversations = await listConversations(userId);
   for (const conversation of conversations) await deleteConversation(conversation.id, userId);
+  await discardTemporaryConversations(userId);
   return conversations.length;
 }
 
@@ -351,7 +379,7 @@ export async function searchConversations(userId: string, query: string) {
   if (!needle) return [];
   const rows = db.prepare(`SELECT c.id, c.title, c.active_branch_id AS activeBranchId, b.id AS branchId, b.name AS branchName, m.content
     FROM conversations c JOIN branches b ON b.conversation_id = c.id JOIN branch_messages bm ON bm.branch_id = b.id JOIN messages m ON m.id = bm.message_id
-    WHERE c.user_id = ? ORDER BY c.updated_at DESC, b.position, bm.position`).all(userId) as Array<{id:string;title:string;activeBranchId:string;branchId:string;branchName:string;content:string}>;
+    WHERE c.user_id = ? AND c.temporary = 0 ORDER BY c.updated_at DESC, b.position, bm.position`).all(userId) as Array<{id:string;title:string;activeBranchId:string;branchId:string;branchName:string;content:string}>;
   const seen = new Set<string>();
   return rows.filter(row => { const key = row.id + ":" + row.branchId; if (seen.has(key) || !(row.content.toLocaleLowerCase().includes(needle) || row.title.toLocaleLowerCase().includes(needle))) return false; seen.add(key); return true; }).slice(0, 100).map(row => { const at = row.content.toLocaleLowerCase().indexOf(needle); return {...row, content: row.content.slice(Math.max(0, at - 60), Math.max(0, at - 60) + 240), otherBranch: row.branchId !== row.activeBranchId}; });
 }

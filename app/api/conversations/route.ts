@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
-import { searchConversations, deleteAllConversations, listConversations, writeConversation } from "@/lib/conversations";
+import { searchConversations, deleteAllConversations, discardTemporaryConversations, listConversations, writeConversation } from "@/lib/conversations";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  try { const user = requireUser(request); const query = new URL(request.url).searchParams.get("q"); return NextResponse.json(query !== null ? { results: await searchConversations(user.id, query) } : { conversations: await listConversations(user.id) }); }
+  try {
+    const user = requireUser(request);
+    const params = new URL(request.url).searchParams;
+    const query = params.get("q");
+    if (query !== null) return NextResponse.json({ results: await searchConversations(user.id, query) });
+    // The client names the temporary chat it still has open; every other one is abandoned.
+    const keep = params.get("keepTemporary");
+    await discardTemporaryConversations(user.id, keep && /^[a-zA-Z0-9_-]+$/.test(keep) ? keep : undefined);
+    return NextResponse.json({ conversations: await listConversations(user.id) });
+  }
   catch (error) { return authErrorResponse(error); }
 }
 

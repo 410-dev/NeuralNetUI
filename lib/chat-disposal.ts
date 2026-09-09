@@ -8,6 +8,11 @@ export function registerChatDisposal(id: string, userId: string, discard: () => 
   return () => { if (disposals.get(id) === entry) disposals.delete(id); };
 }
 
+/** True while a chat job for this conversation is still registered, streaming or just finished. */
+export function hasChatDisposal(conversationId: string, userId: string) {
+  return disposals.get(conversationId)?.userId === userId;
+}
+
 export function discardChatJobs(userId: string, conversationId?: string) {
   for (const [id, entry] of disposals) {
     if (entry.userId !== userId || conversationId && id !== conversationId) continue;

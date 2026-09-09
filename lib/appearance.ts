@@ -1,4 +1,4 @@
-import type { AppearancePreferences, AccentPaletteId } from "./types.ts";
+import type { AppearancePreferences, AccentPaletteId, Locale } from "./types.ts";
 
 /** Named accent choices. The custom entry carries no colour of its own; the saved hex supplies it. */
 export const ACCENT_PALETTES: Array<{ id: AccentPaletteId; hex: string }> = [
@@ -16,7 +16,43 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   streamReveal: "instant",
   streamPacing: "immediate",
   streamChunkSize: 3,
+  showReasoningNotes: true,
+  reasoningNotes: {},
 };
+
+/** Effort keys that share one description. "off" and "none" are both the fast path. */
+export const REASONING_NOTE_KEYS = ["off", "on", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type ReasoningNoteKey = (typeof REASONING_NOTE_KEYS)[number];
+
+export const reasoningNoteKey = (effort: string): ReasoningNoteKey | undefined => {
+  const key = effort === "none" ? "off" : effort;
+  return (REASONING_NOTE_KEYS as readonly string[]).includes(key) ? key as ReasoningNoteKey : undefined;
+};
+
+const DEFAULT_NOTES: Record<ReasoningNoteKey, [string, string]> = {
+  off: ["Instant answers for everyday questions", "일반적인 질문을 위한 즉시 응답"],
+  on: ["Deliberation for complex questions", "복잡한 질문을 위한 사고"],
+  minimal: ["Answers with almost no deliberation", "거의 사고하지 않고 답변"],
+  low: ["Suited to everyday questions", "일반적인 질문에 적합"],
+  medium: ["Suited to moderately complex questions", "다소 복잡한 질문에 적합"],
+  high: ["Suited to very complex questions", "아주 복잡한 질문에 적합"],
+  xhigh: ["Careful deliberation on very complex questions", "아주 복잡한 질문에 대해 심사숙고"],
+  max: ["Uses as much deliberation as the model allows", "가능한 모든 사고를 사용"],
+};
+
+export const defaultReasoningNote = (key: ReasoningNoteKey, locale: Locale) => DEFAULT_NOTES[key][locale === "ko" ? 1 : 0];
+
+/**
+ * Description shown beside a reasoning choice. A saved override wins; otherwise the built-in
+ * default for the active language is used, so switching language keeps untouched notes readable.
+ */
+export function reasoningNote(effort: string | undefined, preferences: Partial<AppearancePreferences> | undefined, locale: Locale): string {
+  const key = reasoningNoteKey(effort || "");
+  if (!key) return "";
+  const override = preferences?.reasoningNotes?.[key];
+  return typeof override === "string" && override.trim() ? override.trim() : defaultReasoningNote(key, locale);
+}
+
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
 
@@ -97,5 +133,18 @@ export function normalizeAppearance(input: Partial<AppearancePreferences> | unde
     streamReveal: input?.streamReveal === "fade" ? "fade" : "instant",
     streamPacing: input?.streamPacing === "chunked" ? "chunked" : "immediate",
     streamChunkSize: clamp(Math.floor(Number(input?.streamChunkSize) || DEFAULT_APPEARANCE.streamChunkSize), 1, 24),
+    showReasoningNotes: input?.showReasoningNotes !== false,
+    reasoningNotes: normalizeReasoningNotes(input?.reasoningNotes),
   };
+}
+
+/** Keeps only known effort keys and trims blanks, so a stray note cannot bloat the preference blob. */
+export function normalizeReasoningNotes(input: unknown): Record<string, string> {
+  const source = input && typeof input === "object" ? input as Record<string, unknown> : {};
+  const notes: Record<string, string> = {};
+  for (const key of REASONING_NOTE_KEYS) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) notes[key] = value.trim().slice(0, 200);
+  }
+  return notes;
 }

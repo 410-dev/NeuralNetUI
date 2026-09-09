@@ -1,8 +1,36 @@
 import { NextResponse } from "next/server";
-import { renameConversation, deleteConversation, readConversation, writeConversation } from "@/lib/conversations";
+import { promoteConversation, renameConversation, deleteConversation, readConversation, writeConversation } from "@/lib/conversations";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { getChatJob } from "@/lib/chat-runtime";
 import { settlePendingTools } from "@/lib/conversation-messages";
+import { readConfig } from "@/lib/config";
+import { DEFAULT_HARNESS_SETTINGS } from "@/lib/harness";
+import { harnessCompletion } from "@/lib/harness-runtime";
+import { connectionForModel } from "@/lib/connection-drivers";
+
+/**
+ * Titles a chat the user just promoted out of temporary mode, following the harness settings the
+ * automatic path uses: the first request always, plus the first response unless titles are
+ * configured to be written before the model answers.
+ */
+async function titleFromFirstExchange(id: string, userId: string) {
+  const config = await readConfig();
+  const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
+  if (!harness.titleEnabled) return undefined;
+  const conversation = await readConversation(id, userId);
+  const branch = conversation?.branches.find((item) => item.id === conversation.activeBranchId) || conversation?.branches[0];
+  const request = branch?.messages.find((message) => message.role === "user");
+  if (!request) return undefined;
+  const response = harness.titleTiming === "before" ? "" : branch?.messages.find((message) => message.role === "assistant")?.content || "";
+  const model = config.models.find((item) => item.id === (harness.titleModelId || conversation?.modelId));
+  if (!model || !connectionForModel(config.connections, model)) return undefined;
+  const controller = new AbortController();
+  const context = { config, model, userId, signal: controller.signal, onPhase: () => undefined };
+  const answer = await harnessCompletion(context, harness.titleModelId, harness.titleEffort, harness.titlePrompt,
+    JSON.stringify({ user: request.content.slice(0, 2000), assistant: response.slice(0, 2000) }), 256);
+  const title = answer.split(/\r?\n/)[0].replace(/^["'#*]+|["'*]+$/g, "").trim().slice(0, 200);
+  return title || undefined;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +64,16 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   let user; try { user = requireUser(request); } catch (error) { return authErrorResponse(error); }
-  try { const { id } = await context.params; const { title } = await request.json();
-    return renameConversation(id, user.id, title) ? NextResponse.json({ title: title.trim() }) : NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+  const { id } = await context.params;
+  const body = await request.json().catch(() => ({}));
+  if (body.promote === true) {
+    if (!promoteConversation(id, user.id)) return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    // A failed title must not undo the save the user just asked for.
+    const title = await titleFromFirstExchange(id, user.id).catch(() => undefined);
+    if (title) renameConversation(id, user.id, title, true);
+    return NextResponse.json({ promoted: true, ...(title ? { title } : {}) });
+  }
+  try {
+    return renameConversation(id, user.id, body.title) ? NextResponse.json({ title: String(body.title).trim() }) : NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   } catch { return NextResponse.json({ error: "Title must contain 1–200 characters" }, { status: 400 }); }
 }
