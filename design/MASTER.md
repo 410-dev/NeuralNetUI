@@ -97,6 +97,20 @@
 - Never sweep a temporary chat that still has a live chat job; another tab may be streaming into it.
 - Promoting one clears the flag and titles it from the first exchange through the same harness settings the automatic path uses.
 
+## Assistant transcript
+
+- An assistant turn is a sequence, not a set of sections. Reasoning, delivered text, tool rounds and context compaction render in the order they happened, so text after a tool round sits after that round rather than above it.
+- Each stage owns its own fold and its own duration. Several reasoning blocks in one answer are normal.
+- `content` and `reasoning` stay the concatenation of every stage, so copying, export and upstream history never depend on the transcript.
+- Context compaction is a stage of the answer, not a status line. It folds like a reasoning block and holds up to two panes: the compaction model's own reasoning and the summary that was kept. Never report it twice — while a stage is showing, the wait line stays quiet.
+- Messages written before the transcript existed carry no stages; reconstruct their fixed layout rather than dropping their content.
+
+## Context compaction
+
+- Decide on the largest available reading of what the next request costs, never the smaller. A structural estimate can sit far below what a tokenizer charges, and the interface shows the measured figure — compaction has to fire when *that* number crosses the threshold.
+- A measurement describes the message set that produced it. Discard it the moment compaction replaces that set, or the next decision is made on a number that no longer applies.
+- Check the threshold both before sending and while streaming. Mid-response, stop the output, compact, and resume with the summary plus the original request.
+
 ## Capability disclosure
 
 - Never report a missing capability in the middle of a running response. A wait line states what is happening, not what the server cannot do.

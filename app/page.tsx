@@ -8,6 +8,7 @@ import { SelectMenu, usePopoverPresence } from "./select-menu";
 import { NeuralMark } from "./neural-mark";
 import { ACCENT_PALETTES, accentColorOf, accentVariables, DEFAULT_APPEARANCE, defaultReasoningNote, normalizeHexColor, reasoningNote, REASONING_NOTE_KEYS, revealStep } from "@/lib/appearance";
 import { capabilitySummary, driverCapabilities } from "@/lib/driver-capabilities";
+import { lastContentStep, reasoningStepIsWhole, stepToolEvents, transcriptSteps } from "@/lib/transcript";
 import { greetingFor } from "@/lib/greetings";
 import { chatWaitLabel } from "@/lib/chat-progress";
 import { normalizeReasoning, reasoningOptionName, isReasoningToggle } from "@/lib/reasoning-capabilities";
@@ -17,7 +18,7 @@ import {
   FileText, GitBranch, GripVertical, ImagePlus, KeyRound, LoaderCircle, Menu, MessageSquarePlus, Pencil, Plus, RefreshCw,
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
   LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload,
-  Palette, PanelLeftClose, PanelLeftOpen, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save,
+  Palette, PanelLeftClose, PanelLeftOpen, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save, Minimize2,
 } from "lucide-react";
 import { FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -26,7 +27,7 @@ import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type {
-  ChatWaitPhase, ChatBranch, ConnectionConfig, Conversation, ConversationSummary, ModelConfig, PublicConfig,
+  ChatWaitPhase, ChatBranch, ConnectionConfig, Conversation, ConversationSummary, MessageStep, ModelConfig, PublicConfig,
   ReasoningPreset, StoredAttachment, StoredMessage, Locale, AccountInfo, UserSummary, EnabledTools, ToolEvent, MultipleChoiceQuestion, ToolSettings, AccentPaletteId, AppearancePreferences, ConnectionDriver,
 } from "@/lib/types";
 import { advertisedContextWindowTokens, effectiveContextWindowTokens } from "@/lib/model-context";
@@ -97,7 +98,7 @@ const translations = {
     language: "Language", general: "General", generalTitle: "General settings", generalDesc: "Choose interface and inference behavior.", appearance: "Appearance", appearanceTitle: "Appearance", appearanceDesc: "Choose how model names and Markdown content are displayed.", interfaceLanguage: "Interface language", languageHelp: "The selected language is saved for future visits.", english: "English", korean: "Korean", onDemand: "On demand", onDemandHelp: "Load the selected model through /api/inference/load before each inference request.", showModelIdentifiers: "Show model identifiers", showModelIdentifiersHelp: "Show served identifiers below model names in model lists.", renderStrikethrough: "Render strikethrough", renderStrikethroughHelp: "Render text surrounded by one or two tildes as strikethrough. When off, the tildes remain visible.", appVersion: "Version", saved: "Saved.", detectSaved: "models and capabilities detected. Save changes to apply.", detectFirst: "Detect a server model first.", useAsDefault: "Use as default", defaultModelActive: "Default model", defaultReasoningActive: "Default reasoning", modelSettingsTransfer: "Model and reasoning settings", modelSettingsTransferDesc: "Export these settings as two-space JSON, or import a compatible file and apply it immediately.", exportModelSettings: "Export JSON", importModelSettings: "Import JSON", importedModelSettings: "Imported and applied model settings.", invalidModelSettings: "This is not a valid NeuralNetUI model settings file.",
     attachImages: "Attach images or PDFs", uploadingImages: "Preparing and uploading files…", removeImage: "Remove attachment", loadEarlier: "Load earlier messages",
     imagesAttached: "files attached", imageChat: "File chat", imageUploadFailed: "File upload failed.", maxImages: "You have reached the configured attachment limit.",
-    thinking: "Thinking…", editResponse: "Edit response", saveEdit: "Save", thoughtFor: "Thought for", useWrapping: "Use wrapping", copied: "Copied",
+    thinking: "Thinking…", compactingNow: "Compacting context…", compactionThought: "Compaction reasoning", compactionSummary: "Summary kept in context", editResponse: "Edit response", saveEdit: "Save", thoughtFor: "Thought for", useWrapping: "Use wrapping", copied: "Copied",
     addMenu: "Add", tools: "Tools", internetSearch: "Internet search", internetSearchDesc: "Let the model search DuckDuckGo", pageVisit: "Visit pages", pageVisitDesc: "Let the model read public web pages", browserTool: "Browser", browserToolDesc: "Render JavaScript pages, interact, and take screenshots", currentTime: "Current time", currentTimeDesc: "Provide local time and time zone to the model", locationTool: "Current location", locationToolDesc: "Use browser location and detailed reverse geocoding", multipleChoice: "Multiple choice", multipleChoiceDesc: "Let the model ask up to three selectable questions", usingTool: "Using a tool…", toolCall: "Tool call", toolResult: "Tool result", submitChoices: "Submit answers", otherChoice: "Or type a direct answer…", choiceNext: "Next", choiceBack: "Previous question", choiceProgress: "Question", choiceWaiting: "Answer the question above to continue", locationPermission: "Waiting for browser location permission…",
     account: "Account", users: "Users", signOut: "Sign out", changePassword: "Change password", currentPassword: "Current password", newPassword: "New password", passwordChanged: "Password changed. Please sign in again.",
     toolsSettings: "Harness settings", toolsSettingsTitle: "Tool and file limits", toolsSettingsDesc: "Control tool iterations, downloads, PDF processing, and temporary upload cleanup.", maxToolRounds: "Maximum tool rounds", maxAttachments: "Attachments per message", textDownloadLimit: "Text download limit (MB)", textCharacterLimit: "Text characters sent to model", imageDownloadLimit: "Image URL limit (MB)", imageUploadLimit: "Image upload limit (MB)", pdfSizeLimit: "PDF limit (MB)", pdfPageLimit: "PDF pages processed", pdfTextLimit: "PDF characters sent to model", pdfVisionPages: "Scanned PDF vision pages", pdfTimeout: "PDF processing timeout (seconds)", temporaryFileTtl: "Temporary file cleanup (minutes)", orphanTtl: "Unattached upload retention (hours)", toolLoopGroup: "Tool loop", attachmentGroup: "Attachments and downloads", pdfGroup: "PDF processing", cleanupGroup: "Temporary file cleanup", toolsSafetyHelp: "Values are validated against server safety boundaries when saved.",
@@ -139,7 +140,7 @@ const translations = {
     language: "언어", general: "일반", generalTitle: "일반 설정", generalDesc: "인터페이스와 추론 동작을 설정합니다.", appearance: "모양", appearanceTitle: "모양", appearanceDesc: "모델 이름과 Markdown 콘텐츠가 표시되는 방식을 설정합니다.", interfaceLanguage: "인터페이스 언어", languageHelp: "선택한 언어는 저장되어 다음 접속에도 유지됩니다.", english: "영어", korean: "한국어", onDemand: "On demand", onDemandHelp: "추론 요청 전에 /api/inference/load를 호출해 선택한 모델을 로드합니다.", showModelIdentifiers: "모델 identifier 표시", showModelIdentifiersHelp: "모델 목록에서 모델 이름 아래에 서빙 identifier를 표시합니다.", renderStrikethrough: "취소선 렌더링", renderStrikethroughHelp: "물결표 한 개 또는 두 개로 감싼 텍스트를 취소선으로 표시합니다. 끄면 물결표를 그대로 표시합니다.", appVersion: "버전", saved: "저장했습니다.", detectSaved: "개 모델과 기능을 감지했습니다. 저장을 눌러 적용하세요.", detectFirst: "먼저 서버 모델을 감지해 주세요.", useAsDefault: "기본으로 사용", defaultModelActive: "기본 모델", defaultReasoningActive: "기본 추론 강도", modelSettingsTransfer: "모델 및 추론 강도 설정", modelSettingsTransferDesc: "2칸 들여쓰기 JSON으로 내보내거나 호환 파일을 가져와 즉시 적용합니다.", exportModelSettings: "JSON 내보내기", importModelSettings: "JSON 가져오기", importedModelSettings: "모델 설정을 가져와 적용했습니다.", invalidModelSettings: "올바른 NeuralNetUI 모델 설정 파일이 아닙니다.",
     attachImages: "이미지 또는 PDF 첨부", uploadingImages: "파일 준비 및 업로드 중…", removeImage: "첨부 제거", loadEarlier: "이전 메시지 불러오기",
     imagesAttached: "개 파일 첨부", imageChat: "파일 대화", imageUploadFailed: "파일 업로드에 실패했습니다.", maxImages: "설정된 첨부 개수 제한에 도달했습니다.",
-    thinking: "생각 중…", editResponse: "응답 편집", saveEdit: "저장", thoughtFor: "동안 생각함", useWrapping: "줄 바꿈 사용", copied: "복사됨",
+    thinking: "생각 중…", compactingNow: "컨텍스트 압축 중…", compactionThought: "압축 모델의 사고", compactionSummary: "맥락으로 유지되는 요약", editResponse: "응답 편집", saveEdit: "저장", thoughtFor: "동안 생각함", useWrapping: "줄 바꿈 사용", copied: "복사됨",
     addMenu: "추가", tools: "도구", internetSearch: "인터넷 검색", internetSearchDesc: "모델이 DuckDuckGo를 검색하도록 허용", pageVisit: "페이지 방문", pageVisitDesc: "모델이 공개 웹 페이지를 읽도록 허용", browserTool: "브라우저", browserToolDesc: "JS 페이지 렌더링, 인터랙션 및 스크린샷 허용", currentTime: "현재 시간", currentTimeDesc: "현지 시간과 시간대를 모델에 제공", locationTool: "현재 위치", locationToolDesc: "브라우저 위치와 상세 역지오코딩 사용", multipleChoice: "다중 선택", multipleChoiceDesc: "모델이 선택형 질문을 최대 3개까지 요청", usingTool: "도구 사용 중…", toolCall: "도구 호출", toolResult: "도구 결과", submitChoices: "답변 제출", otherChoice: "또는 직접 답변…", choiceNext: "다음", choiceBack: "이전 질문", choiceProgress: "질문", choiceWaiting: "위 질문에 답하면 모델이 계속 응답합니다", locationPermission: "브라우저 위치 권한을 기다리는 중…",
     account: "계정", users: "사용자", signOut: "로그아웃", changePassword: "비밀번호 변경", currentPassword: "현재 비밀번호", newPassword: "새 비밀번호", passwordChanged: "비밀번호를 변경했습니다. 다시 로그인해 주세요.",
     toolsSettings: "하네스 설정", toolsSettingsTitle: "도구 및 파일 제한", toolsSettingsDesc: "도구 반복, 다운로드, PDF 처리 및 임시 업로드 정리 기준을 설정합니다.", maxToolRounds: "최대 도구 호출 라운드", maxAttachments: "메시지당 첨부 개수", textDownloadLimit: "텍스트 다운로드 제한 (MB)", textCharacterLimit: "모델에 전달할 텍스트 글자 수", imageDownloadLimit: "이미지 URL 제한 (MB)", imageUploadLimit: "이미지 업로드 제한 (MB)", pdfSizeLimit: "PDF 제한 (MB)", pdfPageLimit: "처리할 PDF 페이지 수", pdfTextLimit: "모델에 전달할 PDF 글자 수", pdfVisionPages: "스캔 PDF 비전 페이지 수", pdfTimeout: "PDF 처리 제한 시간 (초)", temporaryFileTtl: "임시 파일 정리 시간 (분)", orphanTtl: "미첨부 업로드 보관 시간", toolLoopGroup: "도구 반복", attachmentGroup: "첨부 및 다운로드", pdfGroup: "PDF 처리", cleanupGroup: "임시 파일 정리", toolsSafetyHelp: "저장 시 서버의 안전 범위 안에서 값이 검증됩니다.",
@@ -163,6 +164,12 @@ function formatThoughtDuration(totalSeconds: number, locale: Locale) {
   const total = Math.max(1, Math.round(totalSeconds)); const minutes = Math.floor(total / 60); const seconds = total % 60;
   if (locale === "ko") return `${minutes ? `${minutes}분 ` : ""}${seconds}초 동안 생각함`;
   return `Thought for ${minutes ? `${minutes} min ` : ""}${seconds} sec`;
+}
+
+function formatCompactionDuration(totalSeconds: number, locale: Locale) {
+  const total = Math.max(1, Math.round(totalSeconds)); const minutes = Math.floor(total / 60); const seconds = total % 60;
+  if (locale === "ko") return `${minutes ? `${minutes}분 ` : ""}${seconds}초 동안 컨텍스트 압축함`;
+  return `Compacted context for ${minutes ? `${minutes} min ` : ""}${seconds} sec`;
 }
 
 type TokenUsage = { inputTokens?: number; outputTokens?: number; reasoningTokens?: number; totalTokens?: number };
@@ -1272,21 +1279,16 @@ function useRevealedText(target: string, active: boolean, pacing: AppearancePref
 }
 
 function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethrough, appearance, pending, revisions, onFork, onEditAssistant, onRegenerate, onRegenerateUser, onDeleteUser, onRevision }: { c: CopySet; locale: Locale; message: StoredMessage; waitPhase?: ChatWaitPhase; waitProgress?: number; renderStrikethrough: boolean; appearance: AppearancePreferences; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
-  const [thoughtOpen, setThoughtOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(message.content);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
-  const reasoningRef = useRef<HTMLDivElement>(null);
   const isThinking = pending && Boolean(message.reasoning) && message.reasoningDurationSeconds === undefined;
   const displayedReasoning = formatReasoningForDisplay(message.reasoning || "", message.toolEvents || [], locale);
-  const visibleToolEvents = (message.toolEvents || []).filter((event) => event.name !== "ask_multiple_choice");
-  const choiceResponses = (message.toolEvents || []).filter((event) => event.name === "ask_multiple_choice" && event.status === "completed");
   const waitingForChoice = (message.toolEvents || []).some((event) => event.name === "ask_multiple_choice" && event.status === "waiting");
   const longPress = useLongPress(() => setMobileActionsOpen(true), pending || editing);
   const shownContent = useRevealedText(message.content, pending && message.role === "assistant", appearance.streamPacing, appearance.streamChunkSize);
   const fading = pending && appearance.streamReveal === "fade" && Boolean(shownContent);
   useEffect(() => { if (!editing) setText(message.content); }, [editing, message.content]);
-  useEffect(() => { if (isThinking && reasoningRef.current) reasoningRef.current.scrollTop = reasoningRef.current.scrollHeight; }, [isThinking, message.reasoning]);
   const copyMessage = async () => { await copyTextToClipboard(message.content); setMobileActionsOpen(false); };
   const editMessage = () => { setMobileActionsOpen(false); setEditing(true); };
   const regenerateMessage = () => { setMobileActionsOpen(false); message.role === "user" ? onRegenerateUser(message.id) : onRegenerate(message.id); };
@@ -1295,15 +1297,59 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
     : null;
 
   if (message.role === "user") return <div className="message-row user-message"><div className="user-message-actions">{editing ? <div className="message-edit">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}<textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => setEditing(false)}>{c.cancel}</button><button onClick={() => { if (text.trim() !== message.content) onFork(message.id, text); setEditing(false); }}><GitBranch size={13} /> {c.forkSend}</button></div></div> : <><div className="user-message-toolbar"><button title={c.regenerateRequest} aria-label={c.regenerateRequest} onClick={() => onRegenerateUser(message.id)}><RefreshCw size={13} /></button>{message.content && <button title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={13} /></button>}<button title={c.editBranch} aria-label={c.editBranch} onClick={() => setEditing(true)}><Pencil size={13} /></button><button className="delete" title={c.deleteMessage} aria-label={c.deleteMessage} onClick={() => onDeleteUser(message.id)}><Trash2 size={13} /></button></div><div className="user-message-stack long-press-target" {...longPress}><div className="user-message-content">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}{message.content && <div className="message-bubble">{message.content}</div>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /></div></>}</div>{actions}</div>;
-  const showThought = isThinking || thoughtOpen;
+  const steps = transcriptSteps(message);
+  const liveContentIndex = lastContentStep(steps);
+  const wholeReasoning = reasoningStepIsWhole(message);
+  const markdown = (text: string) => <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: true }], remarkMath]} rehypePlugins={[rehypeKatex]} components={{ a: (props) => <a {...props} target="_blank" rel="noreferrer" />, pre: ({ children }) => <CodeSnippet c={c}>{children}</CodeSnippet>, del: ({ node, children, ...props }) => renderStrikethrough ? <del {...props}>{children}</del> : <>{literalStrikethroughSource(text, node, String(children))}</> }}>{text}</ReactMarkdown>;
   return <div className="message-row assistant-message long-press-target" {...longPress}>
-    {pending && waitPhase && <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div>}
-    {message.reasoning && <div className={`thinking-block ${isThinking ? "streaming" : ""}`}><button onClick={() => !isThinking && setThoughtOpen((value) => !value)} aria-expanded={showThought}><BrainCircuit size={15} /> {isThinking ? c.thinking : formatThoughtDuration(message.reasoningDurationSeconds || 1, locale)} {!isThinking && <ChevronDown size={14} className={thoughtOpen ? "rotate" : ""} />}</button>{showThought && <div ref={reasoningRef} className={`thinking-preview ${isThinking ? "live" : ""}`}>{displayedReasoning}</div>}</div>}
-    {visibleToolEvents.length ? <ToolActivityGroup c={c} locale={locale} events={visibleToolEvents} /> : null}
-    {choiceResponses.map((event) => <MultipleChoiceResponse key={event.id} event={event} />)}
-    {editing ? <div className="assistant-edit"><textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => { setText(message.content); setEditing(false); }}>{c.cancel}</button><button className="save-response" onClick={() => { if (text.trim()) onEditAssistant(message.id, text); setEditing(false); }}><Check size={13} /> {c.saveEdit}</button></div></div> : <div className={`assistant-copy markdown-body ${fading ? "stream-fade" : ""}`}>{shownContent ? <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: true }], remarkMath]} rehypePlugins={[rehypeKatex]} components={{ a: (props) => <a {...props} target="_blank" rel="noreferrer" />, pre: ({ children }) => <CodeSnippet c={c}>{children}</CodeSnippet>, del: ({ node, children, ...props }) => renderStrikethrough ? <del {...props}>{children}</del> : <>{literalStrikethroughSource(shownContent, node, String(children))}</> }}>{shownContent}</ReactMarkdown> : pending && !waitingForChoice && !waitPhase ? <span className="typing"><i /><i /><i /></span> : ""}</div>}
+    {pending && waitPhase && waitPhase !== "compacting-context" && <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div>}
+    {editing
+      ? <div className="assistant-edit"><textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => { setText(message.content); setEditing(false); }}>{c.cancel}</button><button className="save-response" onClick={() => { if (text.trim()) onEditAssistant(message.id, text); setEditing(false); }}><Check size={13} /> {c.saveEdit}</button></div></div>
+      : <>{steps.map((step, index) => {
+          if (step.kind === "reasoning") return <ReasoningStep key={index} c={c} locale={locale} text={wholeReasoning ? displayedReasoning : step.text} seconds={step.seconds} live={pending && isThinking && index === steps.length - 1} />;
+          if (step.kind === "compaction") return <CompactionStep key={index} c={c} locale={locale} step={step} live={pending && index === steps.length - 1 && waitPhase === "compacting-context"} />;
+          if (step.kind === "tools") {
+            const events = stepToolEvents(step.ids, message.toolEvents);
+            const tools = events.filter((event) => event.name !== "ask_multiple_choice");
+            const answered = events.filter((event) => event.name === "ask_multiple_choice" && event.status === "completed");
+            return <div key={index} className="transcript-tools">{tools.length ? <ToolActivityGroup c={c} locale={locale} events={tools} /> : null}{answered.map((event) => <MultipleChoiceResponse key={event.id} event={event} />)}</div>;
+          }
+          const live = index === liveContentIndex && pending;
+          const body = live ? shownContent : step.text;
+          return <div key={index} className={`assistant-copy markdown-body ${live && fading ? "stream-fade" : ""}`}>{body ? markdown(body) : null}</div>;
+        })}
+        {!steps.length && (pending && !waitingForChoice && !waitPhase ? <div className="assistant-copy markdown-body"><span className="typing"><i /><i /><i /></span></div> : null)}
+      </>}
     {!pending && !editing && <div className="assistant-footer"><div className="assistant-actions"><button className="message-action-button" title={c.regenerate} aria-label={c.regenerate} onClick={() => onRegenerate(message.id)}><RefreshCw size={14} /></button>{message.content && <button className="message-action-button" title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={14} /></button>}<button className="message-action-button" title={c.editResponse} aria-label={c.editResponse} onClick={() => setEditing(true)}><Pencil size={14} /></button></div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /><MessageTokenStats c={c} locale={locale} message={message} /></div>}
     {actions}
+  </div>;
+}
+
+function ReasoningStep({ c, locale, text, seconds, live }: { c: CopySet; locale: Locale; text: string; seconds?: number; live: boolean }) {
+  const [open, setOpen] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (live && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight; }, [live, text]);
+  const shown = live || open;
+  return <div className={`thinking-block ${live ? "streaming" : ""}`}>
+    <button onClick={() => !live && setOpen((value) => !value)} aria-expanded={shown}><BrainCircuit size={15} /> {live ? c.thinking : formatThoughtDuration(seconds || 1, locale)} {!live && <ChevronDown size={14} className={open ? "rotate" : ""} />}</button>
+    {shown && <div ref={bodyRef} className={`thinking-preview ${live ? "live" : ""}`}>{text}</div>}
+  </div>;
+}
+
+/**
+ * A compaction stage. Its fold holds the compaction model's own reasoning and the summary it
+ * produced, each in its own small window, so the stage reads like a reasoning block.
+ */
+function CompactionStep({ c, locale, step, live }: { c: CopySet; locale: Locale; step: Extract<MessageStep, { kind: "compaction" }>; live: boolean }) {
+  const [open, setOpen] = useState(false);
+  const foldable = Boolean(step.reasoning || step.summary);
+  const shown = open && foldable;
+  return <div className={`thinking-block compaction-block ${live ? "streaming" : ""}`}>
+    <button onClick={() => foldable && setOpen((value) => !value)} aria-expanded={shown} disabled={!foldable}><Minimize2 size={15} /> {live ? c.compactingNow : formatCompactionDuration(step.seconds || 1, locale)} {foldable && <ChevronDown size={14} className={open ? "rotate" : ""} />}</button>
+    {shown && <div className="compaction-panes">
+      {step.reasoning && <div className="compaction-pane"><small>{c.compactionThought}</small><div className="thinking-preview">{step.reasoning}</div></div>}
+      {step.summary && <div className="compaction-pane"><small>{c.compactionSummary}</small><div className="thinking-preview">{step.summary}</div></div>}
+    </div>}
   </div>;
 }
 

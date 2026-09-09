@@ -20,6 +20,12 @@ const messageSchema = z.object({
   completionDurationSeconds: z.number().nonnegative().optional(),
   contextTokens: z.number().int().nonnegative().optional(),
   timeToFirstTokenSeconds: z.number().nonnegative().optional(),
+  steps: z.array(z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("reasoning"), text: z.string(), seconds: z.number().nonnegative().optional() }),
+    z.object({ kind: z.literal("content"), text: z.string() }),
+    z.object({ kind: z.literal("tools"), ids: z.array(z.string().min(1)) }),
+    z.object({ kind: z.literal("compaction"), seconds: z.number().nonnegative().optional(), summary: z.string().optional(), reasoning: z.string().optional() }),
+  ])).optional(),
   toolEvents: z.array(z.object({
     id: z.string().min(1),
     name: z.string().min(1),
@@ -90,10 +96,10 @@ const insertBranch = db.prepare(`
 const insertMessage = db.prepare(`
   INSERT OR IGNORE INTO messages(
     id, conversation_id, revision_group_id, role, content, reasoning, reasoning_duration_seconds,
-    input_tokens, output_tokens, reasoning_tokens, total_tokens, completion_duration_seconds, time_to_first_token_seconds, tool_events, created_at
+    input_tokens, output_tokens, reasoning_tokens, total_tokens, completion_duration_seconds, time_to_first_token_seconds, tool_events, steps, created_at
   ) VALUES (
     @id, @conversationId, @revisionGroupId, @role, @content, @reasoning, @reasoningDurationSeconds,
-    @inputTokens, @outputTokens, @reasoningTokens, @totalTokens, @completionDurationSeconds, @timeToFirstTokenSeconds, @toolEvents, @createdAt
+    @inputTokens, @outputTokens, @reasoningTokens, @totalTokens, @completionDurationSeconds, @timeToFirstTokenSeconds, @toolEvents, @steps, @createdAt
   )
 `);
 const insertBranchMessage = db.prepare("INSERT INTO branch_messages(branch_id, message_id, position) VALUES (?, ?, ?)");
@@ -136,6 +142,7 @@ function storeConversation(record: Conversation, userId: string, guard?: () => b
           completionDurationSeconds: message.completionDurationSeconds ?? null,
           timeToFirstTokenSeconds: message.timeToFirstTokenSeconds ?? null,
           toolEvents: message.toolEvents?.length ? JSON.stringify(message.toolEvents) : null,
+          steps: message.steps?.length ? JSON.stringify(message.steps) : null,
         });
         db.prepare("UPDATE messages SET context_tokens = ? WHERE id = ? AND conversation_id = ?").run(message.contextTokens ?? null, message.id, record.id);
         insertBranchMessage.run(branch.id, message.id, messagePosition);
@@ -235,6 +242,7 @@ type MessageRow = {
   time_to_first_token_seconds: number | null;
   context_tokens: number | null;
   tool_events: string | null;
+  steps: string | null;
   created_at: string;
 };
 type AttachmentRow = {
@@ -256,7 +264,7 @@ export async function readConversation(id: string, userId: string): Promise<Conv
   const branchRows = db.prepare("SELECT id, name, parent_branch_id, forked_from_message_id, created_at, updated_at FROM branches WHERE conversation_id = ? ORDER BY position").all(id) as BranchRow[];
   const messageRows = db.prepare(`
     SELECT bm.branch_id, m.id, m.revision_group_id, m.role, m.content, m.reasoning, m.reasoning_duration_seconds,
-           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.context_tokens, m.tool_events, m.created_at
+           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.context_tokens, m.tool_events, m.steps, m.created_at
     FROM branch_messages bm
     JOIN messages m ON m.id = bm.message_id
     JOIN branches b ON b.id = bm.branch_id
@@ -300,6 +308,7 @@ export async function readConversation(id: string, userId: string): Promise<Conv
       contextTokens: row.context_tokens ?? undefined,
       timeToFirstTokenSeconds: row.time_to_first_token_seconds ?? undefined,
       toolEvents: row.tool_events ? JSON.parse(row.tool_events) : undefined,
+      steps: row.steps ? JSON.parse(row.steps) : undefined,
       attachments: attachments.get(row.id),
       createdAt: row.created_at,
     });

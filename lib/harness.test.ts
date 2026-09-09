@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages } from "./harness.ts";
+import { contextThresholdReached, projectedInputTokens, DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages } from "./harness.ts";
 
 test("resume substitution is literal and non-recursive; threshold includes equality", async () => {
   const { resumePrompt, contextThresholdReached } = await import("./harness.ts");
@@ -23,4 +23,17 @@ test("multilingual estimate and conservative defaults", () => {
   assert.equal(DEFAULT_HARNESS_SETTINGS.maxOutputTokens,0);
   assert.equal(DEFAULT_HARNESS_SETTINGS.titleEnabled,false);
   assert.equal(DEFAULT_HARNESS_SETTINGS.titleEffort,"off");
+});
+
+test("the compaction decision never uses the smaller of estimate and measurement", () => {
+  // A tokenizer charging more than the structural estimate must still trigger compaction.
+  assert.equal(projectedInputTokens(1200, 3600), 3600);
+  assert.equal(projectedInputTokens(4000, 1200), 4000);
+  assert.equal(projectedInputTokens(500, undefined), 500);
+  assert.equal(projectedInputTokens(500, 0), 500);
+  assert.equal(projectedInputTokens(500, Number.NaN), 500);
+  // 89% of a window crosses an 80% threshold once the measurement is taken into account.
+  const window = 4000;
+  assert.equal(contextThresholdReached(projectedInputTokens(1000, 3560), window, 80), true);
+  assert.equal(contextThresholdReached(projectedInputTokens(1000, undefined), window, 80), false);
 });

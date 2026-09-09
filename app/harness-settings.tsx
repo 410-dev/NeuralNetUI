@@ -13,10 +13,10 @@ const EFFORT_LABELS: Record<string, [string, string]> = {
   low: ["Low", "낮음"], medium: ["Medium", "보통"], high: ["High", "높음"], xhigh: ["Extra high", "매우 높음"],
 };
 
-export function TextDialog({ title, value, onSave, onClose, multiline = false }: { title:string; value:string; onSave:(value:string)=>void; onClose:()=>void; multiline?:boolean }) {
+export function TextDialog({ title, value, onSave, onClose, multiline = false, help }: { title:string; value:string; onSave:(value:string)=>void; onClose:()=>void; multiline?:boolean; help?:string }) {
   const [text,setText] = useState(value);
   const ref = useModalFocus(onClose);
-  return createPortal(<div ref={ref} tabIndex={-1} className="harness-modal-layer" role="dialog" aria-modal="true" aria-label={title}><button className="settings-backdrop" tabIndex={-1} onClick={onClose} aria-label="Close"/><form className="harness-dialog" onSubmit={e=>{e.preventDefault();if(text.trim())onSave(text.trim());}}><header><h2>{title}</h2><button type="button" onClick={onClose} aria-label="Close"><X size={20}/></button></header>{multiline ? <textarea aria-label={title} rows={16} maxLength={32000} value={text} onChange={e=>setText(e.target.value)}/> : <input aria-label={title} maxLength={200} value={text} onChange={e=>setText(e.target.value)}/>}<button className="save-button" disabled={!text.trim()}>OK</button></form></div>,document.body);
+  return createPortal(<div ref={ref} tabIndex={-1} className="harness-modal-layer" role="dialog" aria-modal="true" aria-label={title}><button className="settings-backdrop" tabIndex={-1} onClick={onClose} aria-label="Close"/><form className="harness-dialog" onSubmit={e=>{e.preventDefault();if(text.trim())onSave(text.trim());}}><header><h2>{title}</h2><button type="button" onClick={onClose} aria-label="Close"><X size={20}/></button></header>{help && <p className="harness-dialog-help">{help}</p>}{multiline ? <textarea aria-label={title} rows={16} maxLength={32000} value={text} onChange={e=>setText(e.target.value)}/> : <input aria-label={title} maxLength={200} value={text} onChange={e=>setText(e.target.value)}/>}<button className="save-button" disabled={!text.trim()}>OK</button></form></div>,document.body);
 }
 
 // Radio cards keep the harness modes and title timings comparable at a glance.
@@ -55,7 +55,6 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
         {modelFields("compact")}
         <div className="harness-prompt-actions"><button type="button" className="subtle-action" onClick={()=>setPrompt("compactPrompt")}><Pencil size={16}/>{ko?"압축 프롬프트 편집":"Edit compacting prompt"}</button>
         <button type="button" className="subtle-action" onClick={()=>setPrompt("resumePrompt")}><Pencil size={16}/>{ko?"재개 프롬프트 편집":"Edit resume prompt"}</button></div>
-        <small>{ko?"재개 시 %COMPRESSED%는 압축된 맥락, %USER_PROMPT%는 원래 사용자 메시지로 치환됩니다.":"On resume, %COMPRESSED% becomes the summary and %USER_PROMPT% becomes the original user message."}</small>
         <label className="field"><span>{ko?"출력 중 압축 후 최대 재개 횟수":"Maximum compaction resumes per response"}</span><input type="number" min={0} max={100} step={1} value={h.maxCompactionResumes} onChange={e=>patch({maxCompactionResumes:Math.min(100,Math.max(0,Math.floor(Number(e.target.value)||0)))})}/><small>{ko?"기본 3회. 0이면 출력 중 임계값 도달 시 재개하지 않습니다. 전송 전 압축은 제외됩니다.":"Default: 3. Zero stops at the first output threshold. Pre-send compaction does not count."}</small></label>
       </div>}
       <div className="harness-advanced">
@@ -80,6 +79,6 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
         <button type="button" className="subtle-action" onClick={()=>setPrompt("titlePrompt")}><Pencil size={16}/>{ko?"제목 생성 프롬프트 편집":"Edit title prompt"}</button>
       </div>}
     </section>
-    {prompt&&<TextDialog title={prompt==="compactPrompt"?(ko?"압축 프롬프트":"Compacting prompt"):prompt==="resumePrompt"?(ko?"재개 프롬프트":"Resume prompt"):(ko?"제목 생성 프롬프트":"Title prompt")} value={h[prompt]} multiline onClose={()=>setPrompt(null)} onSave={text=>{patch({[prompt]:text});setPrompt(null);}}/>}
+    {prompt&&<TextDialog title={prompt==="compactPrompt"?(ko?"압축 프롬프트":"Compacting prompt"):prompt==="resumePrompt"?(ko?"재개 프롬프트":"Resume prompt"):(ko?"제목 생성 프롬프트":"Title prompt")} help={prompt==="resumePrompt"?(ko?"출력을 재개할 때 사용합니다. %COMPRESSED%는 압축된 맥락으로, %USER_PROMPT%는 원래 사용자 메시지로 치환됩니다.":"Used when resuming an interrupted response. %COMPRESSED% is replaced with the compacted context and %USER_PROMPT% with the original user message."):undefined} value={h[prompt]} multiline onClose={()=>setPrompt(null)} onSave={text=>{patch({[prompt]:text});setPrompt(null);}}/>}
   </div>;
 }

@@ -144,6 +144,18 @@ export interface ToolSettings {
   orphanUploadTtlHours: number;
 }
 
+/**
+ * One stage of an assistant turn, in the order it happened. Reasoning, delivered text, tool
+ * rounds and context compaction interleave, so the transcript keeps the sequence rather than
+ * grouping each kind together. `content` and `reasoning` stay the concatenation of every step,
+ * so copying, export and upstream history are unaffected.
+ */
+export type MessageStep =
+  | { kind: "reasoning"; text: string; seconds?: number }
+  | { kind: "content"; text: string }
+  | { kind: "tools"; ids: string[] }
+  | { kind: "compaction"; seconds?: number; summary?: string; reasoning?: string };
+
 export interface StoredMessage {
   id: string;
   revisionGroupId?: string;
@@ -158,6 +170,8 @@ export interface StoredMessage {
   completionDurationSeconds?: number;
   timeToFirstTokenSeconds?: number;
   contextTokens?: number;
+  /** Absent on messages written before the sequential transcript existed. */
+  steps?: MessageStep[];
   toolEvents?: ToolEvent[];
   attachments?: StoredAttachment[];
   createdAt: string;

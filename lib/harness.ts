@@ -39,3 +39,12 @@ export function resumePrompt(template: string, summary: string, userPrompt: stri
 export function contextThresholdReached(tokens: number, window: number | undefined, threshold: number): boolean {
   return !!window && tokens >= Math.floor(window * threshold / 100);
 }
+
+/**
+ * Tokens the next request is expected to cost. A structural estimate can fall well below what a
+ * tokenizer actually charges, so never decide on the smaller of the two numbers: the interface
+ * shows the same floor, and compaction has to trigger when that reading crosses the threshold.
+ */
+export function projectedInputTokens(estimate: number, measured?: number): number {
+  return Math.max(estimate, typeof measured === "number" && Number.isFinite(measured) && measured > 0 ? Math.floor(measured) : 0);
+}

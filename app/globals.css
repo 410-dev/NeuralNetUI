@@ -833,3 +833,24 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 .harness-prompt-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 @media (max-width: 640px) { .harness-prompt-actions { flex-direction: column; align-items: flex-start; } }
+
+
+/* ============================================================================================
+   2.1.4: the assistant transcript runs in sequence, and a compaction stage folds like reasoning.
+   ============================================================================================ */
+
+/* Consecutive stages need the same rhythm the single content block used to have. */
+.assistant-message > .assistant-copy + .assistant-copy { margin-top: 12px; }
+.assistant-message > .transcript-tools + .assistant-copy, .assistant-message > .thinking-block + .assistant-copy { margin-top: 4px; }
+.assistant-message > .assistant-copy + .thinking-block, .assistant-message > .assistant-copy + .transcript-tools { margin-top: 14px; }
+.transcript-tools:empty { display: none; }
+
+.compaction-block > button { color: var(--muted); }
+.compaction-block > button:disabled { cursor: default; opacity: 1; }
+.compaction-block.streaming > button svg:first-child { animation: tool-pulse 1.2s ease-in-out infinite; }
+.compaction-panes { display: grid; gap: 9px; margin-top: 9px; }
+.compaction-pane > small { display: block; margin: 0 0 4px 2px; color: var(--dim); font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase; }
+.compaction-pane > .thinking-preview { margin-top: 0; }
+
+.harness-dialog-help { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+

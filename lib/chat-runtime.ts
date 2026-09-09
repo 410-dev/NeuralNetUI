@@ -1,7 +1,8 @@
 import { progressEvent } from "./inference-progress";
 import { nativeChatResponse } from "./lm-studio-progress";
-import { DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages, contextThresholdReached } from "./harness";
-import { harnessCompletion, prepareContext, compactForResume } from "./harness-runtime";
+import { DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rollingMessages, contextThresholdReached } from "./harness";
+import { contextUsage } from "./context-usage";
+import { harnessCompletion, prepareContext, compactForResume, type CompactionRecord } from "./harness-runtime";
 import { effectiveContextWindowTokens } from "./model-context";
 import { db } from "./database";
 import { registerChatDisposal } from "./chat-disposal";
@@ -17,7 +18,7 @@ import { modelResidency } from "./residency-runtime";
 import { progressFetch, withSlowProgress } from "./chat-progress";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
 import { closeBrowserSessions, executeBrowserTool } from "./browser-tool";
-import type { ChatWaitPhase, Conversation, StoredMessage, ToolEvent, ToolSettings } from "./types";
+import type { ChatWaitPhase, Conversation, MessageStep, StoredMessage, ToolEvent, ToolSettings } from "./types";
 import type { ModelContentPart } from "./document-processing";
 
 type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
@@ -86,13 +87,51 @@ function usageFrom(payload: Record<string, unknown>) {
   };
 }
 
+/** Appends streamed text to the open step of the same kind, or opens a new one. */
+function appendStep(job: ChatJob, kind: "reasoning" | "content", text: string) {
+  if (!text) return;
+  const steps = job.message.steps ? [...job.message.steps] : [];
+  const last = steps.at(-1);
+  if (last && last.kind === kind) steps[steps.length - 1] = { ...last, text: last.text + text };
+  else steps.push(kind === "reasoning" ? { kind, text } : { kind, text });
+  job.message = { ...job.message, steps };
+}
+
+function pushStep(job: ChatJob, step: MessageStep) {
+  job.message = { ...job.message, steps: [...(job.message.steps || []), step] };
+}
+
+/** Stamps the reasoning step that just ended with how long it ran. */
+function closeReasoningStep(job: ChatJob, seconds: number) {
+  const steps = job.message.steps ? [...job.message.steps] : [];
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index];
+    if (step.kind === "reasoning") {
+      if (step.seconds === undefined) { steps[index] = { ...step, seconds: Math.max(1, Math.round(seconds)) }; job.message = { ...job.message, steps }; }
+      return;
+    }
+    if (step.kind === "content" || step.kind === "tools") return;
+  }
+}
+
+/** Fills the compaction step opened when the phase began, or opens a finished one. */
+function completeCompaction(job: ChatJob, record: CompactionRecord) {
+  const finished: MessageStep = { kind: "compaction", seconds: Math.max(1, Math.round(record.seconds)), ...(record.summary ? { summary: record.summary } : {}), ...(record.reasoning ? { reasoning: record.reasoning } : {}) };
+  const steps = job.message.steps ? [...job.message.steps] : [];
+  const open = steps.findLastIndex(step => step.kind === "compaction" && step.seconds === undefined);
+  if (open >= 0) steps[open] = finished; else steps.push(finished);
+  job.message = { ...job.message, steps };
+}
+
 function snapshot(job: ChatJob): ChatJobSnapshot {
   return { conversationId: job.input.conversationId, branchId: job.input.branchId, status: job.status, message: job.message, waitPhase: job.waitPhase, waitProgress: job.waitProgress, ...(job.error ? { error: job.error } : {}) };
 }
 
 function setWaitPhase(job: ChatJob, phase?: ChatWaitPhase) {
   if (job.discarded || job.controller.signal.aborted || !["running", "waiting"].includes(job.status) || job.waitPhase === phase) return;
-  job.waitPhase = phase; job.waitProgress = undefined; broadcast(job, true);
+  job.waitPhase = phase; job.waitProgress = undefined;
+  if (phase === "compacting-context" && !(job.message.steps || []).some(step => step.kind === "compaction" && step.seconds === undefined)) pushStep(job, { kind: "compaction" });
+  broadcast(job, true);
 }
 
 function setWaitProgress(job: ChatJob, phase: ChatWaitPhase, progress: number) {
@@ -164,7 +203,7 @@ async function upstreamMessages(input: StartChatJobInput, userId: string, system
   return [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...converted.flat()];
 }
 
-async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false, threshold?: number) {
+async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false, threshold?: number, baseInput?: number) {
   const turnController = new AbortController();
   const signal = AbortSignal.any([job.controller.signal, turnController.signal]);
   setWaitPhase(job, "preparing-response");
@@ -179,7 +218,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   const calls = new Map<number, ToolCall>(); let content = ""; let reasoning = ""; let usage: Record<string, number | undefined> = {};
   let visibleStarted: number | undefined; let visibleEnded: number | undefined; let reasoningStarted: number | undefined; let reasoningEnded: number | undefined;
   let compact = false;
-  const inputEstimate = estimateTokens(body.messages) + estimateTokens(body.tools || []);
+  const inputEstimate = projectedInputTokens(estimateTokens(body.messages) + estimateTokens(body.tools || []), baseInput);
   let terminated = false; let sawPayload = false; let finishReason = false;
   const readPayload = (payload: Record<string, unknown>) => {
     sawPayload = true;
@@ -199,6 +238,8 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     if (contentDelta || reasoningDelta) {
       setWaitPhase(job, undefined);
       job.message = { ...job.message, content: job.message.content + contentDelta, reasoning: (job.message.reasoning || "") + reasoningDelta };
+      appendStep(job, "reasoning", reasoningDelta);
+      if (contentDelta) { closeReasoningStep(job, (reasoningEnded ?? now) - (reasoningStarted ?? now) > 0 ? ((reasoningEnded ?? now) - (reasoningStarted ?? now)) / 1000 : 1); appendStep(job, "content", contentDelta); }
       broadcast(job);
     }
     if (Array.isArray(delta.tool_calls)) for (const part of delta.tool_calls as Array<Record<string, unknown>>) {
@@ -334,14 +375,22 @@ async function run(job: ChatJob) {
       if (!managed || managed.title_managed) return;
       try {
         const first = job.input.messages.find(m => m.role === "user");
-        const title = (await harnessCompletion(harnessContext, harness.titleModelId, harness.titleEffort, harness.titlePrompt, JSON.stringify({user:first?.content.slice(0, 2000), assistant:job.message.content.slice(0, 2000)}), 256)).split(/\r?\n/)[0].replace(/^["'#*]+|["'*]+$/g, "").trim().slice(0,200);
+        const title = (await harnessCompletion(harnessContext, harness.titleModelId, harness.titleEffort, harness.titlePrompt, JSON.stringify({user:first?.content.slice(0, 2000), assistant:job.message.content.slice(0, 2000)}), 256)).text.split(/\r?\n/)[0].replace(/^["'#*]+|["'*]+$/g, "").trim().slice(0,200);
         job.controller.signal.throwIfAborted();
         if (title && renameConversation(job.input.conversationId, job.userId, title, true)) job.conversation.title = title;
       } catch (error) { if (job.controller.signal.aborted) throw error; /* A title failure must not discard a chat response. */ }
     };
     if (harness.titleTiming === "before") await generateTitle();
     const originalUser = messages.findLast(m => m.role === "user");
-    messages = await prepareContext(harnessContext, job.input.branchId, messages, true, estimateTokens(tools));
+    // The composer's donut reads the stored counters; the same reading has to drive compaction,
+    // or a request the interface calls 89% full is sent untouched.
+    const branchMessages = (job.conversation.branches.find(item => item.id === job.input.branchId) || job.conversation.branches[0])?.messages || [];
+    let measuredInput = contextUsage(branchMessages, job.input.sendReasoning === true, "", systemPrompt).total;
+    let compactedBeforeSending = false;
+    messages = await prepareContext(harnessContext, job.input.branchId, messages, true, estimateTokens(tools), measuredInput,
+      record => { compactedBeforeSending = true; completeCompaction(job, record); });
+    // A send-time compaction happened before any output, so it opens the transcript.
+    if (compactedBeforeSending) { measuredInput = 0; broadcast(job, true); }
     job.message.contextTokens = estimateTokens(messages); broadcast(job, true);
     const headers = connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "");
     const progressEnabled = connection.driver === "lmstudio" || config.experimental?.openAIProgress === true;
@@ -361,16 +410,20 @@ async function run(job: ChatJob) {
     const acquireModel = () => modelResidency.acquire({ server: serverKey, model: model.sourceModel, limit, policy, adapter, signal: job.controller.signal, onPhase: phase => setWaitPhase(job, phase) });
     releaseModel = await acquireModel();
     let compactionResumes = 0;
+    const recordCompaction = (record: CompactionRecord) => { completeCompaction(job, record); broadcast(job, true); };
     const compactionError = () => new Error(config.preferences.language === "ko"
       ? "출력 중 컨텍스트 압축 재개 횟수를 초과했습니다. 압축 임계값이 너무 낮거나 모델의 컨텍스트 길이가 너무 짧습니다. 하네스 설정에서 임계값·재개 횟수 또는 모델 컨텍스트 길이를 늘려 주세요."
       : "Context compaction resume limit exceeded. The compaction threshold is too low or the model context window is too short. Increase the threshold, resume limit, or context window.");
     for (let turn = 0; turn < config.toolSettings.maxToolRounds; turn += 1) {
       const contextWindow = effectiveContextWindowTokens(model, config.models);
-      if (contextWindow && turn > 0 && harness.contextMode === "compacting" && estimateTokens(messages) + estimateTokens(tools) >= Math.min(contextWindow * .95, contextWindow * harness.compactThreshold / 100)) {
+      let projectedInput = projectedInputTokens(estimateTokens(messages) + estimateTokens(tools), measuredInput);
+      if (contextWindow && turn > 0 && harness.contextMode === "compacting" && projectedInput >= Math.min(contextWindow * .95, contextWindow * harness.compactThreshold / 100)) {
         releaseModel?.(); releaseModel = undefined;
         if (++compactionResumes > harness.maxCompactionResumes) throw compactionError();
-        messages = await compactForResume(harnessContext, messages, originalUser);
+        messages = await compactForResume(harnessContext, messages, originalUser, recordCompaction);
+        measuredInput = 0;
         if (contextThresholdReached(estimateTokens(messages) + estimateTokens(tools), contextWindow, harness.compactThreshold)) throw compactionError();
+        projectedInput = estimateTokens(messages) + estimateTokens(tools);
         releaseModel = await acquireModel();
       }
       if (contextWindow && harness.contextMode === "rolling") messages = rollingMessages(messages, Math.floor(contextWindow * .95) - estimateTokens(tools));
@@ -381,7 +434,9 @@ async function run(job: ChatJob) {
         ? (remainingTokens ? Math.min(harness.maxOutputTokens, remainingTokens) : harness.maxOutputTokens)
         : remainingTokens;
       const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(outputLimit ? { max_tokens: outputLimit } : {}), stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
-      const result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled, harness.contextMode === "compacting" && contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined); reasoningSeconds += result.reasoningDurationSeconds;
+      const result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled, harness.contextMode === "compacting" && contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined, projectedInput); reasoningSeconds += result.reasoningDurationSeconds;
+      // The server's own input count is authoritative once it arrives.
+      if (result.usage.inputTokens) measuredInput = result.usage.inputTokens + (result.usage.outputTokens || 0);
       if (result.compact) {
         job.controller.signal.throwIfAborted();
         releaseModel?.(); releaseModel = undefined;
@@ -389,13 +444,15 @@ async function run(job: ChatJob) {
         // Incomplete tool arguments are historical data only; never execute them.
         messages.push({ role: "assistant", content: result.content, reasoning_content: result.reasoning,
           ...(result.calls.length ? { tool_calls: result.calls } : {}) });
-        messages = await compactForResume(harnessContext, messages, originalUser);
+        messages = await compactForResume(harnessContext, messages, originalUser, recordCompaction);
+        measuredInput = 0;
         if (contextThresholdReached(estimateTokens(messages) + estimateTokens(tools), contextWindow, harness.compactThreshold)) throw compactionError();
         releaseModel = await acquireModel();
         turn -= 1; // Compaction retries do not consume the tool execution budget.
         continue;
       }
       if (!result.calls.length) {
+        closeReasoningStep(job, reasoningSeconds);
         job.message = { ...job.message, ...result.usage, contextTokens: (result.usage.inputTokens ?? estimateTokens(messages)) + (result.usage.outputTokens ?? estimateTokens(result.content)), reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,
           completionDurationSeconds: result.visibleDurationSeconds,
           timeToFirstTokenSeconds: Math.max(0, (performance.now() - requestStartedAt - (result.visibleDurationSeconds || 0) * 1000) / 1000) };
@@ -404,6 +461,9 @@ async function run(job: ChatJob) {
         job.waitPhase = undefined; job.waitProgress = undefined; job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
       }
       messages.push({ role: "assistant", content: result.content, ...(result.reasoning ? { reasoning_content: result.reasoning } : {}), tool_calls: result.calls });
+      closeReasoningStep(job, result.reasoningDurationSeconds);
+      pushStep(job, { kind: "tools", ids: result.calls.map(call => call.id) });
+      broadcast(job, true);
       const visualToolContent: ModelContentPart[] = [];
       for (const call of result.calls) {
         addToolEvent(job, call); let execution: ToolExecution;

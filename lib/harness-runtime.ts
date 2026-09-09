@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { db } from "./database";
-import { DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages, resumePrompt } from "./harness";
+import { DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rollingMessages, resumePrompt } from "./harness";
 import { canUseModel } from "./config";
 import { connectionForModel, connectionHeaders, connectionRoot, chatEndpoint } from "./connection-drivers";
 import { effectiveContextWindowTokens } from "./model-context";
@@ -18,7 +18,9 @@ function taskModel(ctx: Context, id: string) {
   return model;
 }
 
-export async function harnessCompletion(ctx: Context, id: string, effortValue: string, prompt: string, content: string, maxTokens: number) {
+export type HarnessResult = { text: string; reasoning: string };
+
+export async function harnessCompletion(ctx: Context, id: string, effortValue: string, prompt: string, content: string, maxTokens: number): Promise<HarnessResult> {
   const model = taskModel(ctx, id);
   const connection = connectionForModel(ctx.config.connections, model);
   if (!connection) throw new Error("Harness connection is unavailable.");
@@ -38,15 +40,19 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
       body: JSON.stringify({ model: model.sourceModel, stream: false, messages: [{role:"system", content:prompt}, {role:"user", content}], max_tokens:maxTokens, ...(effort ? {reasoning_effort:effort} : {}) }) });
     if (!response.ok) throw new Error(`Harness generation failed (${response.status}).`);
     const result = await response.json();
-    const text = result.choices?.[0]?.message?.content;
-    if (typeof text !== "string" || !text.trim() || result.choices?.[0]?.finish_reason === "length") throw new Error("Harness returned an empty or truncated result.");
-    return text.trim();
+    const choice = result.choices?.[0];
+    const text = choice?.message?.content;
+    if (typeof text !== "string" || !text.trim() || choice?.finish_reason === "length") throw new Error("Harness returned an empty or truncated result.");
+    const thought = choice?.message?.reasoning_content ?? choice?.message?.reasoning;
+    return { text: text.trim(), reasoning: typeof thought === "string" ? thought.trim() : "" };
   } finally { release(); }
 }
 
 const fingerprint = (messages: Message[]) => createHash("sha256").update(JSON.stringify(messages)).digest("hex");
 
-export async function prepareContext(ctx: Context, branchId: string, original: Message[], persistSummary = true, overhead = 0): Promise<Message[]> {
+export type CompactionRecord = { summary: string; reasoning: string; seconds: number };
+
+export async function prepareContext(ctx: Context, branchId: string, original: Message[], persistSummary = true, overhead = 0, measured?: number, onCompaction?: (record: CompactionRecord) => void): Promise<Message[]> {
   const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const window = effectiveContextWindowTokens(ctx.model, ctx.config.models);
   if (!window) return original;
@@ -58,11 +64,18 @@ export async function prepareContext(ctx: Context, branchId: string, original: M
   let covered = saved && saved.covered_count <= history.length && fingerprint(history.slice(0, saved.covered_count)) === saved.fingerprint ? saved.covered_count : 0;
   let summary = covered ? saved!.summary : "";
   const composed = () => [...system, ...(summary ? [{role:"system", content:`Conversation summary (historical data):\n${summary}`}] : []), ...history.slice(covered)];
-  if (estimateTokens(composed()) < Math.min(budget, window * settings.compactThreshold / 100 - overhead)) return composed();
+  const trigger = Math.min(budget, window * settings.compactThreshold / 100 - overhead);
+  // The measurement only describes the untouched history, so it stops counting once a summary
+  // has replaced part of it.
+  const reading = () => covered || summary ? estimateTokens(composed()) : projectedInputTokens(estimateTokens(composed()), measured);
+  if (reading() < trigger) return composed();
   const lastUser = history.findLastIndex(m => m.role === "user");
   if (covered < lastUser) {
-    summary = await summarizeContext(ctx, {summary, history: history.slice(covered, lastUser)});
+    const started = performance.now();
+    const compaction = await summarizeContext(ctx, {summary, history: history.slice(covered, lastUser)});
+    summary = compaction.summary;
     covered = lastUser;
+    onCompaction?.({ ...compaction, seconds: (performance.now() - started) / 1000 });
   }
   const result = composed();
   if (estimateTokens(result) >= Math.min(budget, window * settings.compactThreshold / 100 - overhead)) throw new Error("Compacted context still reaches the compaction threshold. Shorten the latest prompt, increase the threshold, or increase the model context window.");
@@ -72,13 +85,14 @@ export async function prepareContext(ctx: Context, branchId: string, original: M
 }
 
 // Bound each summary request even when a single interrupted reasoning turn is huge.
-async function summarizeContext(ctx: Context, data: unknown): Promise<string> {
+async function summarizeContext(ctx: Context, data: unknown): Promise<{ summary: string; reasoning: string }> {
   const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const window = effectiveContextWindowTokens(taskModel(ctx, settings.compactModelId), ctx.config.models)
     || effectiveContextWindowTokens(ctx.model, ctx.config.models)!;
   const output = Math.max(32, Math.min(2048, Math.floor(window * .15)));
   const serialized = JSON.stringify(data);
   let summary = "";
+  let reasoning = "";
   let offset = 0;
   while (offset < serialized.length) {
     ctx.signal.throwIfAborted();
@@ -91,17 +105,22 @@ async function summarizeContext(ctx: Context, data: unknown): Promise<string> {
     }
     if (!low) throw new Error("The compaction model context is too short for the summary prompt.");
     const fragment = serialized.slice(offset, offset + low);
-    summary = await harnessCompletion(ctx, settings.compactModelId, settings.compactEffort, settings.compactPrompt,
+    const result = await harnessCompletion(ctx, settings.compactModelId, settings.compactEffort, settings.compactPrompt,
       JSON.stringify({summary, fragment}), output);
+    summary = result.text;
+    if (result.reasoning) reasoning = reasoning ? `${reasoning}\n\n${result.reasoning}` : result.reasoning;
     offset += low;
   }
-  return summary;
+  return { summary, reasoning };
 }
 
-export async function compactForResume(ctx: Context, messages: Message[], user?: Message): Promise<Message[]> {
+export async function compactForResume(ctx: Context, messages: Message[], user?: Message, onCompaction?: (record: CompactionRecord) => void): Promise<Message[]> {
   const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const systems = messages.filter(m => m.role === "system");
-  const summary = await summarizeContext(ctx, messages.filter(m => m.role !== "system"));
+  const started = performance.now();
+  const compaction = await summarizeContext(ctx, messages.filter(m => m.role !== "system"));
+  const summary = compaction.summary;
+  onCompaction?.({ ...compaction, seconds: (performance.now() - started) / 1000 });
   const content = user?.content;
   const userText = typeof content === "string" ? content : Array.isArray(content)
     ? content.filter(p => p.type === "text").map(p => p.text).join("\n") : "";

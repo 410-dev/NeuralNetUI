@@ -28,7 +28,7 @@ async function titleFromFirstExchange(id: string, userId: string) {
   const context = { config, model, userId, signal: controller.signal, onPhase: () => undefined };
   const answer = await harnessCompletion(context, harness.titleModelId, harness.titleEffort, harness.titlePrompt,
     JSON.stringify({ user: request.content.slice(0, 2000), assistant: response.slice(0, 2000) }), 256);
-  const title = answer.split(/\r?\n/)[0].replace(/^["'#*]+|["'*]+$/g, "").trim().slice(0, 200);
+  const title = answer.text.split(/\r?\n/)[0].replace(/^["'#*]+|["'*]+$/g, "").trim().slice(0, 200);
   return title || undefined;
 }
 
