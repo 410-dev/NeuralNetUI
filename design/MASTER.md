@@ -124,3 +124,5 @@
 - Keep progress on the existing quiet status line: neutral 16px donut and tabular grey percentage, configurable under Appearance.
 - Never invent a completion percentage from elapsed time or token usage. Unavailable progress keeps the waiting indicator with a short unsupported label.
 - Context disclosure shows input, response and reasoning in aligned white/grey rows. Identify history/draft values as estimates and recalculate immediately when prior reasoning is toggled.
+
+- Context compaction places compact/resume prompt editors side by side on desktop and vertically on mobile. Show template placeholders and the per-response resume cap alongside the threshold. Keep compaction activity on the existing wait line.

@@ -3,7 +3,7 @@ export type SystemPromptMode = "replace" | "prepend" | "append";
 export type Locale = "en" | "ko";
 export type ConnectionDriver = "openai" | "lmstudio";
 export type ModelWaitPolicy = "capacity" | "serial";
-export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response" | "processing-prompt";
+export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response" | "processing-prompt" | "compacting-context";
 export type AccentPaletteId = "blue" | "violet" | "teal" | "amber" | "rose" | "graphite" | "custom";
 export type StreamReveal = "instant" | "fade";
 export type StreamPacing = "immediate" | "chunked";
@@ -113,6 +113,8 @@ export interface HarnessSettings {
   compactModelId: string;
   compactEffort: string;
   compactPrompt: string;
+  resumePrompt: string;
+  maxCompactionResumes: number;
   titleEnabled: boolean;
   titleTiming: "before" | "after";
   titleModelId: string;

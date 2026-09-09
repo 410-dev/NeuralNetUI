@@ -1,7 +1,7 @@
 import { progressEvent } from "./inference-progress";
 import { nativeChatResponse } from "./lm-studio-progress";
-import { DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages } from "./harness";
-import { harnessCompletion, prepareContext } from "./harness-runtime";
+import { DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages, contextThresholdReached } from "./harness";
+import { harnessCompletion, prepareContext, compactForResume } from "./harness-runtime";
 import { effectiveContextWindowTokens } from "./model-context";
 import { db } from "./database";
 import { registerChatDisposal } from "./chat-disposal";
@@ -164,11 +164,13 @@ async function upstreamMessages(input: StartChatJobInput, userId: string, system
   return [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...converted.flat()];
 }
 
-async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false) {
+async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false, threshold?: number) {
+  const turnController = new AbortController();
+  const signal = AbortSignal.any([job.controller.signal, turnController.signal]);
   setWaitPhase(job, "preparing-response");
-  const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal: job.controller.signal }) : undefined;
+  const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal }) : undefined;
   const response = nativeResponse || await progressFetch(String(body._endpoint), {
-    method: "POST", headers, signal: job.controller.signal,
+    method: "POST", headers, signal,
     body: JSON.stringify(Object.fromEntries(Object.entries(body).filter(([key]) => key !== "_endpoint"))),
   }, phase => setWaitPhase(job, phase), "preparing-response");
   if (!response.ok) throw new Error((await response.text()) || `Model server responded with ${response.status}`);
@@ -176,6 +178,8 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
   const calls = new Map<number, ToolCall>(); let content = ""; let reasoning = ""; let usage: Record<string, number | undefined> = {};
   let visibleStarted: number | undefined; let visibleEnded: number | undefined; let reasoningStarted: number | undefined; let reasoningEnded: number | undefined;
+  let compact = false;
+  const inputEstimate = estimateTokens(body.messages) + estimateTokens(body.tools || []);
   let terminated = false; let sawPayload = false; let finishReason = false;
   const readPayload = (payload: Record<string, unknown>) => {
     sawPayload = true;
@@ -208,6 +212,11 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
         function: { name: `${previous.function.name}${typeof fn?.name === "string" ? fn.name : ""}`, arguments: `${previous.function.arguments}${typeof fn?.arguments === "string" ? fn.arguments : ""}` },
       });
     }
+    const used = Math.max(inputEstimate, usage.inputTokens ?? 0) + Math.max(
+      estimateTokens(content) + estimateTokens(reasoning) + estimateTokens([...calls.values()]),
+      usage.outputTokens ?? 0, usage.reasoningTokens ?? 0);
+    job.message.contextTokens = used;
+    if (threshold && used >= threshold) { compact = true; terminated = true; turnController.abort(); }
   };
   const consume = (record: string) => {
     const data = record.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n").trim();
@@ -230,7 +239,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     await reader.cancel().catch(() => undefined); reader.releaseLock();
   }
   return {
-    content, reasoning, calls: [...calls.values()], usage,
+    content, reasoning, calls: [...calls.values()], usage, compact,
     visibleDurationSeconds: visibleStarted === undefined ? undefined : Math.max(.001, ((visibleEnded || performance.now()) - visibleStarted) / 1000),
     reasoningDurationSeconds: reasoningStarted === undefined ? 0 : Math.max(.001, ((reasoningEnded || performance.now()) - reasoningStarted) / 1000),
   };
@@ -331,6 +340,7 @@ async function run(job: ChatJob) {
       } catch (error) { if (job.controller.signal.aborted) throw error; /* A title failure must not discard a chat response. */ }
     };
     if (harness.titleTiming === "before") await generateTitle();
+    const originalUser = messages.findLast(m => m.role === "user");
     messages = await prepareContext(harnessContext, job.input.branchId, messages, true, estimateTokens(tools));
     job.message.contextTokens = estimateTokens(messages); broadcast(job, true);
     const headers = connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "");
@@ -350,11 +360,17 @@ async function run(job: ChatJob) {
     const adapter = config.preferences.onDemand || limit > 0 || nativeServer ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase), fetch, nativeServer && progressEnabled ? progress => setWaitProgress(job, "loading-model", progress) : undefined) : undefined;
     const acquireModel = () => modelResidency.acquire({ server: serverKey, model: model.sourceModel, limit, policy, adapter, signal: job.controller.signal, onPhase: phase => setWaitPhase(job, phase) });
     releaseModel = await acquireModel();
+    let compactionResumes = 0;
+    const compactionError = () => new Error(config.preferences.language === "ko"
+      ? "출력 중 컨텍스트 압축 재개 횟수를 초과했습니다. 압축 임계값이 너무 낮거나 모델의 컨텍스트 길이가 너무 짧습니다. 하네스 설정에서 임계값·재개 횟수 또는 모델 컨텍스트 길이를 늘려 주세요."
+      : "Context compaction resume limit exceeded. The compaction threshold is too low or the model context window is too short. Increase the threshold, resume limit, or context window.");
     for (let turn = 0; turn < config.toolSettings.maxToolRounds; turn += 1) {
       const contextWindow = effectiveContextWindowTokens(model, config.models);
       if (contextWindow && turn > 0 && harness.contextMode === "compacting" && estimateTokens(messages) + estimateTokens(tools) >= Math.min(contextWindow * .95, contextWindow * harness.compactThreshold / 100)) {
         releaseModel?.(); releaseModel = undefined;
-        messages = await prepareContext(harnessContext, job.input.branchId, messages, false, estimateTokens(tools));
+        if (++compactionResumes > harness.maxCompactionResumes) throw compactionError();
+        messages = await compactForResume(harnessContext, messages, originalUser);
+        if (contextThresholdReached(estimateTokens(messages) + estimateTokens(tools), contextWindow, harness.compactThreshold)) throw compactionError();
         releaseModel = await acquireModel();
       }
       if (contextWindow && harness.contextMode === "rolling") messages = rollingMessages(messages, Math.floor(contextWindow * .95) - estimateTokens(tools));
@@ -365,7 +381,20 @@ async function run(job: ChatJob) {
         ? (remainingTokens ? Math.min(harness.maxOutputTokens, remainingTokens) : harness.maxOutputTokens)
         : remainingTokens;
       const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(outputLimit ? { max_tokens: outputLimit } : {}), stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
-      const result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled); reasoningSeconds += result.reasoningDurationSeconds;
+      const result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled, harness.contextMode === "compacting" && contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined); reasoningSeconds += result.reasoningDurationSeconds;
+      if (result.compact) {
+        job.controller.signal.throwIfAborted();
+        releaseModel?.(); releaseModel = undefined;
+        if (++compactionResumes > harness.maxCompactionResumes) throw compactionError();
+        // Incomplete tool arguments are historical data only; never execute them.
+        messages.push({ role: "assistant", content: result.content, reasoning_content: result.reasoning,
+          ...(result.calls.length ? { tool_calls: result.calls } : {}) });
+        messages = await compactForResume(harnessContext, messages, originalUser);
+        if (contextThresholdReached(estimateTokens(messages) + estimateTokens(tools), contextWindow, harness.compactThreshold)) throw compactionError();
+        releaseModel = await acquireModel();
+        turn -= 1; // Compaction retries do not consume the tool execution budget.
+        continue;
+      }
       if (!result.calls.length) {
         job.message = { ...job.message, ...result.usage, contextTokens: (result.usage.inputTokens ?? estimateTokens(messages)) + (result.usage.outputTokens ?? estimateTokens(result.content)), reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,
           completionDurationSeconds: result.visibleDurationSeconds,

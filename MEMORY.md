@@ -25,7 +25,7 @@
 - Connections are ordered and support OpenAI API or LM Studio drivers. Connections, models, and reasoning presets use drag-and-drop or adjacent up/down controls; their independently scrollable settings lists persist the order shown by chat pickers. Each connection preserves its own discovered model metadata and reasoning presets; duplicate served identifiers resolve to the highest-priority connection.
 - LM Studio discovery uses native `/api/v1` REST. Version 2.1.1 uses request-scoped SDK loading and supported chat inference for progress, with Chat Completions fallback for unsupported SDK semantics.
 - Chat admission uses a server-wide residency manager: inventory checks and load/unload mutations are serialized; aliases use their base model. Dispatched mutations retain the lock through completion even if the caller cancels.
-- Current release version: 2.1.2.
+- Current release version: 2.1.3.
 - The UI/LM Studio audit in `docs/audits/2026-09-08-ui-lmstudio.md` has 14 addressed findings; #7 is intentional behavior per the user. Settings preserve protected presets and unsaved model edits; aliases resolve their base connection; API-key removal explicitly disables fallback credentials.
 - Deleted conversations/users discard their chat jobs. Background saves validate task ownership and conversation existence inside the SQLite transaction. Terminal jobs release full histories and expire after 60 seconds, with at most 64 terminal jobs retained.
 - Persisted tool call/result pairs are restored for follow-up requests. Interrupted questions recover on conversation read; active questions can be stopped. SSE errors and incomplete streams are surfaced, and failed client saves restore the unsent draft.
@@ -64,3 +64,8 @@
 - Validation script scripts/test-progress-integration.mjs uses an isolated DB; --live opts into localhost:1234 and --keep leaves the QA server running for browser checks.
 - Final 2.1.1 unsigned MSI built and metadata verified: installer/output/NeuralNetUI-2.1.1-x64.msi (400009049 bytes); audit docs/audits/2026-09-09-release-2.1.1.md includes hash and validation. Staged standalone native inference smoke passed.
 - Version 2.1.2 MSI built and metadata verified on 2026-09-09; unsigned. Output: `installer/output/NeuralNetUI-2.1.2-x64.msi`. Validation notes: `docs/audits/2026-09-09-release-2.1.2.md`.
+
+- Release 2.1.3 context compaction checks streamed content, reasoning and tool arguments per SSE event. A request-scoped AbortController interrupts inference without cancelling the job; model residency is released for summaries and reacquired for resume. Partial tool calls are summarized as data and never executed.
+- Harness resumePrompt supports literal single-pass %COMPRESSED% and %USER_PROMPT%; maxCompactionResumes defaults to 3 (0–100), per response, excluding pre-send compaction. Resume retries do not consume tool rounds. Original prompts/attachments and visible partial output are retained; impossible post-compaction input fails before dispatch.
+- Summary requests split oversized serialized history into bounded fragments, including prior summary in each request. Branch summary fingerprints still protect reuse. New settings have schema defaults for existing installations.
+- Version 2.1.3 unsigned MSI built and metadata verified: `installer/output/NeuralNetUI-2.1.3-x64.msi` (400025433 bytes); release notes and hash in `docs/audits/2026-09-09-release-2.1.3.md`.

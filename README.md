@@ -158,7 +158,7 @@ chmod +x host-linux.sh
 
 ## Windows MSI 설치
 
-`installer/output/NeuralNetUI-2.1.2-x64.msi`는 Node.js, 앱 런타임, 헤드리스 Chromium, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
+`installer/output/NeuralNetUI-2.1.3-x64.msi`는 Node.js, 앱 런타임, 헤드리스 Chromium, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
 
 트레이 아이콘을 두 번 누르면 Web UI를 다시 열 수 있습니다. 우클릭 메뉴에는 **설정 파일 수정**, **재시작**, **종료하기**가 있으며, 종료는 서비스와 트레이 앱을 함께 중지합니다. 시작 메뉴의 **NeuralNetUI**를 누르면 중지된 서비스를 다시 시작하고 Web UI를 호스팅하며 트레이 아이콘도 복원합니다. 서비스 제어와 보호된 설정 파일 편집에는 Windows 관리자 권한 확인이 표시될 수 있습니다.
 
@@ -167,7 +167,7 @@ chmod +x host-linux.sh
 무인 설치에서도 같은 공개 MSI 속성을 사용할 수 있습니다.
 
 ```powershell
-msiexec /i NeuralNetUI-2.1.2-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
+msiexec /i NeuralNetUI-2.1.3-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
 ```
 
 MSI를 다시 빌드하려면 Node.js, .NET 8 SDK가 있는 Windows x64 개발 환경에서 다음을 실행합니다. WiX 5 도구는 처음 빌드할 때 `installer/.tools`에 로컬 설치됩니다.
@@ -324,3 +324,13 @@ python -m pip install -r requirements.txt
 ## 언어
 
 좌측 하단 프로필을 눌러 `설정 > 일반`에서 전체 인터페이스 언어를 변경할 수 있습니다. 선택한 언어는 변경사항을 저장하면 다음 접속에도 유지됩니다.
+
+## 컨텍스트 압축과 출력 재개 (2.1.3)
+
+하네스 → 컨텍스트 처리 → 압축에서 임계값, 압축 프롬프트, 재개 프롬프트와 최대 재개 횟수를 설정합니다. 전송 전에는 이전 대화를 먼저 압축하고, 출력 중에는 답변·추론·도구 호출 인자를 포함한 사용량을 매 스트림 이벤트에서 검사합니다. 서버 토큰 사용량이 없을 때는 추정값을 사용합니다.
+
+임계값에 도달하면 현재 추론 요청을 취소하고 진행 내용을 압축한 뒤 원래 사용자 요청과 함께 재개합니다. 재개 템플릿의 `%COMPRESSED%`는 압축 요약, `%USER_PROMPT%`는 원래 사용자 메시지입니다. 사용자 첨부 이미지는 재개 요청에도 유지됩니다. 끊긴 도구 호출은 실행하지 않습니다.
+
+최대 재개 횟수는 응답 하나당 기본 3회이며 0~100회로 설정합니다. 전송 전 압축은 제외됩니다. 한도 초과 시 출력은 보존하고 임계값 또는 모델 컨텍스트 길이를 늘리라는 오류를 표시합니다. 압축 후에도 입력이 임계값 이상이면 무한 재시도 없이 오류를 표시합니다. 원문 대화는 보존됩니다.
+
+회귀 검증: `npm test`, `npx tsc --noEmit`, `npm run build`, `node scripts/test-compaction-integration.mjs`.

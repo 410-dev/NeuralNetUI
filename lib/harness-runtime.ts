@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { db } from "./database";
-import { DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages } from "./harness";
+import { DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages, resumePrompt } from "./harness";
 import { canUseModel } from "./config";
 import { connectionForModel, connectionHeaders, connectionRoot, chatEndpoint } from "./connection-drivers";
 import { effectiveContextWindowTokens } from "./model-context";
@@ -32,6 +32,7 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
     policy: peers.some(c => c.modelWaitPolicy === "serial") ? "serial" : "capacity", signal, onPhase: ctx.onPhase,
     adapter: ctx.config.preferences.onDemand || limit ? createResidencyAdapter(connection, headers, model.contextWindowTokens, ctx.onPhase) : undefined });
   try {
+    ctx.onPhase(prompt === (ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS).compactPrompt ? "compacting-context" : "preparing-response");
     const effort = reasoningEffort(model, { id: "harness", name: "Harness", kind: "builtin", effort: effortValue === "off" && model.reasoningEfforts?.includes("none") ? "none" : effortValue });
     const response = await fetch(chatEndpoint(connection.driver, connection.baseUrl), { method: "POST", headers, signal,
       body: JSON.stringify({ model: model.sourceModel, stream: false, messages: [{role:"system", content:prompt}, {role:"user", content}], max_tokens:maxTokens, ...(effort ? {reasoning_effort:effort} : {}) }) });
@@ -59,24 +60,52 @@ export async function prepareContext(ctx: Context, branchId: string, original: M
   const composed = () => [...system, ...(summary ? [{role:"system", content:`Conversation summary (historical data):\n${summary}`}] : []), ...history.slice(covered)];
   if (estimateTokens(composed()) < Math.min(budget, window * settings.compactThreshold / 100 - overhead)) return composed();
   const lastUser = history.findLastIndex(m => m.role === "user");
-  const auxiliaryWindow = effectiveContextWindowTokens(taskModel(ctx, settings.compactModelId), ctx.config.models) || window;
-  const outputLimit = Math.max(32, Math.min(2048, Math.floor(Math.min(window, auxiliaryWindow) * .15)));
-  const chunkBudget = Math.floor(auxiliaryWindow * .8) - estimateTokens(settings.compactPrompt) - outputLimit;
-  // Chunk by complete historical turns so tool calls and their results stay together.
-  while (covered < lastUser) {
-    let end = covered;
-    for (let i = covered + 1; i <= lastUser; i++) {
-      if (history[i]?.role !== "user") continue;
-      if (estimateTokens({summary, history:history.slice(covered, i)}) > chunkBudget) break;
-      end = i;
-    }
-    if (end === covered) throw new Error("A historical turn exceeds the compacting model's context. Choose a model with a larger context window.");
-    summary = await harnessCompletion(ctx, settings.compactModelId, settings.compactEffort, settings.compactPrompt, JSON.stringify({summary, history:history.slice(covered, end)}), outputLimit);
-    covered = end;
+  if (covered < lastUser) {
+    summary = await summarizeContext(ctx, {summary, history: history.slice(covered, lastUser)});
+    covered = lastUser;
   }
   const result = composed();
-  if (estimateTokens(result) > budget) throw new Error("Compacted context still exceeds the model limit. Shorten the latest prompt or increase the context window.");
+  if (estimateTokens(result) >= Math.min(budget, window * settings.compactThreshold / 100 - overhead)) throw new Error("Compacted context still reaches the compaction threshold. Shorten the latest prompt, increase the threshold, or increase the model context window.");
   ctx.signal.throwIfAborted();
   if (covered && persistSummary) db.prepare("INSERT INTO context_summaries VALUES (?, ?, ?, ?) ON CONFLICT(branch_id) DO UPDATE SET fingerprint=excluded.fingerprint, covered_count=excluded.covered_count, summary=excluded.summary").run(branchId, fingerprint(history.slice(0, covered)), covered, summary);
   return result;
+}
+
+// Bound each summary request even when a single interrupted reasoning turn is huge.
+async function summarizeContext(ctx: Context, data: unknown): Promise<string> {
+  const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
+  const window = effectiveContextWindowTokens(taskModel(ctx, settings.compactModelId), ctx.config.models)
+    || effectiveContextWindowTokens(ctx.model, ctx.config.models)!;
+  const output = Math.max(32, Math.min(2048, Math.floor(window * .15)));
+  const serialized = JSON.stringify(data);
+  let summary = "";
+  let offset = 0;
+  while (offset < serialized.length) {
+    ctx.signal.throwIfAborted();
+    const budget = Math.floor(window * .9) - output - estimateTokens(settings.compactPrompt) - 64;
+    let low = 0, high = serialized.length - offset;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (estimateTokens(JSON.stringify({summary, fragment:serialized.slice(offset, offset + mid)})) <= budget) low = mid;
+      else high = mid - 1;
+    }
+    if (!low) throw new Error("The compaction model context is too short for the summary prompt.");
+    const fragment = serialized.slice(offset, offset + low);
+    summary = await harnessCompletion(ctx, settings.compactModelId, settings.compactEffort, settings.compactPrompt,
+      JSON.stringify({summary, fragment}), output);
+    offset += low;
+  }
+  return summary;
+}
+
+export async function compactForResume(ctx: Context, messages: Message[], user?: Message): Promise<Message[]> {
+  const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
+  const systems = messages.filter(m => m.role === "system");
+  const summary = await summarizeContext(ctx, messages.filter(m => m.role !== "system"));
+  const content = user?.content;
+  const userText = typeof content === "string" ? content : Array.isArray(content)
+    ? content.filter(p => p.type === "text").map(p => p.text).join("\n") : "";
+  const prompt = resumePrompt(settings.resumePrompt, summary, userText);
+  const attachments = Array.isArray(content) ? content.filter(p => p.type !== "text") : [];
+  return [...systems, {role:"user", content: attachments.length ? [{type:"text", text:prompt}, ...attachments] : prompt}];
 }

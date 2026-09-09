@@ -27,7 +27,7 @@ function OptionCards({ label, options, value, onSelect }: { label:string; option
 export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDraft:React.Dispatch<React.SetStateAction<PublicConfig>>}) {
   const ko=draft.preferences.language==="ko";
   const h=draft.harnessSettings || DEFAULT_HARNESS_SETTINGS;
-  const [prompt,setPrompt]=useState<"compactPrompt"|"titlePrompt"|null>(null);
+  const [prompt,setPrompt]=useState<"compactPrompt"|"resumePrompt"|"titlePrompt"|null>(null);
   const patch=(value:Partial<HarnessSettings>)=>setDraft(d=>({...d,harnessSettings:{...(d.harnessSettings || DEFAULT_HARNESS_SETTINGS),...value}}));
   const effortLabel=(value:string)=>{ const label=EFFORT_LABELS[value]; return label ? label[ko?1:0] : value; };
   function modelFields(kind:"compact"|"title") {
@@ -53,7 +53,10 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
         <h4>{ko?"압축 옵션":"Compaction options"}</h4>
         <div className="field"><span id="compact-threshold-label">{ko?"압축 시작 임계값":"Start compacting at"}</span><div className="harness-slider"><input type="range" min={10} max={95} step={1} value={h.compactThreshold} aria-labelledby="compact-threshold-label" onChange={e=>patch({compactThreshold:Number(e.target.value)})}/><b>{h.compactThreshold}%</b></div><small>{ko?"컨텍스트 사용량이 이 비율에 도달하면 요약을 시작합니다.":"Summarization starts once context usage reaches this share of the window."}</small></div>
         {modelFields("compact")}
-        <button type="button" className="subtle-action" onClick={()=>setPrompt("compactPrompt")}><Pencil size={16}/>{ko?"압축 프롬프트 편집":"Edit compacting prompt"}</button>
+        <div className="harness-prompt-actions"><button type="button" className="subtle-action" onClick={()=>setPrompt("compactPrompt")}><Pencil size={16}/>{ko?"압축 프롬프트 편집":"Edit compacting prompt"}</button>
+        <button type="button" className="subtle-action" onClick={()=>setPrompt("resumePrompt")}><Pencil size={16}/>{ko?"재개 프롬프트 편집":"Edit resume prompt"}</button></div>
+        <small>{ko?"재개 시 %COMPRESSED%는 압축된 맥락, %USER_PROMPT%는 원래 사용자 메시지로 치환됩니다.":"On resume, %COMPRESSED% becomes the summary and %USER_PROMPT% becomes the original user message."}</small>
+        <label className="field"><span>{ko?"출력 중 압축 후 최대 재개 횟수":"Maximum compaction resumes per response"}</span><input type="number" min={0} max={100} step={1} value={h.maxCompactionResumes} onChange={e=>patch({maxCompactionResumes:Math.min(100,Math.max(0,Math.floor(Number(e.target.value)||0)))})}/><small>{ko?"기본 3회. 0이면 출력 중 임계값 도달 시 재개하지 않습니다. 전송 전 압축은 제외됩니다.":"Default: 3. Zero stops at the first output threshold. Pre-send compaction does not count."}</small></label>
       </div>}
       <div className="harness-advanced">
         <h4>{ko?"응답 길이":"Response length"}</h4>
@@ -77,6 +80,6 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
         <button type="button" className="subtle-action" onClick={()=>setPrompt("titlePrompt")}><Pencil size={16}/>{ko?"제목 생성 프롬프트 편집":"Edit title prompt"}</button>
       </div>}
     </section>
-    {prompt&&<TextDialog title={prompt==="compactPrompt"?(ko?"압축 프롬프트":"Compacting prompt"):(ko?"제목 생성 프롬프트":"Title prompt")} value={h[prompt]} multiline onClose={()=>setPrompt(null)} onSave={text=>{patch({[prompt]:text});setPrompt(null);}}/>}
+    {prompt&&<TextDialog title={prompt==="compactPrompt"?(ko?"압축 프롬프트":"Compacting prompt"):prompt==="resumePrompt"?(ko?"재개 프롬프트":"Resume prompt"):(ko?"제목 생성 프롬프트":"Title prompt")} value={h[prompt]} multiline onClose={()=>setPrompt(null)} onSave={text=>{patch({[prompt]:text});setPrompt(null);}}/>}
   </div>;
 }

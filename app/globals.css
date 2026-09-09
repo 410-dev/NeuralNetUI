@@ -830,3 +830,6 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .status-percent { color: #bbb; font-variant-numeric: tabular-nums; }
 
 @media (max-width: 600px) { .context-tooltip { right: -110px; width: 240px; max-width: calc(100vw - 32px); } }
+
+.harness-prompt-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+@media (max-width: 640px) { .harness-prompt-actions { flex-direction: column; align-items: flex-start; } }

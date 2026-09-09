@@ -8,6 +8,7 @@ const labels: Record<Locale, Record<ChatWaitPhase, string>> = {
     "loading-model": "모델을 로드중입니다",
     "waiting-server": "서버 응답을 기다리는 중입니다",
     "preparing-response": "응답을 준비중입니다",
+    "compacting-context": "컨텍스트를 압축하고 있습니다",
   },
   en: {
     "processing-prompt": "Processing the prompt",
@@ -16,6 +17,7 @@ const labels: Record<Locale, Record<ChatWaitPhase, string>> = {
     "loading-model": "Loading the model",
     "waiting-server": "Waiting for the server to respond",
     "preparing-response": "Preparing the response",
+    "compacting-context": "Compacting context",
   },
 };
 export const chatWaitLabel = (phase: ChatWaitPhase, locale: Locale) => labels[locale][phase];
