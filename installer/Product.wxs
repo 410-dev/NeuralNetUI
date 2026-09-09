@@ -2,13 +2,13 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="NeuralNetUI"
            Manufacturer="NeuralNetUI"
-           Version="2.1.4"
+           Version="2.1.4.1"
            UpgradeCode="8D444D86-37C2-4E37-B56B-6BB9CD2C62BD"
            Language="1033"
            Codepage="949"
            Scope="perMachine">
     <SummaryInformation Description="NeuralNetUI Windows service and tray application" Manufacturer="NeuralNetUI" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of NeuralNetUI is already installed." />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of NeuralNetUI is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <Property Id="ACCESS_MODE" Value="lan-and-tailscale" Secure="yes" />

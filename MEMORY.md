@@ -25,7 +25,7 @@
 - Connections are ordered and support OpenAI API or LM Studio drivers. Connections, models, and reasoning presets use drag-and-drop or adjacent up/down controls; their independently scrollable settings lists persist the order shown by chat pickers. Each connection preserves its own discovered model metadata and reasoning presets; duplicate served identifiers resolve to the highest-priority connection.
 - LM Studio discovery uses native `/api/v1` REST. Version 2.1.1 uses request-scoped SDK loading and supported chat inference for progress, with Chat Completions fallback for unsupported SDK semantics.
 - Chat admission uses a server-wide residency manager: inventory checks and load/unload mutations are serialized; aliases use their base model. Dispatched mutations retain the lock through completion even if the caller cancels.
-- Current release version: 2.1.4.
+- Current release version: 2.1.4.1.
 - Version 2.1.4 MSI built and metadata verified on 2026-09-09; unsigned. Output: `installer/output/NeuralNetUI-2.1.4-x64.msi`. Validation notes: `docs/audits/2026-09-09-release-2.1.4.md`.
 - An assistant message carries `steps` (migration 10): ordered reasoning/content/tools/compaction stages. `content` and `reasoning` remain the concatenation, so copy, export and upstream history are unaffected; `lib/transcript.ts` reconstructs the old fixed layout for messages without steps.
 - Compaction decides on `projectedInputTokens(estimate, measured)` where measured comes from `contextUsage` — the same figure the composer's donut shows. Discard the measurement right after compaction replaces the message set, or the compacted request immediately re-triggers compaction. Checked both before sending and mid-stream.

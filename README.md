@@ -11,6 +11,12 @@
 - 컨텍스트 도넛은 현재 대화와 작성 중 입력의 추정치를 표시합니다. 클릭하면 입력·응답·추론을 구분하고, ‘생각 기록 기억하기’에 따라 추론 사용량이 즉시 바뀝니다. 실제 요청에는 컨텍스트 정리가 추가 적용될 수 있습니다.
 
 
+## 메시지 큐 레이아웃과 압축 후 사용량 (2.1.4.1)
+
+- 대기 중인 메시지·첨부·업로드 중 표시가 있으면 컴포저가 알약 모양을 유지하지 못해 테두리가 깨졌습니다. 자기 줄을 차지하는 요소가 하나라도 있으면 이제 둥근 사각형 형태로 전환합니다.
+- 컨텍스트 압축 후에도 사용량 도넛이 줄지 않았습니다. 압축 요약이 이전 대화를 대신한다는 사실을 반영하지 않고 원문 전체를 계속 합산했기 때문입니다. 이제 가장 최근 압축을 기준으로 그 이전 대화를 요약 토큰으로 대체해 계산하고, 세부 내역에 **압축 요약** 항목이 표시됩니다.
+- MSI 참고: Windows Installer는 버전의 네 번째 자리를 비교에 사용하지 않습니다. 2.1.4 → 2.1.4.1이 같은 버전으로 취급되므로 `AllowSameVersionUpgrades`를 켜서 기존 설치본을 교체하도록 했습니다.
+
 ## 순차 출력과 컨텍스트 압축 수정 (2.1.4)
 
 모델 출력이 일어난 순서대로 표시되고, 컨텍스트 압축이 실제로 임계점에서 동작합니다.
@@ -171,7 +177,7 @@ chmod +x host-linux.sh
 
 ## Windows MSI 설치
 
-`installer/output/NeuralNetUI-2.1.4-x64.msi`는 Node.js, 앱 런타임, 헤드리스 Chromium, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
+`installer/output/NeuralNetUI-2.1.4.1-x64.msi`는 Node.js, 앱 런타임, 헤드리스 Chromium, Windows 서비스와 트레이 앱을 함께 포함합니다. 설치 화면의 **Hosting access** 단계에서 LAN만, Tailscale만, 또는 둘 다를 선택하고 수신 포트를 지정할 수 있습니다. 설치가 끝나면 `NeuralNetUI Service` Windows 서비스가 자동 시작 유형으로 등록되고 현재 사용자에게 Web UI와 트레이 아이콘이 열립니다. 이후 Windows 부팅 때는 서비스가 먼저 시작되며, 사용자가 로그인하면 Web UI와 트레이 아이콘이 자동으로 열립니다.
 
 트레이 아이콘을 두 번 누르면 Web UI를 다시 열 수 있습니다. 우클릭 메뉴에는 **설정 파일 수정**, **재시작**, **종료하기**가 있으며, 종료는 서비스와 트레이 앱을 함께 중지합니다. 시작 메뉴의 **NeuralNetUI**를 누르면 중지된 서비스를 다시 시작하고 Web UI를 호스팅하며 트레이 아이콘도 복원합니다. 서비스 제어와 보호된 설정 파일 편집에는 Windows 관리자 권한 확인이 표시될 수 있습니다.
 
@@ -180,7 +186,7 @@ chmod +x host-linux.sh
 무인 설치에서도 같은 공개 MSI 속성을 사용할 수 있습니다.
 
 ```powershell
-msiexec /i NeuralNetUI-2.1.4-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
+msiexec /i NeuralNetUI-2.1.4.1-x64.msi /qn ACCESS_MODE=tailscale APP_PORT=65500
 ```
 
 MSI를 다시 빌드하려면 Node.js, .NET 8 SDK가 있는 Windows x64 개발 환경에서 다음을 실행합니다. WiX 5 도구는 처음 빌드할 때 `installer/.tools`에 로컬 설치됩니다.

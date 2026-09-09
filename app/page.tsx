@@ -983,7 +983,8 @@ function ContextWindowIndicator({ c, locale, model, models, usage, includeReason
         [locale === "ko" ? "입력" : "Input", usage.input],
         [locale === "ko" ? "응답" : "Response", usage.response],
         [locale === "ko" ? "추론" : "Reasoning", usage.reasoning],
-      ] as const).map(([label, value]) => <span key={label}><span>{label}</span><b>{formatTokens(value, locale)}</b></span>)}<small>{locale === "ko" ? `대화·작성 중 입력 기준 추정치 · 추론 ${includeReasoning ? "포함" : "제외"}. 실제 전송 시 컨텍스트 정리가 적용될 수 있습니다.` : `History and draft estimate · reasoning ${includeReasoning ? "included" : "excluded"}. Context handling may reduce the actual request.`}</small></span>}
+        ...(usage.summary ? [[locale === "ko" ? "압축 요약" : "Compacted", usage.summary] as const] : []),
+      ] as const).map(([label, value]) => <span key={label}><span>{label}</span><b>{formatTokens(value, locale)}</b></span>)}<small>{locale === "ko" ? `대화·작성 중 입력 기준 추정치 · 추론 ${includeReasoning ? "포함" : "제외"}. ${usage.summary ? "압축된 요약이 이전 대화를 대신하고 있습니다." : "실제 전송 시 컨텍스트 정리가 적용될 수 있습니다."}` : `History and draft estimate · reasoning ${includeReasoning ? "included" : "excluded"}. ${usage.summary ? "A compacted summary now stands in for the earlier turns." : "Context handling may reduce the actual request."}`}</small></span>}
     </span>
   </div>;
 }
@@ -1025,16 +1026,18 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
     window.addEventListener("resize", measureShell);
     return () => window.removeEventListener("resize", measureShell);
   }, []);
-  // The composer holds its pill shape only while the inline row can still hold a usable draft
-  // field. Both the control widths and the chrome allowance are layout-independent, so the
-  // comparison cannot oscillate between the two states.
+  // The composer holds its pill shape only while everything still fits on one row: nothing may
+  // take a row of its own, and the leftover space has to stay wide enough to type in. Both the
+  // control widths and the chrome allowance are layout-independent, so the comparison cannot
+  // oscillate between the two states.
+  const stackedRows = queuedPrompts.length > 0 || attachments.length > 0 || uploadingImages;
   useLayoutEffect(() => {
     const shell = formRef.current; const measure = measureRef.current;
     if (!shell || !measure) return;
     const controls = (leadRef.current?.offsetWidth || 0) + (trailRef.current?.offsetWidth || 0);
     const available = shell.clientWidth - controls - INLINE_COMPOSER_CHROME;
-    setExpanded(draft.includes("\n") || available < MIN_INLINE_DRAFT_WIDTH || measure.scrollWidth > available);
-  }, [draft, shellWidth, attachments.length, queuedPrompts.length, uploadingImages, activeToolCount]);
+    setExpanded(stackedRows || draft.includes("\n") || available < MIN_INLINE_DRAFT_WIDTH || measure.scrollWidth > available);
+  }, [draft, shellWidth, stackedRows, activeToolCount]);
   useLayoutEffect(() => {
     const element = textRef.current;
     if (!element) return;

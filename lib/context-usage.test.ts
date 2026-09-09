@@ -28,3 +28,37 @@ test("invalid or oversized reasoning counters cannot make response negative", ()
   assert.equal(usage.response, 0);
   assert.equal(usage.reasoning, 100);
 });
+
+test("a compaction summary replaces the history it covers", () => {
+  const long = "x".repeat(4000);
+  const history: StoredMessage[] = [
+    { id: "u1", role: "user", content: long, createdAt: "" },
+    { id: "a1", role: "assistant", content: long, outputTokens: 900, createdAt: "" },
+    { id: "u2", role: "user", content: "carry on", createdAt: "" },
+    { id: "a2", role: "assistant", content: "continuing", outputTokens: 40, createdAt: "" },
+  ];
+  const before = contextUsage(history, false);
+  const compacted = contextUsage(history.map((message) => message.id === "a2"
+    ? { ...message, steps: [{ kind: "compaction" as const, summary: "short summary of everything earlier" }, { kind: "content" as const, text: "continuing" }] }
+    : message), false);
+  assert.ok(compacted.total < before.total / 2, `compaction should cut the preview: ${compacted.total} vs ${before.total}`);
+  assert.ok(compacted.summary > 0, "the summary is counted");
+  assert.equal(compacted.total, compacted.input + compacted.response + compacted.reasoning + compacted.summary);
+  // Only the compacting turn survives, so the long first exchange is gone from the preview.
+  assert.ok(compacted.input < 200, `covered history is excluded: ${compacted.input}`);
+});
+
+test("only the most recent compaction sets the boundary", () => {
+  const step = (summary: string) => [{ kind: "compaction" as const, summary }];
+  const history: StoredMessage[] = [
+    { id: "u1", role: "user", content: "one", createdAt: "" },
+    { id: "a1", role: "assistant", content: "first", outputTokens: 10, steps: step("earlier summary"), createdAt: "" },
+    { id: "u2", role: "user", content: "two", createdAt: "" },
+    { id: "a2", role: "assistant", content: "second", outputTokens: 10, steps: step("the later summary text"), createdAt: "" },
+  ];
+  const usage = contextUsage(history, false);
+  assert.equal(usage.summary, contextUsage([history[3]], false, "", "").summary);
+  // A compaction step without a summary must not move the boundary.
+  const noSummary: StoredMessage[] = [history[0], { ...history[1], steps: [{ kind: "compaction" }] }, history[2]];
+  assert.equal(contextUsage(noSummary, false).summary, 0);
+});
