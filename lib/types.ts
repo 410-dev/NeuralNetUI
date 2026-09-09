@@ -3,13 +3,14 @@ export type SystemPromptMode = "replace" | "prepend" | "append";
 export type Locale = "en" | "ko";
 export type ConnectionDriver = "openai" | "lmstudio";
 export type ModelWaitPolicy = "capacity" | "serial";
-export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response";
+export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response" | "processing-prompt";
 export type AccentPaletteId = "blue" | "violet" | "teal" | "amber" | "rose" | "graphite" | "custom";
 export type StreamReveal = "instant" | "fade";
 export type StreamPacing = "immediate" | "chunked";
 
 /** Per-user presentation choices that never affect what is sent to a model. */
 export interface AppearancePreferences {
+  lmStudioProgress: "text" | "percent" | "donut" | "both";
   accentPalette: AccentPaletteId;
   /** Used when the palette is "custom". */
   accentColor: string;
@@ -121,6 +122,7 @@ export interface HarnessSettings {
 
 /** Opt-in features an administrator must switch on before anyone can use them. */
 export interface ExperimentalFeatures {
+  openAIProgress?: boolean;
   browserTool: boolean;
 }
 

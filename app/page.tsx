@@ -1,5 +1,6 @@
 "use client";
 
+import { contextUsage, type ContextUsage } from "../lib/context-usage";
 import { HarnessSettingsPanel, TextDialog } from "./harness-settings";
 import { HistorySearch } from "./history-search";
 import { SectionTitle } from "./section-title";
@@ -55,7 +56,7 @@ type QueuedPrompt = {
   tools: EnabledTools;
 };
 type CompletionOptions = Omit<QueuedPrompt, "id" | "content" | "attachments">;
-type ChatJobSnapshot = { conversationId: string; branchId: string; status: "running" | "waiting" | "completed" | "stopped" | "error"; message: StoredMessage; error?: string; waitPhase?: ChatWaitPhase };
+type ChatJobSnapshot = { conversationId: string; branchId: string; status: "running" | "waiting" | "completed" | "stopped" | "error"; message: StoredMessage; error?: string; waitPhase?: ChatWaitPhase; waitProgress?: number; progressUnavailable?: boolean };
 const emptyConfig: PublicConfig = {
   connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", hasApiKey: false, models: [] }],
   profile: { name: "" },
@@ -241,7 +242,7 @@ export default function Home() {
   const [exportOpen, setExportOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [pendingWait, setPendingWait] = useState<{ messageId: string; phase: ChatWaitPhase } | null>(null);
+  const [pendingWait, setPendingWait] = useState<{ messageId: string; phase: ChatWaitPhase; progress?: number; unavailable?: boolean } | null>(null);
   const [error, setError] = useState("");
   const [searching, setSearching] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -399,13 +400,7 @@ export default function Home() {
   const canManageInference = config.account?.role === "admin" || config.account?.role === "superadmin";
   const activeBranch = conversation?.branches.find((branch) => branch.id === conversation.activeBranchId);
   const pendingChoice = pendingMultipleChoiceEvent(messages);
-  const contextUsedTokens = useMemo(() => {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index].contextTokens !== undefined) return messages[index].contextTokens;
-      if (messages[index].totalTokens !== undefined) return messages[index].totalTokens;
-    }
-    return undefined;
-  }, [messages]);
+  const contextBreakdown = useMemo(() => contextUsage(messages, sendReasoning, draft, selectedModel?.systemPrompt || "", draftAttachments.length), [messages, sendReasoning, draft, selectedModel?.systemPrompt, draftAttachments.length]);
   const messageRevisions = useMemo(() => {
     const groups = new Map<string, Map<string, MessageRevision>>();
     for (const branch of conversation?.branches || []) {
@@ -663,7 +658,7 @@ export default function Home() {
               const next = JSON.parse(data) as ChatJobSnapshot;
               baseMessages = [...baseMessages.filter((message) => message.id !== next.message.id), next.message];
               setMessages(baseMessages);
-              setPendingWait(next.waitPhase ? { messageId: next.message.id, phase: next.waitPhase } : null);
+              setPendingWait(next.waitPhase ? { messageId: next.message.id, phase: next.waitPhase, progress: next.waitProgress, unavailable: next.progressUnavailable } : null);
               setConversation((current) => current ? { ...current, branches: current.branches.map((item) => item.id === next.branchId ? { ...item, messages: baseMessages } : item) } : current);
               const waitingLocation = next.message.toolEvents?.find((event) => event.name === "get_current_location" && event.status === "waiting");
               if (waitingLocation) provideBrowserLocation(next.conversationId, waitingLocation.id);
@@ -929,12 +924,12 @@ export default function Home() {
         </div>
 
         <div className="conversation-stage">
-          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{greeting}</h1><p>{c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} /></div> : <>
+          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{greeting}</h1><p>{c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} /></div> : <>
             <div className="thread" ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
               {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
-              {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
+              {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} progressUnavailable={pendingWait?.messageId === message.id && pendingWait.unavailable} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
             </div>
-            <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextUsedTokens={contextUsedTokens} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} />
+            <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} />
           </>}
         </div>
       </section>
@@ -962,20 +957,26 @@ function AuthScreen({ setup, onAuthenticated }: { setup: boolean; onAuthenticate
   return <main className="auth-shell"><section className="auth-card"><div className="auth-mark"><ShieldCheck size={25} /></div><span>NEURAL CHAT</span><h1>{setup ? "최고 관리자 계정 만들기" : "로그인"}</h1><p>{setup ? "처음 생성한 계정은 최고 관리자가 되며 기존 대화와 업로드를 인계받습니다." : "계속하려면 계정에 로그인하세요."}</p><form onSubmit={submit}>{setup && <label><span>표시 이름</span><input autoFocus value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" /></label>}<label><span>사용자 이름</span><input autoFocus={!setup} value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required /></label><label><span>비밀번호</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={setup ? "new-password" : "current-password"} minLength={8} required /></label>{error && <div className="auth-error">{error}</div>}<button disabled={busy}>{busy && <LoaderCircle className="spin" size={16} />}{setup ? "계정 생성" : "로그인"}</button></form></section></main>;
 }
 
-function ContextWindowIndicator({ c, locale, model, models, usedTokens }: { c: CopySet; locale: Locale; model?: ModelConfig; models: ModelConfig[]; usedTokens?: number }) {
+function ContextWindowIndicator({ c, locale, model, models, usage, includeReasoning }: { c: CopySet; locale: Locale; model?: ModelConfig; models: ModelConfig[]; usage: ContextUsage; includeReasoning: boolean }) {
   const [open, setOpen] = useState(false);
   const maximum = effectiveContextWindowTokens(model, models);
-  const used = Math.max(0, usedTokens || 0);
-  const percentage = maximum ? Math.min(100, used / maximum * 100) : 0;
+  const percentage = maximum ? usage.total / maximum * 100 : 0;
   const percentageLabel = percentage > 0 && percentage < .1 ? "<0.1%" : `${percentage.toFixed(1)}%`;
-  const detail = maximum
-    ? `${formatTokens(used, locale)} / ${formatTokens(maximum, locale)} ${c.contextUsed} · ${percentageLabel}`
-    : c.contextUnavailable;
+  const estimateLabel = locale === "ko" ? "컨텍스트 사용량 추정" : "Estimated context usage";
+  const detail = maximum ? `${estimateLabel}: ${formatTokens(usage.total, locale)} / ${formatTokens(maximum, locale)} · ${percentageLabel}` : `${estimateLabel}: ${formatTokens(usage.total, locale)} · ${c.contextUnavailable}`;
   return <div className={`context-indicator ${open ? "open" : ""}`}>
-    <button type="button" className="context-trigger" aria-label={detail} aria-expanded={open} onClick={() => setOpen((value) => !value)} onBlur={() => window.setTimeout(() => setOpen(false), 120)}>
-      <span className="context-donut" style={{ "--context-fill": `${percentage * 3.6}deg` } as React.CSSProperties} />
+    <button type="button" className="context-trigger" aria-label={detail} aria-expanded={open} onClick={() => setOpen((value) => !value)} onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }} onBlur={() => setOpen(false)}>
+      <span className="context-donut" style={{ "--context-fill": `${Math.min(100, percentage) * 3.6}deg` } as React.CSSProperties} />
     </button>
-    <span className="context-tooltip" role="tooltip">{maximum ? <><strong>{formatTokens(used, locale)} / {formatTokens(maximum, locale)}</strong><small>{percentageLabel} · {c.contextUsed}</small></> : <small>{detail}</small>}</span>
+    <span className="context-tooltip" role="tooltip">
+      <strong>{formatTokens(usage.total, locale)}{maximum ? ` / ${formatTokens(maximum, locale)}` : ""}</strong>
+      <small>{maximum ? `${percentageLabel} · ${estimateLabel}` : c.contextUnavailable}</small>
+      {open && <span className="context-breakdown">{([
+        [locale === "ko" ? "입력" : "Input", usage.input],
+        [locale === "ko" ? "응답" : "Response", usage.response],
+        [locale === "ko" ? "추론" : "Reasoning", usage.reasoning],
+      ] as const).map(([label, value]) => <span key={label}><span>{label}</span><b>{formatTokens(value, locale)}</b></span>)}<small>{locale === "ko" ? `대화·작성 중 입력 기준 추정치 · 추론 ${includeReasoning ? "포함" : "제외"}. 실제 전송 시 컨텍스트 정리가 적용될 수 있습니다.` : `History and draft estimate · reasoning ${includeReasoning ? "included" : "excluded"}. Context handling may reduce the actual request.`}</small></span>}
+    </span>
   </div>;
 }
 
@@ -984,8 +985,8 @@ const INLINE_COMPOSER_CHROME = 26;
 /** Below this the draft field is too cramped to type in, so the composer stacks instead. */
 const MIN_INLINE_DRAFT_WIDTH = 150;
 
-function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextUsedTokens?: number; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; sendReasoning: boolean; toggleSendReasoning: (value: boolean) => void; error: string; clearError: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onRemoveAttachment: (attachment: StoredAttachment) => void; internetSearchEnabled: boolean; setInternetSearchEnabled: (value: boolean) => void; pageVisitEnabled: boolean; setPageVisitEnabled: (value: boolean) => void; browserToolAvailable: boolean; browserEnabled: boolean; setBrowserEnabled: (value: boolean) => void; currentTimeEnabled: boolean; setCurrentTimeEnabled: (value: boolean) => void; locationEnabled: boolean; setLocationEnabled: (value: boolean) => void; multipleChoiceEnabled: boolean; setMultipleChoiceEnabled: (value: boolean) => void; pendingChoice?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean> }) {
-  const { c, appearance, draft, setDraft, sendMessage, keyDown, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextUsedTokens, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, sendReasoning, toggleSendReasoning, error, clearError, attachments, maxAttachments, uploadingImages, onFiles, onRemoveAttachment, internetSearchEnabled, setInternetSearchEnabled, pageVisitEnabled, setPageVisitEnabled, browserToolAvailable, browserEnabled, setBrowserEnabled, currentTimeEnabled, setCurrentTimeEnabled, locationEnabled, setLocationEnabled, multipleChoiceEnabled, setMultipleChoiceEnabled, pendingChoice, onChoiceSubmit } = props;
+function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextBreakdown: ContextUsage; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; sendReasoning: boolean; toggleSendReasoning: (value: boolean) => void; error: string; clearError: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onRemoveAttachment: (attachment: StoredAttachment) => void; internetSearchEnabled: boolean; setInternetSearchEnabled: (value: boolean) => void; pageVisitEnabled: boolean; setPageVisitEnabled: (value: boolean) => void; browserToolAvailable: boolean; browserEnabled: boolean; setBrowserEnabled: (value: boolean) => void; currentTimeEnabled: boolean; setCurrentTimeEnabled: (value: boolean) => void; locationEnabled: boolean; setLocationEnabled: (value: boolean) => void; multipleChoiceEnabled: boolean; setMultipleChoiceEnabled: (value: boolean) => void; pendingChoice?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean> }) {
+  const { c, appearance, draft, setDraft, sendMessage, keyDown, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextBreakdown, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, sendReasoning, toggleSendReasoning, error, clearError, attachments, maxAttachments, uploadingImages, onFiles, onRemoveAttachment, internetSearchEnabled, setInternetSearchEnabled, pageVisitEnabled, setPageVisitEnabled, browserToolAvailable, browserEnabled, setBrowserEnabled, currentTimeEnabled, setCurrentTimeEnabled, locationEnabled, setLocationEnabled, multipleChoiceEnabled, setMultipleChoiceEnabled, pendingChoice, onChoiceSubmit } = props;
   const fileRef = useRef<HTMLInputElement>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -1062,7 +1063,7 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
         <textarea ref={textRef} aria-label={pendingChoice ? c.choiceWaiting : c.messagePlaceholder} enterKeyHint="enter" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} placeholder={pendingChoice ? c.choiceWaiting : c.messagePlaceholder} disabled={Boolean(pendingChoice)} />
       </div>
       <div className="composer-trail" ref={trailRef}>
-        <ContextWindowIndicator c={c} locale={locale} model={selectedModel} models={models} usedTokens={contextUsedTokens} />
+        <ContextWindowIndicator c={c} locale={locale} model={selectedModel} models={models} usage={contextBreakdown} includeReasoning={sendReasoning} />
         <div className="preset-switcher"><button type="button" className="preset-trigger" disabled={!selectedModel?.reasoningPresets.length} onClick={() => setPresetOpen(!presetOpen)}><BrainCircuit size={16} /><span>{selectedPreset?.name || c.default}</span><ChevronDown size={14} className={presetOpen ? "rotate" : ""} /></button>{presetMounted && <div className={`popover preset-popover ${presetClosing ? "closing" : ""}`}><p>{c.reasoningPreset}</p>{selectedModel?.reasoningPresets.map((preset) => { const note = appearance.showReasoningNotes ? reasoningNote(preset.effort, appearance, locale) : ""; return <button type="button" key={preset.id} onClick={() => { setPreset(preset.id); setPresetOpen(false); }}><span className="selection-dot">{preset.id === selectedPreset?.id && <Check size={12} />}</span><span>{preset.name}<small>{note || (preset.kind === "builtin" ? `${c.native} · ${preset.effort || c.default}` : `${c.template}${preset.effort ? ` · ${preset.effort}` : ""}`)}</small></span></button>; })}<div className="reasoning-send-toggle"><span><strong>{c.sendPriorReasoning}</strong><small>{c.sendPriorReasoningDesc}</small></span><button type="button" role="switch" aria-label={c.sendPriorReasoning} aria-checked={sendReasoning} className={`toggle ${sendReasoning ? "on" : ""}`} onClick={() => toggleSendReasoning(!sendReasoning)}><i /></button></div><button type="button" className="default-choice-action" disabled={!selectedPreset || defaultReasoningPresetId === selectedPreset.id} onClick={setDefaultReasoning}><Check size={14} />{defaultReasoningPresetId === selectedPreset?.id ? c.defaultReasoningActive : c.useAsDefault}</button></div>}</div>
         <button className={`send-button ${showStop ? "stopping" : ""}`} type="submit" disabled={!showStop && (uploadingImages || Boolean(pendingChoice))} aria-label={showStop ? c.stop : pendingChoice ? c.choiceWaiting : isGenerating ? c.addToQueue : c.send}>{showStop ? <Square size={14} fill="currentColor" /> : <ArrowUp size={20} />}</button>
       </div>
@@ -1269,7 +1270,7 @@ function useRevealedText(target: string, active: boolean, pacing: AppearancePref
   return paced ? (target.startsWith(shown) ? shown : target) : target;
 }
 
-function Message({ c, locale, message, waitPhase, renderStrikethrough, appearance, pending, revisions, onFork, onEditAssistant, onRegenerate, onRegenerateUser, onDeleteUser, onRevision }: { c: CopySet; locale: Locale; message: StoredMessage; waitPhase?: ChatWaitPhase; renderStrikethrough: boolean; appearance: AppearancePreferences; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
+function Message({ c, locale, message, waitPhase, waitProgress, progressUnavailable, renderStrikethrough, appearance, pending, revisions, onFork, onEditAssistant, onRegenerate, onRegenerateUser, onDeleteUser, onRevision }: { c: CopySet; locale: Locale; message: StoredMessage; waitPhase?: ChatWaitPhase; waitProgress?: number; progressUnavailable?: boolean; renderStrikethrough: boolean; appearance: AppearancePreferences; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
   const [thoughtOpen, setThoughtOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(message.content);
@@ -1295,7 +1296,7 @@ function Message({ c, locale, message, waitPhase, renderStrikethrough, appearanc
   if (message.role === "user") return <div className="message-row user-message"><div className="user-message-actions">{editing ? <div className="message-edit">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}<textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => setEditing(false)}>{c.cancel}</button><button onClick={() => { if (text.trim() !== message.content) onFork(message.id, text); setEditing(false); }}><GitBranch size={13} /> {c.forkSend}</button></div></div> : <><div className="user-message-toolbar"><button title={c.regenerateRequest} aria-label={c.regenerateRequest} onClick={() => onRegenerateUser(message.id)}><RefreshCw size={13} /></button>{message.content && <button title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={13} /></button>}<button title={c.editBranch} aria-label={c.editBranch} onClick={() => setEditing(true)}><Pencil size={13} /></button><button className="delete" title={c.deleteMessage} aria-label={c.deleteMessage} onClick={() => onDeleteUser(message.id)}><Trash2 size={13} /></button></div><div className="user-message-stack long-press-target" {...longPress}><div className="user-message-content">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}{message.content && <div className="message-bubble">{message.content}</div>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /></div></>}</div>{actions}</div>;
   const showThought = isThinking || thoughtOpen;
   return <div className="message-row assistant-message long-press-target" {...longPress}>
-    {pending && waitPhase && <div className="chat-wait-status" role="status" aria-live="polite"><LoaderCircle className="spin" size={16} /><span>{chatWaitLabel(waitPhase, locale)}</span></div>}
+    {pending && waitPhase && <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{chatWaitLabel(waitPhase, locale)}{progressUnavailable && <small className="status-percent"> · {locale === "ko" ? "진행률 미지원" : "Progress unavailable"}</small>}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div>}
     {message.reasoning && <div className={`thinking-block ${isThinking ? "streaming" : ""}`}><button onClick={() => !isThinking && setThoughtOpen((value) => !value)} aria-expanded={showThought}><BrainCircuit size={15} /> {isThinking ? c.thinking : formatThoughtDuration(message.reasoningDurationSeconds || 1, locale)} {!isThinking && <ChevronDown size={14} className={thoughtOpen ? "rotate" : ""} />}</button>{showThought && <div ref={reasoningRef} className={`thinking-preview ${isThinking ? "live" : ""}`}>{displayedReasoning}</div>}</div>}
     {visibleToolEvents.length ? <ToolActivityGroup c={c} locale={locale} events={visibleToolEvents} /> : null}
     {choiceResponses.map((event) => <MultipleChoiceResponse key={event.id} event={event} />)}
@@ -1397,13 +1398,17 @@ function SettingsPanel({ initial, onClose, onSaved, onLogout, onAccentPreview }:
 }
 
 function ExperimentalSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>> }) {
-  const experimental = draft.experimental || { browserTool: false };
-  const toggle = (key: keyof typeof experimental) => setDraft((current) => ({ ...current, experimental: { ...(current.experimental || { browserTool: false }), [key]: !(current.experimental || { browserTool: false })[key] } }));
+  const experimental = { openAIProgress: false, ...draft.experimental };
+  const toggle = (key: keyof typeof experimental) => setDraft((current) => ({ ...current, experimental: { ...(current.experimental || { browserTool: false, openAIProgress: false }), [key]: !current.experimental?.[key] } }));
   return <div className="settings-section">
     <SectionTitle icon={<FlaskConical size={19} />} title={c.experimentalTitle} description={c.experimentalDesc} />
     <div className="general-setting-card general-toggle-card">
       <div><strong>{c.experimentalBrowser}</strong><small>{c.experimentalBrowserDesc}</small></div>
       <button role="switch" aria-checked={experimental.browserTool} aria-label={c.experimentalBrowser} className={`toggle ${experimental.browserTool ? "on" : ""}`} onClick={() => toggle("browserTool")}><i /></button>
+    </div>
+    <div className="general-setting-card general-toggle-card">
+      <div><strong>{draft.preferences.language === "ko" ? "OpenAI 호환 연결 진행률" : "OpenAI-compatible connection progress"}</strong><small>{draft.preferences.language === "ko" ? "LM Studio로 확인되는 서버에 전용 진행률 연동을 사용합니다. 다른 서버는 표준 채팅 API를 유지하며, 제공하지 않는 진행률은 미지원으로 표시합니다." : "Use native progress on verified LM Studio servers. Other hosts retain standard chat; progress not exposed by the server is marked unavailable."}</small></div>
+      <button role="switch" aria-checked={experimental.openAIProgress} aria-label={draft.preferences.language === "ko" ? "OpenAI 호환 연결 진행률" : "OpenAI-compatible connection progress"} className={`toggle ${experimental.openAIProgress ? "on" : ""}`} onClick={() => toggle("openAIProgress")}><i /></button>
     </div>
     <p className="settings-help">{c.experimentalHelp}</p>
   </div>;
@@ -1495,6 +1500,15 @@ function AppearanceSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicC
           }} />
         </label>)}
       </div><p className="settings-help">{c.reasoningNotesReset}</p></>}
+    </div>
+    <div className="general-setting-card">
+      <div><strong>{locale === "ko" ? "LM Studio 진행률" : "LM Studio progress"}</strong><small>{locale === "ko" ? "모델 로드와 프롬프트 처리 상태의 표시 방식입니다. 서버에서 진행률을 제공하지 않으면 로딩 표시를 사용합니다." : "Display model loading and prompt processing progress. Loading indicators are used when the server provides no percentage."}</small></div>
+      <SelectMenu label={locale === "ko" ? "진행률 표시" : "Progress display"} value={appearance.lmStudioProgress} options={[
+        { value: "text", label: locale === "ko" ? "상태 메시지" : "Status message" },
+        { value: "percent", label: locale === "ko" ? "퍼센트" : "Percentage" },
+        { value: "donut", label: locale === "ko" ? "도넛" : "Donut" },
+        { value: "both", label: locale === "ko" ? "퍼센트와 도넛" : "Percentage and donut" },
+      ]} onChange={(value) => patch({ lmStudioProgress: value as AppearancePreferences["lmStudioProgress"] })} />
     </div>
     <div className="general-setting-card">
       <div><strong>{c.streamRevealTitle}</strong><small>{c.streamRevealHelp}</small></div>

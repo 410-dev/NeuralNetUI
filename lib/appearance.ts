@@ -11,6 +11,7 @@ export const ACCENT_PALETTES: Array<{ id: AccentPaletteId; hex: string }> = [
 ];
 
 export const DEFAULT_APPEARANCE: AppearancePreferences = {
+  lmStudioProgress: "both",
   accentPalette: "blue",
   accentColor: "#4d7fd8",
   streamReveal: "instant",
@@ -128,6 +129,7 @@ export function normalizeAppearance(input: Partial<AppearancePreferences> | unde
   const palette = ACCENT_PALETTES.some((entry) => entry.id === input?.accentPalette) || input?.accentPalette === "custom"
     ? input!.accentPalette! : DEFAULT_APPEARANCE.accentPalette;
   return {
+    lmStudioProgress: ["text", "percent", "donut", "both"].includes(input?.lmStudioProgress || "") ? input!.lmStudioProgress! : "both",
     accentPalette: palette,
     accentColor: normalizeHexColor(input?.accentColor),
     streamReveal: input?.streamReveal === "fade" ? "fade" : "instant",

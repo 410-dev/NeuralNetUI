@@ -35,7 +35,7 @@ function legacyLoadBody(source: string) {
   return separator <= pathSeparator || separator === 1 ? { model_path: source } : { model_path: source.slice(0, separator), gguf_variant: source.slice(separator + 1) };
 }
 
-export function createResidencyAdapter(connection: ConnectionConfig, headers: Record<string, string>, contextWindowTokens: number | undefined, onPhase: (phase: ChatWaitPhase) => void, request: typeof fetch = fetch): ResidencyAdapter {
+export function createResidencyAdapter(connection: ConnectionConfig, headers: Record<string, string>, contextWindowTokens: number | undefined, onPhase: (phase: ChatWaitPhase) => void, request: typeof fetch = fetch, onLoadProgress?: (progress: number) => void): ResidencyAdapter {
   let mode: "native" | "legacy" | undefined = connection.driver === "lmstudio" ? "native" : undefined;
   let phase: ChatWaitPhase = "preparing-response";
   async function call(url: string, signal: AbortSignal, body?: unknown) {
@@ -70,6 +70,10 @@ export function createResidencyAdapter(connection: ConnectionConfig, headers: Re
     },
     async load(model, signal) {
       phase = "loading-model";
+      if (mode === "native" && onLoadProgress) {
+        const { loadWithProgress } = await import("./lm-studio-progress.ts");
+        if (await loadWithProgress(connection.baseUrl, model, contextWindowTokens, signal, onLoadProgress, headers.Authorization)) return;
+      }
       const response = await call(mode === "native" ? lmStudioEndpoint(connection.baseUrl, "load") : inferenceEndpoint(connection.baseUrl, "load"), signal, mode === "native" ? { model, ...(contextWindowTokens ? { context_length: contextWindowTokens } : {}) } : legacyLoadBody(model));
       if (response.status !== 409) await ensureOk(response);
       // A 409 is accepted only if the manager's subsequent list confirms the load.

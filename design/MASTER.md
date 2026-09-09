@@ -111,3 +111,9 @@
 - Accent palettes are named swatches plus one custom colour. The settings panel previews the chosen accent live and restores the saved one if the panel is dismissed.
 - Streaming has two independent presentation choices: whether newly settled text fades in, and whether bursts of tokens are released immediately or spread evenly.
 - Presentation preferences never change what is sent to a model, and never alter stored conversation content.
+
+## Progress and context (2.1.1)
+
+- Keep progress on the existing quiet status line: neutral 16px donut and tabular grey percentage, configurable under Appearance.
+- Never invent a completion percentage from elapsed time or token usage. Unavailable progress keeps the waiting indicator with a short unsupported label.
+- Context disclosure shows input, response and reasoning in aligned white/grey rows. Identify history/draft values as estimates and recalculate immediately when prior reasoning is toggled.

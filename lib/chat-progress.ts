@@ -2,6 +2,7 @@ import type { ChatWaitPhase, Locale } from "./types.ts";
 
 const labels: Record<Locale, Record<ChatWaitPhase, string>> = {
   ko: {
+    "processing-prompt": "프롬프트를 처리중입니다",
     "waiting-session": "다른 세션이 종료되길 기다리는 중입니다",
     "freeing-space": "모델을 로드할 공간을 확보중입니다",
     "loading-model": "모델을 로드중입니다",
@@ -9,6 +10,7 @@ const labels: Record<Locale, Record<ChatWaitPhase, string>> = {
     "preparing-response": "응답을 준비중입니다",
   },
   en: {
+    "processing-prompt": "Processing the prompt",
     "waiting-session": "Waiting for another session to finish",
     "freeing-space": "Making room to load the model",
     "loading-model": "Loading the model",

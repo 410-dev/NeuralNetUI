@@ -804,3 +804,14 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 @media (max-width: 620px) {
   .reasoning-notes { grid-template-columns: 1fr; }
 }
+
+.context-breakdown { display: block; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border); min-width: 180px; }
+.context-breakdown > span { display: flex; justify-content: space-between; gap: 20px; margin: 4px 0; color: #ccc; font-size: 11px; }
+.context-breakdown b { font-weight: 500; color: #eee; font-variant-numeric: tabular-nums; }
+.context-breakdown small { white-space: normal; max-width: 240px; }
+
+.status-donut { width: 16px; height: 16px; flex-shrink: 0; transform: rotate(-90deg); fill: none; stroke: #555; stroke-width: 2; }
+.status-donut circle + circle { stroke: #eee; transition: stroke-dasharray .2s ease; }
+.status-percent { color: #bbb; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 600px) { .context-tooltip { right: -110px; width: 240px; max-width: calc(100vw - 32px); } }

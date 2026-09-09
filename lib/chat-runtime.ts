@@ -1,3 +1,5 @@
+import { progressEvent } from "./inference-progress";
+import { nativeChatResponse } from "./lm-studio-progress";
 import { DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages } from "./harness";
 import { harnessCompletion, prepareContext } from "./harness-runtime";
 import { effectiveContextWindowTokens } from "./model-context";
@@ -30,6 +32,8 @@ export type ChatJobSnapshot = {
   message: StoredMessage;
   error?: string;
   waitPhase?: ChatWaitPhase;
+  waitProgress?: number;
+  progressUnavailable?: boolean;
 };
 
 export type StartChatJobInput = {
@@ -56,6 +60,8 @@ type ChatJob = {
   waiting: Map<string, (value: unknown) => void>;
   error?: string;
   waitPhase?: ChatWaitPhase;
+  waitProgress?: number;
+  progressUnavailable?: boolean;
   discarded?: boolean;
   unregister?: () => void;
   expiryTimer?: ReturnType<typeof setTimeout>;
@@ -83,12 +89,22 @@ function usageFrom(payload: Record<string, unknown>) {
 }
 
 function snapshot(job: ChatJob): ChatJobSnapshot {
-  return { conversationId: job.input.conversationId, branchId: job.input.branchId, status: job.status, message: job.message, waitPhase: job.waitPhase, ...(job.error ? { error: job.error } : {}) };
+  return { conversationId: job.input.conversationId, branchId: job.input.branchId, status: job.status, message: job.message, waitPhase: job.waitPhase, waitProgress: job.waitProgress, progressUnavailable: job.progressUnavailable, ...(job.error ? { error: job.error } : {}) };
 }
 
 function setWaitPhase(job: ChatJob, phase?: ChatWaitPhase) {
   if (job.discarded || job.controller.signal.aborted || !["running", "waiting"].includes(job.status) || job.waitPhase === phase) return;
-  job.waitPhase = phase; broadcast(job, true);
+  job.waitPhase = phase; job.waitProgress = undefined; if (!phase) job.progressUnavailable = undefined; broadcast(job, true);
+}
+
+function setWaitProgress(job: ChatJob, phase: ChatWaitPhase, progress: number) {
+  if (job.discarded || job.controller.signal.aborted || job.status !== "running" || !Number.isFinite(progress)) return;
+  const percent = Math.round(Math.max(0, Math.min(1, progress)) * 100);
+  if (job.waitPhase === phase && job.waitProgress === percent) return;
+  job.waitPhase = phase; job.waitProgress = percent;
+  // A cached prompt may finish inside the text stream's 80ms batching interval.
+  // Publish progress transitions before the first output clears them.
+  broadcast(job, true);
 }
 
 function send(controller: ReadableStreamDefaultController<Uint8Array>, value: ChatJobSnapshot | "done") {
@@ -150,9 +166,12 @@ async function upstreamMessages(input: StartChatJobInput, userId: string, system
   return [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...converted.flat()];
 }
 
-async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>) {
+async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false) {
   setWaitPhase(job, "preparing-response");
-  const response = await progressFetch(String(body._endpoint), {
+  const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal: job.controller.signal }) : undefined;
+  job.progressUnavailable = allowProgress && !nativeResponse || undefined;
+  if (allowProgress) broadcast(job, true);
+  const response = nativeResponse || await progressFetch(String(body._endpoint), {
     method: "POST", headers, signal: job.controller.signal,
     body: JSON.stringify(Object.fromEntries(Object.entries(body).filter(([key]) => key !== "_endpoint"))),
   }, phase => setWaitPhase(job, phase), "preparing-response");
@@ -164,6 +183,8 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   let terminated = false; let sawPayload = false; let finishReason = false;
   const readPayload = (payload: Record<string, unknown>) => {
     sawPayload = true;
+    const progress = allowProgress ? progressEvent(payload) : undefined;
+    if (progress && !content && !reasoning && !calls.size) { job.progressUnavailable = undefined; setWaitProgress(job, progress.phase, progress.progress); return; }
     setWaitPhase(job, content || reasoning || calls.size ? undefined : "preparing-response");
     usage = { ...usage, ...usageFrom(payload) };
     const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }> : [];
@@ -317,12 +338,20 @@ async function run(job: ChatJob) {
     messages = await prepareContext(harnessContext, job.input.branchId, messages, true, estimateTokens(tools));
     job.message.contextTokens = estimateTokens(messages); broadcast(job, true);
     const headers = connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "");
+    const progressEnabled = connection.driver === "lmstudio" || config.experimental?.openAIProgress === true;
+    let nativeServer = connection.driver === "lmstudio";
+    if (!nativeServer && progressEnabled) {
+      try {
+        const probe = await fetch(`${connectionRoot(connection.baseUrl)}/api/v1/models`, { headers, signal: AbortSignal.any([job.controller.signal, AbortSignal.timeout(2000)]), cache: "no-store" });
+        if (probe.ok) { const inventory = await probe.json(); nativeServer = Array.isArray(inventory.models) && inventory.models.some((m: {type?: string; key?: string; loaded_instances?: unknown}) => m.type === "llm" && typeof m.key === "string" && Array.isArray(m.loaded_instances)); }
+      } catch { job.controller.signal.throwIfAborted(); }
+    }
     const serverKey = connectionRoot(connection.baseUrl);
     const sameServer = config.connections.filter(item => connectionRoot(item.baseUrl) === serverKey);
     const limits = sameServer.map(item => item.maxResidentModels || 0).filter(limit => limit > 0);
     const limit = limits.length ? Math.min(...limits) : 0;
     const policy = sameServer.some(item => item.modelWaitPolicy === "serial") ? "serial" : "capacity";
-    const adapter = config.preferences.onDemand || limit > 0 ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase)) : undefined;
+    const adapter = config.preferences.onDemand || limit > 0 || nativeServer ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase), fetch, nativeServer && progressEnabled ? progress => setWaitProgress(job, "loading-model", progress) : undefined) : undefined;
     const acquireModel = () => modelResidency.acquire({ server: serverKey, model: model.sourceModel, limit, policy, adapter, signal: job.controller.signal, onPhase: phase => setWaitPhase(job, phase) });
     releaseModel = await acquireModel();
     for (let turn = 0; turn < config.toolSettings.maxToolRounds; turn += 1) {
@@ -340,14 +369,14 @@ async function run(job: ChatJob) {
         ? (remainingTokens ? Math.min(harness.maxOutputTokens, remainingTokens) : harness.maxOutputTokens)
         : remainingTokens;
       const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(outputLimit ? { max_tokens: outputLimit } : {}), stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
-      const result = await streamTurn(job, body, headers); reasoningSeconds += result.reasoningDurationSeconds;
+      const result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled); reasoningSeconds += result.reasoningDurationSeconds;
       if (!result.calls.length) {
         job.message = { ...job.message, ...result.usage, contextTokens: (result.usage.inputTokens ?? estimateTokens(messages)) + (result.usage.outputTokens ?? estimateTokens(result.content)), reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,
           completionDurationSeconds: result.visibleDurationSeconds,
           timeToFirstTokenSeconds: Math.max(0, (performance.now() - requestStartedAt - (result.visibleDurationSeconds || 0) * 1000) / 1000) };
         releaseModel?.(); releaseModel = undefined;
         if (harness.titleTiming === "after") await generateTitle();
-        job.waitPhase = undefined; job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
+        job.waitPhase = undefined; job.waitProgress = undefined; job.progressUnavailable = undefined; job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
       }
       messages.push({ role: "assistant", content: result.content, ...(result.reasoning ? { reasoning_content: result.reasoning } : {}), tool_calls: result.calls });
       const visualToolContent: ModelContentPart[] = [];
@@ -370,7 +399,7 @@ async function run(job: ChatJob) {
   } catch (error) {
     const stopped = (error as Error).name === "AbortError" || job.controller.signal.aborted;
     job.message = settlePendingTools([job.message])[0];
-    job.waitPhase = undefined;
+    job.waitPhase = undefined; job.waitProgress = undefined; job.progressUnavailable = undefined;
     job.status = stopped ? "stopped" : "error"; job.error = stopped ? undefined : error instanceof Error ? error.message : "Chat generation failed.";
     if (job.message.reasoning) job.message.reasoningDurationSeconds ||= Math.max(1, reasoningSeconds);
     await persist(job).catch(() => undefined); broadcast(job, true); finishSubscribers(job);

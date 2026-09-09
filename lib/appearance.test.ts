@@ -57,9 +57,15 @@ test("stored notes keep only known keys and trim them", () => {
 });
 
 test("appearance preferences fall back to defaults and clamp the chunk size", () => {
-  assert.deepEqual(normalizeAppearance(undefined), { accentPalette: "blue", accentColor: "#4d7fd8", streamReveal: "instant", streamPacing: "immediate", streamChunkSize: 3, showReasoningNotes: true, reasoningNotes: {} });
+  assert.deepEqual(normalizeAppearance(undefined), { lmStudioProgress: "both", accentPalette: "blue", accentColor: "#4d7fd8", streamReveal: "instant", streamPacing: "immediate", streamChunkSize: 3, showReasoningNotes: true, reasoningNotes: {} });
   const normalized = normalizeAppearance({ accentPalette: "nope" as never, streamReveal: "fade", streamPacing: "chunked", streamChunkSize: 999 });
   assert.equal(normalized.accentPalette, "blue");
   assert.equal(normalized.streamChunkSize, 24);
   assert.equal(normalizeAppearance({ streamChunkSize: 0 } as never).streamChunkSize, 3);
+});
+
+
+test("LM Studio progress display validates saved modes", () => {
+  for (const mode of ["text", "percent", "donut", "both"] as const) assert.equal(normalizeAppearance({ lmStudioProgress: mode }).lmStudioProgress, mode);
+  assert.equal(normalizeAppearance({ lmStudioProgress: "invalid" as never }).lmStudioProgress, "both");
 });
