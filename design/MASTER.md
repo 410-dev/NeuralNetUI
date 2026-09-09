@@ -96,6 +96,11 @@
 - Never sweep a temporary chat that still has a live chat job; another tab may be streaming into it.
 - Promoting one clears the flag and titles it from the first exchange through the same harness settings the automatic path uses.
 
+## Settings dialogs
+
+- The footer offers a save only while the draft differs from the saved configuration. With nothing changed, disable the save and label the other button Close rather than Cancel — there is nothing to cancel.
+- Never cap a model's output with a hidden constant. Give the limit a setting whose zero means "use whatever the context window leaves".
+
 ## Experimental features
 
 - Unfinished capabilities live behind an administrator switch in their own settings tab, listed after the harness tab.

@@ -55,6 +55,10 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
         {modelFields("compact")}
         <button type="button" className="subtle-action" onClick={()=>setPrompt("compactPrompt")}><Pencil size={16}/>{ko?"압축 프롬프트 편집":"Edit compacting prompt"}</button>
       </div>}
+      <div className="harness-advanced">
+        <h4>{ko?"응답 길이":"Response length"}</h4>
+        <label className="field"><span>{ko?"응답 최대 토큰":"Maximum output tokens"}</span><input type="number" min={0} max={1000000} step={1} inputMode="numeric" value={h.maxOutputTokens} onChange={e=>patch({maxOutputTokens:Math.min(1000000,Math.max(0,Math.floor(Number(e.target.value) || 0)))})}/><small>{ko?"0은 제한 없음입니다. 남은 컨텍스트 공간을 모두 응답에 사용할 수 있습니다. 값을 지정하면 그 값과 남은 공간 중 작은 쪽을 상한으로 전달합니다.":"0 means no limit, so a response may use all of the remaining context. A value is sent as the smaller of itself and the remaining space."}</small></label>
+      </div>
       <p className="settings-help">{ko?"채팅 원문은 모든 분기에 보존됩니다. 컨텍스트 사용량은 모델 전달 내용을 반영하며, 서버 사용량이 없으면 추정값입니다.":"Original history is preserved in every branch. Context usage reflects model input, estimated when server usage is unavailable."}</p>
     </section>
     <section className="settings-section wide">

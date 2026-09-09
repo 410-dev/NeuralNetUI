@@ -106,6 +106,8 @@ export interface AppConfig {
 
 export interface HarnessSettings {
   contextMode: "rolling" | "compacting";
+  /** Cap on tokens the model may generate per response. Zero leaves it to the context window. */
+  maxOutputTokens: number;
   compactThreshold: number;
   compactModelId: string;
   compactEffort: string;

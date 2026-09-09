@@ -30,7 +30,8 @@ const appearanceSchema = z.object({
 }).default(DEFAULT_APPEARANCE);
 const preferencesSchema = z.object({ sendReasoningToModel: z.boolean(), exportReasoning: z.boolean(), language: z.enum(["en", "ko"]).default("en"), onDemand: z.boolean().default(false), showModelIdentifiers: z.boolean().default(true), renderStrikethrough: z.boolean().default(true), defaultModelId: z.string().min(1).optional(), defaultReasoningPresetId: z.string().min(1).optional(), appearance: appearanceSchema }).default({ sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE });
 const harnessSettingsSchema = z.object({
-  contextMode: z.enum(["rolling", "compacting"]), compactThreshold: z.number().int().min(10).max(95),
+  contextMode: z.enum(["rolling", "compacting"]), maxOutputTokens: z.number().int().min(0).max(1_000_000).default(0),
+  compactThreshold: z.number().int().min(10).max(95),
   compactModelId: z.string().max(500), compactEffort: z.string().max(40), compactPrompt: z.string().trim().min(1).max(32000),
   titleEnabled: z.boolean(), titleTiming: z.enum(["before", "after"]), titleModelId: z.string().max(500),
   titleEffort: z.string().max(40), titlePrompt: z.string().trim().min(1).max(32000),

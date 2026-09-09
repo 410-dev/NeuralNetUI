@@ -12,6 +12,7 @@ test("an oversized latest turn fails explicitly without dropping its prompt", ()
 });
 test("multilingual estimate and conservative defaults", () => {
   assert.ok(estimateTokens("한글") > estimateTokens("ab"));
+  assert.equal(DEFAULT_HARNESS_SETTINGS.maxOutputTokens,0);
   assert.equal(DEFAULT_HARNESS_SETTINGS.titleEnabled,false);
   assert.equal(DEFAULT_HARNESS_SETTINGS.titleEffort,"off");
 });

@@ -335,7 +335,11 @@ async function run(job: ChatJob) {
       if (contextWindow && harness.contextMode === "rolling") messages = rollingMessages(messages, Math.floor(contextWindow * .95) - estimateTokens(tools));
       if (contextWindow && estimateTokens(messages) + estimateTokens(tools) > contextWindow * .95) throw new Error("Context and tool definitions exceed the model limit.");
       job.message.contextTokens = estimateTokens(messages);
-      const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(contextWindow ? { max_tokens: Math.max(1, Math.min(4096, contextWindow - estimateTokens(messages) - estimateTokens(tools) - 32)) } : {}), stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
+      const remainingTokens = contextWindow ? Math.max(1, contextWindow - estimateTokens(messages) - estimateTokens(tools) - 32) : 0;
+      const outputLimit = harness.maxOutputTokens > 0
+        ? (remainingTokens ? Math.min(harness.maxOutputTokens, remainingTokens) : harness.maxOutputTokens)
+        : remainingTokens;
+      const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(outputLimit ? { max_tokens: outputLimit } : {}), stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
       const result = await streamTurn(job, body, headers); reasoningSeconds += result.reasoningDurationSeconds;
       if (!result.calls.length) {
         job.message = { ...job.message, ...result.usage, contextTokens: (result.usage.inputTokens ?? estimateTokens(messages)) + (result.usage.outputTokens ?? estimateTokens(result.content)), reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,

@@ -46,6 +46,8 @@
 - The composer is one pill row that stretches into a rounded rectangle when the draft outgrows the space beside its controls, measured against a hidden mirror span.
 - Popovers animate open and closed via `usePopoverPresence`; a styled button must set its own background or the browser's disabled plate shows through.
 - The composer stacks when the space left beside its controls is under 150px, not only when the draft overflows, so phones use the stacked layout from the start. `.chat-idle .composer-wrap` must not set horizontal padding or it overrides the narrow-screen value.
+- `harnessSettings.maxOutputTokens` caps a response; 0 means the whole remaining context window. Before 2.1.0 `lib/chat-runtime.ts` hardcoded a 4096-token ceiling, which truncated long answers.
+- The settings footer tracks a JSON snapshot of the saved config: save is disabled while clean and the secondary button reads Close instead of Cancel.
 - Temporary chats use migration 9's `conversations.temporary` flag: excluded from history and search, swept by `discardTemporaryConversations` when the client's history fetch no longer names them via `keepTemporary`, and skipped while a chat job is registered. Only `PATCH { promote: true }` clears the flag; ordinary saves carry it forward.
 - Greetings live in `lib/greetings.ts`: seven time bands, five lines each per language, chosen by calendar day so a line holds still while a tab is open.
 - Reasoning descriptions come from `lib/appearance.ts`; an empty override falls back to the built-in wording for the active language, so switching language keeps untouched notes readable.
