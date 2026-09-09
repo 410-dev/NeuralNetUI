@@ -46,6 +46,7 @@
 - The composer is one pill row that stretches into a rounded rectangle when the draft outgrows the space beside its controls, measured against a hidden mirror span.
 - Popovers animate open and closed via `usePopoverPresence`; a styled button must set its own background or the browser's disabled plate shows through.
 - The composer stacks when the space left beside its controls is under 150px, not only when the draft overflows, so phones use the stacked layout from the start. `.chat-idle .composer-wrap` must not set horizontal padding or it overrides the narrow-screen value.
+- Driver capabilities live in `lib/driver-capabilities.ts` and surface as an info marker per option in the driver picker; the chat wait line never reports a missing capability. `SelectMenu` options accept an `info` table, portalled out of the popover and paired with a visually hidden summary.
 - `harnessSettings.maxOutputTokens` caps a response; 0 means the whole remaining context window. Before 2.1.0 `lib/chat-runtime.ts` hardcoded a 4096-token ceiling, which truncated long answers.
 - The settings footer tracks a JSON snapshot of the saved config: save is disabled while clean and the secondary button reads Close instead of Cancel.
 - Temporary chats use migration 9's `conversations.temporary` flag: excluded from history and search, swept by `discardTemporaryConversations` when the client's history fetch no longer names them via `keepTemporary`, and skipped while a chat job is registered. Only `PATCH { promote: true }` clears the flag; ordinary saves carry it forward.

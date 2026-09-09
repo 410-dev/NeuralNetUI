@@ -1,19 +1,19 @@
 "use client";
 
 /**
- * The product mark: a three-layer network of nodes and edges. Drawn with `currentColor` so it
- * inherits the icon treatment used everywhere else — white strokes, no plate behind them.
+ * The product mark: a 2-3-2 network of nodes and edges, spread wide enough that the layers read
+ * as a network rather than a cluster of touching circles. Edges stop short of each node so the
+ * mark stays legible without a plate behind it, and `currentColor` keeps it on the icon treatment.
  */
-export function NeuralMark({ size = 16, strokeWidth = 1.6 }: { size?: number; strokeWidth?: number }) {
+export function NeuralMark({ size = 16, strokeWidth = 1.5 }: { size?: number; strokeWidth?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-    {/* Edges first so the node circles cap them cleanly. */}
-    <path d="M5.4 7.2 12 3.6 18.6 7.2M5.4 7.2 12 12M5.4 7.2 12 20.4M18.6 7.2 12 12M18.6 7.2 12 20.4M5.4 16.8 12 3.6M5.4 16.8 12 12M5.4 16.8 12 20.4M18.6 16.8 12 3.6M18.6 16.8 12 12M18.6 16.8 12 20.4" opacity=".55" />
-    <circle cx="12" cy="3.6" r="2.1" />
-    <circle cx="5.4" cy="7.2" r="2.1" />
-    <circle cx="18.6" cy="7.2" r="2.1" />
-    <circle cx="12" cy="12" r="2.1" />
-    <circle cx="5.4" cy="16.8" r="2.1" />
-    <circle cx="18.6" cy="16.8" r="2.1" />
-    <circle cx="12" cy="20.4" r="2.1" />
+    <path d="M5.55 6.98L10.05 4.62M5.59 8.95L10.01 11.05M4.83 9.82L10.77 18.58M4.83 14.18L10.77 5.42M5.59 15.05L10.01 12.95M5.55 17.02L10.05 19.38M13.95 4.62L18.45 6.98M13.23 5.42L19.17 14.18M13.99 11.05L18.41 8.95M13.99 12.95L18.41 15.05M13.23 18.58L19.17 9.82M13.95 19.38L18.45 17.02" opacity=".5" />
+    <circle cx="3.6" cy="8" r="1.65" />
+    <circle cx="3.6" cy="16" r="1.65" />
+    <circle cx="12" cy="3.6" r="1.65" />
+    <circle cx="12" cy="12" r="1.65" />
+    <circle cx="12" cy="20.4" r="1.65" />
+    <circle cx="20.4" cy="8" r="1.65" />
+    <circle cx="20.4" cy="16" r="1.65" />
   </svg>;
 }

@@ -80,7 +80,8 @@
 
 ## Product mark and greetings
 
-- One drawn mark stands for a model: a three-layer node-and-edge network in `currentColor`, used in the model lists, the chat picker and the favicon.
+- One drawn mark stands for a model: a 2-3-2 node-and-edge network in `currentColor`, used in the model lists, the chat picker, the settings sidebar and the favicon.
+- Space the mark's layers so the network reads as layers rather than a cluster of touching circles: small nodes, wide gaps, and edges trimmed short of each node so the mark needs no plate behind it.
 - The idle greeting varies by time of day across seven bands with several lines each. Pick deterministically from the calendar day so a line holds still while a tab is open.
 - Headings that carry Korean use `word-break: keep-all`; breaking between syllables reads as a typo.
 - On narrow screens the greeting wraps inside 70% of the viewport rather than the full width.
@@ -95,6 +96,12 @@
 - A temporary chat stays out of history and search, and is discarded when the user opens another chat, starts a new one, or reloads onto a different route. It exists server-side only because the streaming pipeline needs somewhere to write.
 - Never sweep a temporary chat that still has a live chat job; another tab may be streaming into it.
 - Promoting one clears the flag and titles it from the first exchange through the same harness settings the automatic path uses.
+
+## Capability disclosure
+
+- Never report a missing capability in the middle of a running response. A wait line states what is happening, not what the server cannot do.
+- Where a choice determines what works, put the answer on the choice: an info marker on each option, revealing a table of supported, limited and unsupported features with the caveat behind every limited answer spelled out.
+- A tooltip inside a scrolling popover must be portalled out of it and positioned against the viewport, flipping above its marker when below would overflow. Pair it with a visually hidden summary so the same facts reach assistive technology.
 
 ## Settings dialogs
 

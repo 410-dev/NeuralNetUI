@@ -33,7 +33,6 @@ export type ChatJobSnapshot = {
   error?: string;
   waitPhase?: ChatWaitPhase;
   waitProgress?: number;
-  progressUnavailable?: boolean;
 };
 
 export type StartChatJobInput = {
@@ -61,7 +60,6 @@ type ChatJob = {
   error?: string;
   waitPhase?: ChatWaitPhase;
   waitProgress?: number;
-  progressUnavailable?: boolean;
   discarded?: boolean;
   unregister?: () => void;
   expiryTimer?: ReturnType<typeof setTimeout>;
@@ -89,12 +87,12 @@ function usageFrom(payload: Record<string, unknown>) {
 }
 
 function snapshot(job: ChatJob): ChatJobSnapshot {
-  return { conversationId: job.input.conversationId, branchId: job.input.branchId, status: job.status, message: job.message, waitPhase: job.waitPhase, waitProgress: job.waitProgress, progressUnavailable: job.progressUnavailable, ...(job.error ? { error: job.error } : {}) };
+  return { conversationId: job.input.conversationId, branchId: job.input.branchId, status: job.status, message: job.message, waitPhase: job.waitPhase, waitProgress: job.waitProgress, ...(job.error ? { error: job.error } : {}) };
 }
 
 function setWaitPhase(job: ChatJob, phase?: ChatWaitPhase) {
   if (job.discarded || job.controller.signal.aborted || !["running", "waiting"].includes(job.status) || job.waitPhase === phase) return;
-  job.waitPhase = phase; job.waitProgress = undefined; if (!phase) job.progressUnavailable = undefined; broadcast(job, true);
+  job.waitPhase = phase; job.waitProgress = undefined; broadcast(job, true);
 }
 
 function setWaitProgress(job: ChatJob, phase: ChatWaitPhase, progress: number) {
@@ -169,8 +167,6 @@ async function upstreamMessages(input: StartChatJobInput, userId: string, system
 async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false) {
   setWaitPhase(job, "preparing-response");
   const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal: job.controller.signal }) : undefined;
-  job.progressUnavailable = allowProgress && !nativeResponse || undefined;
-  if (allowProgress) broadcast(job, true);
   const response = nativeResponse || await progressFetch(String(body._endpoint), {
     method: "POST", headers, signal: job.controller.signal,
     body: JSON.stringify(Object.fromEntries(Object.entries(body).filter(([key]) => key !== "_endpoint"))),
@@ -184,7 +180,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   const readPayload = (payload: Record<string, unknown>) => {
     sawPayload = true;
     const progress = allowProgress ? progressEvent(payload) : undefined;
-    if (progress && !content && !reasoning && !calls.size) { job.progressUnavailable = undefined; setWaitProgress(job, progress.phase, progress.progress); return; }
+    if (progress && !content && !reasoning && !calls.size) { setWaitProgress(job, progress.phase, progress.progress); return; }
     setWaitPhase(job, content || reasoning || calls.size ? undefined : "preparing-response");
     usage = { ...usage, ...usageFrom(payload) };
     const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }> : [];
@@ -376,7 +372,7 @@ async function run(job: ChatJob) {
           timeToFirstTokenSeconds: Math.max(0, (performance.now() - requestStartedAt - (result.visibleDurationSeconds || 0) * 1000) / 1000) };
         releaseModel?.(); releaseModel = undefined;
         if (harness.titleTiming === "after") await generateTitle();
-        job.waitPhase = undefined; job.waitProgress = undefined; job.progressUnavailable = undefined; job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
+        job.waitPhase = undefined; job.waitProgress = undefined; job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
       }
       messages.push({ role: "assistant", content: result.content, ...(result.reasoning ? { reasoning_content: result.reasoning } : {}), tool_calls: result.calls });
       const visualToolContent: ModelContentPart[] = [];
@@ -399,7 +395,7 @@ async function run(job: ChatJob) {
   } catch (error) {
     const stopped = (error as Error).name === "AbortError" || job.controller.signal.aborted;
     job.message = settlePendingTools([job.message])[0];
-    job.waitPhase = undefined; job.waitProgress = undefined; job.progressUnavailable = undefined;
+    job.waitPhase = undefined; job.waitProgress = undefined;
     job.status = stopped ? "stopped" : "error"; job.error = stopped ? undefined : error instanceof Error ? error.message : "Chat generation failed.";
     if (job.message.reasoning) job.message.reasoningDurationSeconds ||= Math.max(1, reasoningSeconds);
     await persist(job).catch(() => undefined); broadcast(job, true); finishSubscribers(job);

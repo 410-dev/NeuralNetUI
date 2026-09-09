@@ -725,7 +725,22 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .select-menu.compact .select-trigger { min-height: 32px; padding: 0 10px 0 13px; font-size: 10.5px; }
 .select-popover { z-index: 40; top: calc(100% + 6px); left: 0; width: 100%; min-width: max-content; max-height: 300px; overflow-y: auto; display: grid; gap: 2px; }
 .select-popover.popover-up { top: auto; bottom: calc(100% + 6px); }
+.select-option-row { position: relative; display: flex; align-items: center; }
+.select-option-row > .select-option { flex: 1 1 auto; min-width: 0; }
+/* An info marker sits at the row's edge; the table it reveals is portalled out of the popover. */
+.select-info { position: absolute; right: 9px; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--dim); cursor: help; transition: color .15s; }
+.select-info:hover { color: var(--text); }
+.capability-tip { position: fixed; z-index: 260; width: min(320px, calc(100vw - 24px)); display: grid; gap: 9px; padding: 13px 15px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: rgba(30,30,35,.98); box-shadow: var(--shadow); backdrop-filter: blur(20px); pointer-events: none; animation: popover-in .16s var(--spring) both; }
+.capability-tip > strong { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.capability-row { display: grid; grid-template-columns: 9px minmax(0,1fr); gap: 9px; align-items: start; }
+.capability-row > i { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--dim); }
+.capability-row.yes > i { background: #7ca58c; }
+.capability-row.partial > i { background: #c8912f; }
+.capability-row.no > i { background: var(--danger); }
+.capability-row b { display: block; font-size: 11.5px; font-weight: 500; }
+.capability-row em { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; font-style: normal; line-height: 1.45; }
 .select-option { width: 100%; min-height: 38px; display: grid; grid-template-columns: 16px minmax(0,1fr); gap: 8px; align-items: center; padding: 8px 12px; border-radius: var(--radius-pill); background: transparent; color: var(--text); text-align: left; }
+.select-option-row:has(.select-info) > .select-option { padding-right: 36px; }
 .select-option:hover, .select-option:focus-visible { background: rgba(255,255,255,.07); outline: 0; }
 .select-option.selected { background: var(--accent-soft); }
 .select-option strong { display: block; font-size: 12.5px; font-weight: 500; }

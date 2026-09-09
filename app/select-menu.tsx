@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Check, ChevronDown, Info } from "lucide-react";
 
 /**
  * Keeps a popover mounted through its closing animation so opening and closing both animate.
@@ -19,7 +20,10 @@ export function usePopoverPresence(open: boolean, duration = 170) {
   return { mounted, closing };
 }
 
-export type SelectOption = { value: string; label: string; detail?: string };
+export type SelectOptionNote = { state: "yes" | "partial" | "no"; label: string; detail?: string };
+/** Hover-revealed capability table for one option, with a flat summary for assistive technology. */
+export type SelectOptionInfo = { title: string; rows: SelectOptionNote[]; summary: string };
+export type SelectOption = { value: string; label: string; detail?: string; info?: SelectOptionInfo };
 
 /**
  * The workspace's only dropdown. Native selects cannot carry the pill shape, the popover
@@ -32,6 +36,9 @@ export function SelectMenu({ value, options, onChange, label, placeholder, disab
   const [open, setOpen] = useState(false);
   const [drop, setDrop] = useState<"down" | "up">("down");
   const [highlight, setHighlight] = useState(0);
+  // The popover clips its own overflow, so a capability tooltip is placed against the viewport.
+  const [info, setInfo] = useState<{ index: number; right: number; top?: number; bottom?: number } | null>(null);
+  const fieldId = useId();
   const { mounted, closing } = usePopoverPresence(open);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -59,7 +66,7 @@ export function SelectMenu({ value, options, onChange, label, placeholder, disab
     setHighlight(Math.max(0, selectedIndex));
     setOpen(true);
   }
-  function hide(restoreFocus = true) { setOpen(false); if (restoreFocus) triggerRef.current?.focus(); }
+  function hide(restoreFocus = true) { setOpen(false); setInfo(null); if (restoreFocus) triggerRef.current?.focus(); }
   function choose(next: string) { onChange(next); hide(); }
 
   function onKeyDown(event: React.KeyboardEvent) {
@@ -78,10 +85,33 @@ export function SelectMenu({ value, options, onChange, label, placeholder, disab
       <ChevronDown size={15} className={open ? "rotate" : ""} />
     </button>
     {mounted && <div ref={listRef} className={`popover select-popover ${drop === "up" ? "popover-up" : ""} ${closing ? "closing" : ""}`} role="listbox" aria-label={label} tabIndex={-1}>
-      {options.map((option, index) => <button key={option.value} type="button" role="option" aria-selected={option.value === value} tabIndex={index === highlight ? 0 : -1} className={`select-option ${option.value === value ? "selected" : ""}`} onClick={() => choose(option.value)}>
-        <span className="selection-dot">{option.value === value && <Check size={13} />}</span>
-        <span><strong>{option.label}</strong>{option.detail && <small>{option.detail}</small>}</span>
-      </button>)}
+      {options.map((option, index) => <div className="select-option-row" role="presentation" key={option.value}>
+        <button type="button" role="option" aria-selected={option.value === value} aria-describedby={option.info ? `${fieldId}-note-${index}` : undefined} tabIndex={index === highlight ? 0 : -1} className={`select-option ${option.value === value ? "selected" : ""}`} onClick={() => choose(option.value)}>
+          <span className="selection-dot">{option.value === value && <Check size={13} />}</span>
+          <span><strong>{option.label}</strong>{option.detail && <small>{option.detail}</small>}</span>
+        </button>
+        {option.info && <>
+          <span className="visually-hidden" id={`${fieldId}-note-${index}`}>{option.info.summary}</span>
+          <span className="select-info" aria-hidden="true"
+            onPointerEnter={(event) => {
+              const box = event.currentTarget.getBoundingClientRect();
+              const right = Math.round(window.innerWidth - box.right);
+              // Hang the table above the marker once it sits low enough that below would overflow.
+              setInfo(box.bottom > window.innerHeight * .55
+                ? { index, right, bottom: Math.round(window.innerHeight - box.top + 8) }
+                : { index, right, top: Math.round(box.bottom + 8) });
+            }}
+            onPointerLeave={() => setInfo(null)}><Info size={14} /></span>
+        </>}
+      </div>)}
     </div>}
+    {info && options[info.index]?.info && typeof document !== "undefined" && createPortal(
+      <div className="capability-tip" role="presentation" style={{ top: info.top, bottom: info.bottom, right: info.right }}>
+        <strong>{options[info.index].info!.title}</strong>
+        {options[info.index].info!.rows.map((row) => <span key={row.label} className={`capability-row ${row.state}`}>
+          <i />
+          <span><b>{row.label}</b>{row.detail && <em>{row.detail}</em>}</span>
+        </span>)}
+      </div>, document.body)}
   </div>;
 }
