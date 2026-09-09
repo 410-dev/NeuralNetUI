@@ -25,7 +25,7 @@
 - Connections are ordered and support OpenAI API or LM Studio drivers. Connections, models, and reasoning presets use drag-and-drop or adjacent up/down controls; their independently scrollable settings lists persist the order shown by chat pickers. Each connection preserves its own discovered model metadata and reasoning presets; duplicate served identifiers resolve to the highest-priority connection.
 - LM Studio discovery uses native `/api/v1` REST. Version 2.1.1 uses request-scoped SDK loading and supported chat inference for progress, with Chat Completions fallback for unsupported SDK semantics.
 - Chat admission uses a server-wide residency manager: inventory checks and load/unload mutations are serialized; aliases use their base model. Dispatched mutations retain the lock through completion even if the caller cancels.
-- Current release version: 2.1.5.
+- Current release version: 2.1.6.
 - Version 2.1.5 MSI built and metadata verified on 2026-09-09; unsigned. Output: `installer/output/NeuralNetUI-2.1.5-x64.msi`. Validation notes: `docs/audits/2026-09-09-release-2.1.5.md`.
 - Windows Installer compares only the first three version fields, so revision-only releases need `MajorUpgrade AllowSameVersionUpgrades="yes"` to replace the installed product. `package.json` carries the four-field version, which is not valid semver; the package is private and never published.
 - The context donut starts at the most recent compacted turn and counts the summary in place of the history it covers, so compaction is visible there. The composer leaves its pill shape whenever anything takes a row of its own — queued messages, attachments or an upload in progress.
@@ -81,3 +81,7 @@
 - New Chat opens `/`; only a successful conversation creation replaces it with `/chat/:id`. Popstate to `/` resets the draft; missing historical draft URLs recover to `/`.
 - Composer paste leaves plain text insertion native and routes image-only clipboard files through the attachment uploader. Mixed text/image clipboard data prioritizes text.
 - Account settings owns the display-name editor in its own account-card, aligned with the password card, using the shared Save Changes footer. All roles may update their own display name via existing config persistence.
+
+- Release 2.1.6 uses Lightbulb for all reasoning icons; reasoning folds are unindented without a left rule and use right/down chevrons. A per-conversation in-memory eye toggle on the active chat hides technical activity via CSS, retaining mounted disclosure state and user question/answer bubbles. New streaming and lazily loaded records inherit the thread visibility. Reload resets visibility.
+- Composer tool order ends with current time, location, optional browser, and multiple choice.
+- Version 2.1.6 unsigned MSI built and metadata verified: `installer/output/NeuralNetUI-2.1.6-x64.msi`; validation and SHA-256 in `docs/audits/2026-09-09-release-2.1.6.md`.

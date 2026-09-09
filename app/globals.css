@@ -123,8 +123,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .message-bubble { max-width: 75%; white-space: pre-wrap; font-size: 17px; line-height: 1.55; padding: 12px 17px; border-radius: 26px 26px 12px 26px; background: #232329; border: 1px solid rgba(255,255,255,.035); }
 .assistant-message { width: min(760px, 92%); white-space: pre-wrap; line-height: 1.75; color: #e6e8ec; }
 .assistant-copy { min-height: 26px; }
-.thinking-block { margin-bottom: 14px; border-left: 2px solid rgb(var(--accent-bright-rgb) / .22); padding-left: 12px; }
-.thinking-block > button { padding: 2px 0; display: flex; align-items: center; gap: 7px; color: var(--muted); background: transparent; font-size: 13px; }
+.thinking-block { margin-bottom: 14px; }
+.thinking-block > button { min-height: 39px; padding: 2px 0; display: flex; align-items: center; gap: 7px; color: var(--muted); background: transparent; font-size: 13px; }
 .thinking-preview { color: #93969d; font-size: 12.5px; line-height: 1.65; max-height: 260px; overflow-y: auto; margin-top: 9px; padding: 11px 13px; white-space: pre-wrap; border-radius: 17px; background: rgba(24,24,28,.72); border: 1px solid rgba(255,255,255,.035); }
 .thinking-block.streaming { padding-left: 0; border-left: 0; }
 .thinking-block.streaming > button { color: #c9cbd1; cursor: default; }
@@ -792,7 +792,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
    2.1: temporary chats, the network mark, reasoning descriptions and time-of-day greetings.
    ============================================================================================ */
 
-.surface-actions { position: absolute; z-index: 21; top: 12px; right: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: min(320px, calc(100% - 120px)); }
+.surface-actions { position: absolute; z-index: 21; top: 12px; right: 16px; display: flex; flex-direction: row; align-items: center; gap: 6px; max-width: min(320px, calc(100% - 120px)); }
 .surface-action { min-height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 15px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--muted); background: rgba(26,26,31,.72); font-size: 12px; white-space: nowrap; transition: color .16s, border-color .16s, background .16s; }
 .surface-action:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
 .surface-action.active { color: var(--text); border-color: rgb(var(--accent-bright-rgb) / .45); background: var(--accent-soft); }
@@ -862,3 +862,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .account-card .field { margin-bottom: 0; }
 
 .surface-action.icon-only { width: 36px; padding: 0; justify-content: center; }
+
+/* Keep disclosures mounted so hiding activity preserves their open state. */
+.thinking-block .disclosure-open { transform: rotate(90deg); }
+.activity-hidden .thinking-block,
+.activity-hidden .tool-activity-group,
+.activity-hidden .transcript-tools:not(:has(.choice-response-row)) { display: none; }

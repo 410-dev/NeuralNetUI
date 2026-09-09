@@ -146,3 +146,9 @@
 - Temporary chat backgrounds use neutral grey without recolouring interactive accents. The idle heading is “안녕하세요, 여행자” and subtitle “채팅이 저장되지 않습니다”; omit the separate explanation above it.
 - An empty temporary chat offers an icon-only Return to regular chat control (with title and accessible name), preserving its draft; a started temporary chat offers Save this chat.
 - Display name belongs in its own account settings group with the same border, padding and input alignment as the password group.
+
+## 2.1.6 activity display
+
+- Use the simple Lightbulb icon for reasoning everywhere, including settings and the composer.
+- Reasoning headings align with tool headings, have no left rule or indentation, and use a right chevron when collapsed and down when expanded.
+- Once a chat has messages, place an icon-only activity visibility toggle to the right of its temporary-chat control. Hide technical records without discarding data or disclosure state; keep user question/answer bubbles visible.
