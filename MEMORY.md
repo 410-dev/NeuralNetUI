@@ -26,6 +26,7 @@
 - LM Studio discovery uses native `/api/v1` REST. Version 2.1.1 uses request-scoped SDK loading and supported chat inference for progress, with Chat Completions fallback for unsupported SDK semantics.
 - Chat admission uses a server-wide residency manager: inventory checks and load/unload mutations are serialized; aliases use their base model. Dispatched mutations retain the lock through completion even if the caller cancels.
 - Current release version: 2.1.4.
+- Version 2.1.4 MSI built and metadata verified on 2026-09-09; unsigned. Output: `installer/output/NeuralNetUI-2.1.4-x64.msi`. Validation notes: `docs/audits/2026-09-09-release-2.1.4.md`.
 - An assistant message carries `steps` (migration 10): ordered reasoning/content/tools/compaction stages. `content` and `reasoning` remain the concatenation, so copy, export and upstream history are unaffected; `lib/transcript.ts` reconstructs the old fixed layout for messages without steps.
 - Compaction decides on `projectedInputTokens(estimate, measured)` where measured comes from `contextUsage` — the same figure the composer's donut shows. Discard the measurement right after compaction replaces the message set, or the compacted request immediately re-triggers compaction. Checked both before sending and mid-stream.
 - A compaction stage opens when the wait phase turns `compacting-context` and is filled in on completion, so it shows live in place; the wait line stays quiet for that phase to avoid reporting it twice.
