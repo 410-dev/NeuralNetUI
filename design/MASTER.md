@@ -152,3 +152,10 @@
 - Use the simple Lightbulb icon for reasoning everywhere, including settings and the composer.
 - Reasoning headings align with tool headings, have no left rule or indentation, and use a right chevron when collapsed and down when expanded.
 - Once a chat has messages, place an icon-only activity visibility toggle to the right of its temporary-chat control. Hide technical records without discarding data or disclosure state; keep user question/answer bubbles visible.
+
+## 2.1.7 setting reach
+
+- Accent choosers are one component. Personal accent and the administrator-only sign-in accent use the same swatch row, custom entry and hex field, and each labels its swatches with its own heading so the two rows stay distinguishable.
+- Only the personal accent previews live while settings are open. The sign-in accent belongs to a screen that is not on show, so leave the surrounding interface alone.
+- Where a person can pin a default, an administrator gets one extra action beside it that reaches every account. Keep the personal action first and the wider one second, and let the personal action's active state be the receipt.
+- A setting an account may not change is shown, disabled, with one line saying who owns it and what to do instead. Do not hide the control.

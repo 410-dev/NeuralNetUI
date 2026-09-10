@@ -235,6 +235,23 @@ export async function changePassword(user: AuthUser, currentPassword: string, ne
   })();
 }
 
+/**
+ * Writes one preference onto every account. Only the named key is replaced, so a person's
+ * language, appearance and the other default they did not have applied to them stay as they were.
+ */
+export function overwriteUserPreference(key: "defaultModelId" | "defaultReasoningPresetId", value: string) {
+  const rows = db.prepare("SELECT id, preferences FROM users").all() as Array<{ id: string; preferences: string }>;
+  const update = db.prepare("UPDATE users SET preferences = ?, updated_at = ? WHERE id = ?");
+  const stamp = new Date().toISOString();
+  db.transaction(() => {
+    for (const row of rows) {
+      let preferences: Record<string, unknown> = {};
+      try { preferences = JSON.parse(row.preferences || "{}"); } catch { /* unreadable preferences start again from this choice */ }
+      update.run(JSON.stringify({ ...preferences, [key]: value }), stamp, row.id);
+    }
+  })();
+}
+
 export function updateUserPreferences(userId: string, displayName: string, preferences: Record<string, unknown>) {
   db.prepare("UPDATE users SET display_name = ?, preferences = ?, updated_at = ? WHERE id = ?")
     .run(displayName, JSON.stringify(preferences), new Date().toISOString(), userId);

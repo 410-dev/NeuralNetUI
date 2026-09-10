@@ -1,11 +1,11 @@
-import { DEFAULT_APPEARANCE, normalizeAppearance } from "./appearance";
+import { DEFAULT_APPEARANCE, DEFAULT_LOGIN_APPEARANCE, normalizeAppearance, normalizeLoginAppearance } from "./appearance";
 import { DEFAULT_HARNESS_SETTINGS } from "./harness";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import type { AppConfig, ConnectionConfig, ExperimentalFeatures, ModelConfig, PublicConfig, ReasoningPreset, ToolSettings } from "./types";
 import type { AuthUser } from "./auth";
-import { updateUserPreferences } from "./auth";
+import { overwriteUserPreference, updateUserPreferences } from "./auth";
 import { dataDir, db } from "./database";
 import { inferApiContextWindowTokens } from "./model-context";
 import { mergeModelPresets } from "./model-edits";
@@ -44,9 +44,13 @@ const harnessSettingsSchema = z.object({
   titleEffort: z.string().max(40), titlePrompt: z.string().trim().min(1).max(32000),
 }).default(DEFAULT_HARNESS_SETTINGS);
 const experimentalSchema = z.object({ browserTool: z.boolean().default(false), openAIProgress: z.boolean().default(false) }).default(DEFAULT_EXPERIMENTAL);
-export const configSchema = z.object({ connections: z.array(connectionSchema).min(1).max(32), profile: z.object({ name: z.string().min(1) }), preferences: preferencesSchema, toolSettings: toolSettingsSchema, harnessSettings: harnessSettingsSchema, experimental: experimentalSchema, models: z.array(modelSchema) });
+const loginAppearanceSchema = z.object({
+  accentPalette: z.enum(["blue", "violet", "teal", "amber", "rose", "graphite", "custom"]).default(DEFAULT_LOGIN_APPEARANCE.accentPalette),
+  accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default(DEFAULT_LOGIN_APPEARANCE.accentColor),
+}).default(DEFAULT_LOGIN_APPEARANCE);
+export const configSchema = z.object({ connections: z.array(connectionSchema).min(1).max(32), profile: z.object({ name: z.string().min(1) }), preferences: preferencesSchema, loginAppearance: loginAppearanceSchema, toolSettings: toolSettingsSchema, harnessSettings: harnessSettingsSchema, experimental: experimentalSchema, models: z.array(modelSchema) });
 
-const defaults: AppConfig = { connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", models: [] }], profile: { name: "User" }, preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE }, toolSettings: DEFAULT_TOOL_SETTINGS, experimental: DEFAULT_EXPERIMENTAL, models: [] };
+const defaults: AppConfig = { connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", models: [] }], profile: { name: "User" }, preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE }, loginAppearance: DEFAULT_LOGIN_APPEARANCE, toolSettings: DEFAULT_TOOL_SETTINGS, experimental: DEFAULT_EXPERIMENTAL, models: [] };
 const configPath = path.join(dataDir, "config.json");
 
 function normalizeConfig(config: AppConfig): AppConfig {
@@ -61,7 +65,7 @@ function migrateConfig(input: unknown): AppConfig {
   if (!legacy.success) throw current.error;
   const connection: ConnectionConfig = { id: "openai-default", name: "OpenAI API", driver: "openai", ...legacy.data.server, models: legacy.data.models.filter((model) => !model.isAlias).map((model) => ({ ...model, connectionId: "openai-default" })) };
   const aliases = legacy.data.models.filter((model) => model.isAlias).map((model) => ({ ...model, connectionId: "openai-default" }));
-  return normalizeConfig({ connections: [connection], profile: legacy.data.profile, preferences: legacy.data.preferences, toolSettings: legacy.data.toolSettings, experimental: DEFAULT_EXPERIMENTAL, models: aliases });
+  return normalizeConfig({ connections: [connection], profile: legacy.data.profile, preferences: legacy.data.preferences, loginAppearance: DEFAULT_LOGIN_APPEARANCE, toolSettings: legacy.data.toolSettings, experimental: DEFAULT_EXPERIMENTAL, models: aliases });
 }
 
 function claimLegacyCustomizations(config: AppConfig) {
@@ -86,18 +90,18 @@ function visiblePreset(preset: ReasoningPreset, user: AuthUser) { return preset.
 
 export function publicConfig(config: AppConfig, user: AuthUser): PublicConfig {
   const preferences: AppConfig["preferences"] = { ...config.preferences, sendReasoningToModel: typeof user.preferences.sendReasoningToModel === "boolean" ? user.preferences.sendReasoningToModel : config.preferences.sendReasoningToModel, exportReasoning: typeof user.preferences.exportReasoning === "boolean" ? user.preferences.exportReasoning : config.preferences.exportReasoning, language: user.preferences.language === "ko" || user.preferences.language === "en" ? user.preferences.language : config.preferences.language, showModelIdentifiers: typeof user.preferences.showModelIdentifiers === "boolean" ? user.preferences.showModelIdentifiers : config.preferences.showModelIdentifiers, renderStrikethrough: typeof user.preferences.renderStrikethrough === "boolean" ? user.preferences.renderStrikethrough : config.preferences.renderStrikethrough, defaultModelId: typeof user.preferences.defaultModelId === "string" ? user.preferences.defaultModelId : config.preferences.defaultModelId, defaultReasoningPresetId: typeof user.preferences.defaultReasoningPresetId === "string" ? user.preferences.defaultReasoningPresetId : config.preferences.defaultReasoningPresetId, appearance: normalizeAppearance((user.preferences.appearance as Partial<typeof DEFAULT_APPEARANCE>) || config.preferences.appearance) };
-  return { ...config, profile: { name: user.displayName }, preferences, models: config.models.filter((model) => canUseModel(model, user)).map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), connections: config.connections.map((connection) => ({ ...connection, models: connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), apiKey: "", hasApiKey: Boolean(!connection.clearApiKey && (connection.apiKey || (connection.driver === "openai" && process.env.OPENAI_API_KEY))) })), account: { id: user.id, username: user.username, displayName: user.displayName, role: user.role } };
+  return { ...config, loginAppearance: normalizeLoginAppearance(config.loginAppearance), profile: { name: user.displayName }, preferences, models: config.models.filter((model) => canUseModel(model, user)).map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), connections: config.connections.map((connection) => ({ ...connection, models: connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), apiKey: "", hasApiKey: Boolean(!connection.clearApiKey && (connection.apiKey || (connection.driver === "openai" && process.env.OPENAI_API_KEY))) })), account: { id: user.id, username: user.username, displayName: user.displayName, role: user.role } };
 }
 
 export async function writeConfigForUser(input: unknown, user: AuthUser): Promise<AppConfig> {
   const incoming = normalizeConfig(configSchema.parse(input)); const current = await readConfig(); const admin = isAdmin(user);
   updateUserPreferences(user.id, incoming.profile.name, { sendReasoningToModel: incoming.preferences.sendReasoningToModel, exportReasoning: incoming.preferences.exportReasoning, language: incoming.preferences.language, showModelIdentifiers: incoming.preferences.showModelIdentifiers, renderStrikethrough: incoming.preferences.renderStrikethrough, defaultModelId: incoming.preferences.defaultModelId, defaultReasoningPresetId: incoming.preferences.defaultReasoningPresetId, appearance: incoming.preferences.appearance });
   const mergePrivatePresets = (existing: ModelConfig, candidate?: ModelConfig) => mergeModelPresets(existing, candidate, user.id, admin);
-  const incomingConnections = new Map(incoming.connections.map((connection) => [connection.id, connection]));
   if (!admin) {
-    const connections = current.connections.map((connection) => { const candidate = incomingConnections.get(connection.id); return { ...connection, models: connection.models.map((model) => mergePrivatePresets(model, candidate?.models.find((item) => item.id === model.id))) }; });
+    // Served models, including their reasoning templates, are an administrator's to shape. A
+    // standard account only owns its aliases, so everything else is carried over untouched.
     const aliases = current.models.filter((model) => model.isAlias && model.ownerId !== user.id).concat(incoming.models.filter((model) => model.isAlias && (!model.ownerId || model.ownerId === user.id)).map((model) => ({ ...model, ownerId: user.id })));
-    return writeConfig({ ...current, connections, models: aliases });
+    return writeConfig({ ...current, models: aliases });
   }
   const existing = new Map(current.connections.map((connection) => [connection.id, connection]));
   const connections = incoming.connections.map((connection) => { const previous = existing.get(connection.id); return { ...connection, apiKey: connection.clearApiKey ? "" : connection.apiKey || previous?.apiKey || "", models: connection.models.map((model) => mergePrivatePresets(previous?.models.find((item) => item.id === model.id) || model, model)) }; });
@@ -106,6 +110,18 @@ export async function writeConfigForUser(input: unknown, user: AuthUser): Promis
   const aliasesById = new Map(incomingAliases.map((model) => [model.id, model]));
   const orderedIncoming = incoming.models.map((model) => model.isAlias ? aliasesById.get(model.id) : connections.find(c => c.id === model.connectionId)?.models.find(m => m.id === model.id)).filter((model): model is ModelConfig => Boolean(model));
   return writeConfig({ ...incoming, connections, models: [...orderedIncoming, ...protectedAliases], profile: current.profile, preferences: { ...current.preferences, ...incoming.preferences } });
+}
+
+/**
+ * Makes one choice the workspace default and stamps it onto every account, replacing only that
+ * key so a person's other saved preferences survive the change.
+ */
+export async function applyGlobalDefault(kind: "model" | "reasoning", id: string): Promise<AppConfig> {
+  const key = kind === "model" ? "defaultModelId" : "defaultReasoningPresetId";
+  const current = await readConfig();
+  const saved = await writeConfig({ ...current, preferences: { ...current.preferences, [key]: id } });
+  overwriteUserPreference(key, id);
+  return saved;
 }
 
 export function inferModel(input: string | Record<string, unknown>, driver: "openai" | "lmstudio" = "openai", connectionId?: string): ModelConfig {

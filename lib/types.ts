@@ -27,6 +27,13 @@ export interface AppearancePreferences {
   greetings: GreetingOverrides;
 }
 
+/** Accent for the sign-in screen. One administrator choice shown to everyone, signed in or not. */
+export interface LoginAppearance {
+  accentPalette: AccentPaletteId;
+  /** Used when the palette is "custom". */
+  accentColor: string;
+}
+
 export interface ReasoningPreset {
   id: string;
   name: string;
@@ -102,6 +109,8 @@ export interface AppConfig {
     defaultReasoningPresetId?: string;
     appearance: AppearancePreferences;
   };
+  /** Workspace-wide, never overridden per account. */
+  loginAppearance: LoginAppearance;
   harnessSettings?: HarnessSettings;
   toolSettings: ToolSettings;
   experimental: ExperimentalFeatures;

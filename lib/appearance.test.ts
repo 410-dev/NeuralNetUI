@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ACCENT_PALETTES, accentColorOf, accentVariables, defaultReasoningNote, normalizeAppearance, normalizeHexColor, normalizeReasoningNotes, reasoningNote, reasoningNoteKey, revealStep } from "./appearance.ts";
+import { ACCENT_PALETTES, accentColorOf, accentVariables, defaultReasoningNote, DEFAULT_LOGIN_APPEARANCE, normalizeAppearance, normalizeHexColor, normalizeLoginAppearance, normalizeReasoningNotes, reasoningNote, reasoningNoteKey, revealStep } from "./appearance.ts";
 
 test("hex normalization accepts short forms and rejects anything else", () => {
   assert.equal(normalizeHexColor("#ABCDEF"), "#abcdef");
@@ -68,4 +68,12 @@ test("appearance preferences fall back to defaults and clamp the chunk size", ()
 test("LM Studio progress display validates saved modes", () => {
   for (const mode of ["text", "percent", "donut", "both"] as const) assert.equal(normalizeAppearance({ lmStudioProgress: mode }).lmStudioProgress, mode);
   assert.equal(normalizeAppearance({ lmStudioProgress: "invalid" as never }).lmStudioProgress, "both");
+});
+
+test("the sign-in accent keeps only known palettes and resolves to one colour", () => {
+  assert.deepEqual(normalizeLoginAppearance(undefined), DEFAULT_LOGIN_APPEARANCE);
+  assert.equal(normalizeLoginAppearance({ accentPalette: "nope" as never }).accentPalette, "blue");
+  assert.equal(normalizeLoginAppearance({ accentPalette: "custom", accentColor: "f0f" }).accentColor, "#ff00ff");
+  assert.equal(accentColorOf(normalizeLoginAppearance({ accentPalette: "custom", accentColor: "#123456" })), "#123456");
+  assert.equal(accentColorOf(normalizeLoginAppearance({ accentPalette: "rose", accentColor: "#123456" })), ACCENT_PALETTES.find((p) => p.id === "rose")!.hex);
 });

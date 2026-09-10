@@ -1,5 +1,5 @@
 import { normalizeGreetings } from "./greetings.ts";
-import type { AppearancePreferences, AccentPaletteId, Locale } from "./types.ts";
+import type { AppearancePreferences, AccentPaletteId, LoginAppearance, Locale } from "./types.ts";
 
 /** Named accent choices. The custom entry carries no colour of its own; the saved hex supplies it. */
 export const ACCENT_PALETTES: Array<{ id: AccentPaletteId; hex: string }> = [
@@ -21,6 +21,12 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   showReasoningNotes: true,
   reasoningNotes: {},
   greetings: {},
+};
+
+/** The sign-in screen shares the accent vocabulary but keeps its own workspace-wide choice. */
+export const DEFAULT_LOGIN_APPEARANCE: LoginAppearance = {
+  accentPalette: DEFAULT_APPEARANCE.accentPalette,
+  accentColor: DEFAULT_APPEARANCE.accentColor,
 };
 
 /** Effort keys that share one description. "off" and "none" are both the fast path. */
@@ -66,7 +72,7 @@ export function normalizeHexColor(value: string | undefined, fallback = DEFAULT_
 }
 
 /** The colour the interface should use, resolving the custom palette to its saved hex. */
-export function accentColorOf(preferences: Partial<AppearancePreferences> | undefined): string {
+export function accentColorOf(preferences: Partial<Pick<AppearancePreferences, "accentPalette" | "accentColor">> | undefined): string {
   const id = preferences?.accentPalette || DEFAULT_APPEARANCE.accentPalette;
   const named = ACCENT_PALETTES.find((palette) => palette.id === id);
   return normalizeHexColor(named ? named.hex : preferences?.accentColor);
@@ -127,9 +133,18 @@ export function revealStep(shown: string, target: string, chunkSize: number): st
   return target.slice(0, Math.min(target.length, shown.length + Math.max(1, Math.floor(chunkSize))));
 }
 
+const knownPalette = (value: string | undefined): value is AccentPaletteId =>
+  value === "custom" || ACCENT_PALETTES.some((entry) => entry.id === value);
+
+export function normalizeLoginAppearance(input: Partial<LoginAppearance> | undefined): LoginAppearance {
+  return {
+    accentPalette: knownPalette(input?.accentPalette) ? input!.accentPalette! : DEFAULT_LOGIN_APPEARANCE.accentPalette,
+    accentColor: normalizeHexColor(input?.accentColor),
+  };
+}
+
 export function normalizeAppearance(input: Partial<AppearancePreferences> | undefined): AppearancePreferences {
-  const palette = ACCENT_PALETTES.some((entry) => entry.id === input?.accentPalette) || input?.accentPalette === "custom"
-    ? input!.accentPalette! : DEFAULT_APPEARANCE.accentPalette;
+  const palette = knownPalette(input?.accentPalette) ? input!.accentPalette! : DEFAULT_APPEARANCE.accentPalette;
   return {
     lmStudioProgress: ["text", "percent", "donut", "both"].includes(input?.lmStudioProgress || "") ? input!.lmStudioProgress! : "both",
     accentPalette: palette,
