@@ -51,6 +51,7 @@
 - The browser frame represents the exact Chromium page shared with the model. Preserve aspect ratio, map pointer and wheel coordinates back to the fixed browser viewport, and keep navigation and focused-field text entry immediately adjacent to the frame.
 - Put a horizontally scrollable tab strip above navigation. Titles come from pages, while model-assigned labels lead and notes remain available as concise tab context. New-tab availability must visibly follow the administrator's session limit.
 - Human and model controls operate on the same active tab. The model can list, label, note, open, switch, and close tabs by stable per-session identifiers; closing the last tab ends that browser session.
+- Browser tabs belong to the conversation rather than one assistant response. Keep them available across completed responses and periods of inactivity; only an explicit user/model close, last-tab close, or conversation deletion ends the session. Capacity limits reject new sessions instead of evicting existing work.
 - Human handoff is explicit: state why the model is waiting and provide one completion action. Closing the visual panel does not claim the task is complete or discard the shared session.
 - Browser frames and controls are authenticated conversation surfaces, not public media endpoints. Keep ownership checks and public-network navigation policy active for every operation.
 
@@ -117,6 +118,7 @@
 - Consecutive reasoning/tool folds use a compact gap. Keep a slightly larger, but still compact, gap where delivered prose meets a technical fold so the content boundary remains legible.
 - `content` and `reasoning` stay the concatenation of every stage, so copying, export and upstream history never depend on the transcript.
 - Context compaction is a stage of the answer, not a status line. It folds like a reasoning block and holds up to two panes: the compaction model's own reasoning and the summary that was kept. Never report it twice — while a stage is showing, the wait line stays quiet.
+- While compaction is active, keep its fold open and stream both the compaction model's reasoning and partial summary into their final panes.
 - Messages written before the transcript existed carry no stages; reconstruct their fixed layout rather than dropping their content.
 
 ## Context compaction
@@ -152,6 +154,7 @@
 - Keep progress on the existing quiet status line: neutral 16px donut and tabular grey percentage, configurable under Appearance.
 - Never invent a completion percentage from elapsed time or token usage. Unavailable progress keeps the waiting indicator with a short unsupported label.
 - Context disclosure shows input, response and reasoning in aligned white/grey rows. Identify history/draft values as estimates and recalculate immediately when prior reasoning is toggled.
+- Give tool calls/results their own context-disclosure row. As soon as active compaction opens, replace every covered response/reasoning/tool estimate with the partial summary estimate rather than waiting for generation to finish.
 
 - Context compaction places compact/resume prompt editors side by side on desktop and vertically on mobile. Show template placeholders and the per-response resume cap alongside the threshold. Keep compaction activity on the existing wait line.
 

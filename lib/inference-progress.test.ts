@@ -6,6 +6,7 @@ test("native inference never drops unsupported reasoning semantics", () => {
   assert.equal(nativeEligibility([{ role: "user", content: "hello" }], "off"), true);
   assert.equal(nativeEligibility([], "high"), false);
   assert.equal(nativeEligibility([{ role: "assistant", content: "answer", reasoning_content: "private history" }], "on"), false);
+  assert.equal(nativeEligibility([{ role: "assistant", content: "", reasoning_content: "planning", tool_calls: [{ id: "c1" }] }], "on"), true);
 });
 test("progress accepts documented event values only", () => {
   assert.deepEqual(progressEvent({ type: "prompt_processing.progress", progress: .43 }), { phase: "processing-prompt", progress: .43 });
@@ -29,5 +30,9 @@ test("native history preserves roles, tool IDs and image parts", async () => {
   assert.equal(history[1].content[1].type, "file");
   assert.deepEqual(history[2].content[0], { type: "toolCallRequest", toolCallRequest: { id: "c1", type: "function", name: "clock", arguments: {} } });
   assert.deepEqual(history[3].content[0], { type: "toolCallResult", content: "noon", toolCallId: "c1" });
+  const reasoningToolRound = await nativeHistory([
+    { role: "assistant", content: "", reasoning_content: "hidden planning", tool_calls: [{ id: "c2", type: "function", function: { name: "clock", arguments: "{}" } }] },
+  ], async () => { throw Error("no image expected"); });
+  assert.deepEqual(reasoningToolRound[0].content[0], { type: "toolCallRequest", toolCallRequest: { id: "c2", type: "function", name: "clock", arguments: {} } });
   await assert.rejects(nativeHistory([{ role: "user", content: [{ type: "image_url", image_url: { url: "http://example.com/image" } }] }], async () => { throw Error("must not fetch"); }));
 });

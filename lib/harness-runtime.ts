@@ -7,6 +7,7 @@ import { effectiveContextWindowTokens } from "./model-context";
 import { reasoningEffort } from "./model-edits";
 import { modelResidency } from "./residency-runtime";
 import { createResidencyAdapter } from "./residency-adapter";
+import { readSsePayload } from "./stream-protocol";
 import type { AppConfig, ModelConfig, ChatWaitPhase } from "./types";
 
 type Message = { role: string; content: unknown; tool_calls?: unknown };
@@ -20,7 +21,35 @@ function taskModel(ctx: Context, id: string) {
 
 export type HarnessResult = { text: string; reasoning: string };
 
-export async function harnessCompletion(ctx: Context, id: string, effortValue: string, prompt: string, content: string, maxTokens: number): Promise<HarnessResult> {
+async function readHarnessStream(response: Response, onUpdate: (result: HarnessResult) => void): Promise<HarnessResult> {
+  if (!response.body) throw new Error("Harness generation returned no response stream.");
+  const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
+  let text = ""; let reasoning = ""; let finished = false; let finishReason = "";
+  const consume = (record: string) => {
+    const data = record.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n").trim();
+    if (!data) return;
+    const payload = readSsePayload(data);
+    if (payload === "done") { finished = true; return; }
+    const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }> : [];
+    const delta = choices[0]?.delta || {};
+    const textDelta = typeof delta.content === "string" ? delta.content : "";
+    const reasoningDelta = typeof (delta.reasoning_content ?? delta.reasoning) === "string" ? String(delta.reasoning_content ?? delta.reasoning) : "";
+    if (choices[0]?.finish_reason) finishReason = String(choices[0].finish_reason);
+    if (textDelta || reasoningDelta) { text += textDelta; reasoning += reasoningDelta; onUpdate({ text, reasoning }); }
+  };
+  try {
+    while (!finished) {
+      const { done, value } = await reader.read(); if (done) break;
+      buffer += decoder.decode(value, { stream: true }); const records = buffer.split(/\r?\n\r?\n/); buffer = records.pop() || "";
+      for (const record of records) { consume(record); if (finished) break; }
+    }
+    buffer += decoder.decode(); if (!finished && buffer.trim()) consume(buffer);
+  } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
+  if (!text.trim() || finishReason === "length") throw new Error("Harness returned an empty or truncated result.");
+  return { text: text.trim(), reasoning: reasoning.trim() };
+}
+
+export async function harnessCompletion(ctx: Context, id: string, effortValue: string, prompt: string, content: string, maxTokens: number, onUpdate?: (result: HarnessResult) => void): Promise<HarnessResult> {
   const model = taskModel(ctx, id);
   const connection = connectionForModel(ctx.config.connections, model);
   if (!connection) throw new Error("Harness connection is unavailable.");
@@ -37,8 +66,9 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
     ctx.onPhase(prompt === (ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS).compactPrompt ? "compacting-context" : "preparing-response");
     const effort = reasoningEffort(model, { id: "harness", name: "Harness", kind: "builtin", effort: effortValue === "off" && model.reasoningEfforts?.includes("none") ? "none" : effortValue });
     const response = await fetch(chatEndpoint(connection.driver, connection.baseUrl), { method: "POST", headers, signal,
-      body: JSON.stringify({ model: model.sourceModel, stream: false, messages: [{role:"system", content:prompt}, {role:"user", content}], max_tokens:maxTokens, ...(effort ? {reasoning_effort:effort} : {}) }) });
+      body: JSON.stringify({ model: model.sourceModel, stream: Boolean(onUpdate), ...(onUpdate ? { stream_options: { include_usage: true } } : {}), messages: [{role:"system", content:prompt}, {role:"user", content}], max_tokens:maxTokens, ...(effort ? {reasoning_effort:effort} : {}) }) });
     if (!response.ok) throw new Error(`Harness generation failed (${response.status}).`);
+    if (onUpdate) return readHarnessStream(response, onUpdate);
     const result = await response.json();
     const choice = result.choices?.[0];
     const text = choice?.message?.content;
@@ -50,9 +80,10 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
 
 const fingerprint = (messages: Message[]) => createHash("sha256").update(JSON.stringify(messages)).digest("hex");
 
-export type CompactionRecord = { summary: string; reasoning: string; seconds: number };
+export type CompactionUpdate = { summary: string; reasoning: string };
+export type CompactionRecord = CompactionUpdate & { seconds: number };
 
-export async function prepareContext(ctx: Context, branchId: string, original: Message[], persistSummary = true, overhead = 0, measured?: number, onCompaction?: (record: CompactionRecord) => void): Promise<Message[]> {
+export async function prepareContext(ctx: Context, branchId: string, original: Message[], persistSummary = true, overhead = 0, measured?: number, onCompaction?: (record: CompactionRecord) => void, onUpdate?: (record: CompactionUpdate) => void): Promise<Message[]> {
   const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const window = effectiveContextWindowTokens(ctx.model, ctx.config.models);
   if (!window) return original;
@@ -72,7 +103,7 @@ export async function prepareContext(ctx: Context, branchId: string, original: M
   const lastUser = history.findLastIndex(m => m.role === "user");
   if (covered < lastUser) {
     const started = performance.now();
-    const compaction = await summarizeContext(ctx, {summary, history: history.slice(covered, lastUser)});
+    const compaction = await summarizeContext(ctx, {summary, history: history.slice(covered, lastUser)}, onUpdate);
     summary = compaction.summary;
     covered = lastUser;
     onCompaction?.({ ...compaction, seconds: (performance.now() - started) / 1000 });
@@ -85,7 +116,7 @@ export async function prepareContext(ctx: Context, branchId: string, original: M
 }
 
 // Bound each summary request even when a single interrupted reasoning turn is huge.
-async function summarizeContext(ctx: Context, data: unknown): Promise<{ summary: string; reasoning: string }> {
+async function summarizeContext(ctx: Context, data: unknown, onUpdate?: (record: CompactionUpdate) => void): Promise<{ summary: string; reasoning: string }> {
   const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const window = effectiveContextWindowTokens(taskModel(ctx, settings.compactModelId), ctx.config.models)
     || effectiveContextWindowTokens(ctx.model, ctx.config.models)!;
@@ -106,7 +137,10 @@ async function summarizeContext(ctx: Context, data: unknown): Promise<{ summary:
     if (!low) throw new Error("The compaction model context is too short for the summary prompt.");
     const fragment = serialized.slice(offset, offset + low);
     const result = await harnessCompletion(ctx, settings.compactModelId, settings.compactEffort, settings.compactPrompt,
-      JSON.stringify({summary, fragment}), output);
+      JSON.stringify({summary, fragment}), output, onUpdate ? partial => onUpdate({
+        summary: partial.text || summary,
+        reasoning: [reasoning, partial.reasoning].filter(Boolean).join("\n\n"),
+      }) : undefined);
     summary = result.text;
     if (result.reasoning) reasoning = reasoning ? `${reasoning}\n\n${result.reasoning}` : result.reasoning;
     offset += low;
@@ -114,11 +148,11 @@ async function summarizeContext(ctx: Context, data: unknown): Promise<{ summary:
   return { summary, reasoning };
 }
 
-export async function compactForResume(ctx: Context, messages: Message[], user?: Message, onCompaction?: (record: CompactionRecord) => void): Promise<Message[]> {
+export async function compactForResume(ctx: Context, messages: Message[], user?: Message, onCompaction?: (record: CompactionRecord) => void, onUpdate?: (record: CompactionUpdate) => void): Promise<Message[]> {
   const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const systems = messages.filter(m => m.role === "system");
   const started = performance.now();
-  const compaction = await summarizeContext(ctx, messages.filter(m => m.role !== "system"));
+  const compaction = await summarizeContext(ctx, messages.filter(m => m.role !== "system"), onUpdate);
   const summary = compaction.summary;
   onCompaction?.({ ...compaction, seconds: (performance.now() - started) / 1000 });
   const content = user?.content;

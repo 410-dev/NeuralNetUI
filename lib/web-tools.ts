@@ -33,7 +33,7 @@ export function toolDefinitions(enabled: EnabledWebTools, settings: ToolSettings
     type: "function",
     function: {
       name: "browser",
-      description: `Control a real JavaScript-enabled browser for pages that visit_page cannot render. One session supports up to ${settings.maxBrowserTabs} tabs. Open a session, inspect and interact with its active tab, and use list_tabs, new_tab, switch_tab, close_tab, and set_tab_metadata to organize parallel work. Tab listings include title, URL, model-assigned label, and note. Reuse session_id and tab_id values exactly. If a CAPTCHA or another step needs the person, use request_user; they can operate the same tabs in split view and mark the handoff complete. Close the session when finished.`,
+      description: `Control a real JavaScript-enabled browser for pages that visit_page cannot render. One session supports up to ${settings.maxBrowserTabs} tabs. Open a session, inspect and interact with its active tab, and use list_tabs, new_tab, switch_tab, close_tab, and set_tab_metadata to organize parallel work. Tab listings include title, URL, model-assigned label, and note. Reuse session_id and tab_id values exactly across tool rounds and later responses in this conversation. If a CAPTCHA or another step needs the person, use request_user; they can operate the same tabs in split view and mark the handoff complete. Tabs remain open after a response ends; close a tab or session only when it is no longer needed.`,
       parameters: {
         type: "object",
         properties: {

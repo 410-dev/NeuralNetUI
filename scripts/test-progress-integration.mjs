@@ -73,7 +73,6 @@ try {
   assert.deepEqual(requests, ['/v1/chat/completions']);
   config.experimental.openAIProgress = true; config = await json('/api/config', 'PUT', config);
   const unsupported = await chat('standard', 'unsupported extension');
-  assert.ok(unsupported.snapshots.some(s => s.progressUnavailable));
   assert.ok(!unsupported.snapshots.some(s => s.waitProgress !== undefined));
   assert.deepEqual(requests.slice(1), ['/api/v1/models', '/v1/chat/completions']);
   for (const mode of ['text', 'percent', 'donut', 'both']) {
@@ -100,16 +99,19 @@ try {
     assert.ok(thinking.message.reasoning && thinking.message.reasoningTokens > 0);
     const tools = await chat(lm.id, 'Call the get_current_time tool to tell me the current time. Do not guess.', { tools: { currentTime: true } });
     assert.ok(tools.message.toolEvents?.some(e => e.name === 'get_current_time' && e.status === 'completed'));
+    const completedTool = tools.snapshots.findIndex(snapshot => snapshot.message.toolEvents?.some(event => event.name === 'get_current_time' && event.status === 'completed'));
+    assert.ok(completedTool >= 0);
+    assert.ok(tools.snapshots.slice(completedTool + 1).some(snapshot => snapshot.waitPhase === 'processing-prompt' && typeof snapshot.waitProgress === 'number'), 'prompt progress was not published after the tool result');
     await chat(lm.id, 'Count from 1 to 10000 and explain each number in detail.', { effort: 'on', stop: true });
     const fallback = await chat(lm.id, 'What is 2+3?', { prior: [{ ...thinking.message, id: 'prior-think' }], sendReasoning: true });
-    assert.ok(fallback.snapshots.some(s => s.progressUnavailable));
+    assert.ok(!fallback.snapshots.some(s => s.waitProgress !== undefined));
     config.connections[0].driver = 'openai'; config.connections[0].baseUrl = 'http://localhost:1234/v1'; config.experimental.openAIProgress = true;
     config = await json('/api/config', 'PUT', config);
     const expanded = await chat(lm.id, 'Reply with OK.');
     assert.ok(expanded.snapshots.some(s => s.waitPhase === 'processing-prompt' && typeof s.waitProgress === 'number'));
     config.connections[0].driver = 'lmstudio'; config.connections[0].baseUrl = 'http://localhost:1234';
     config = await json('/api/config', 'PUT', config);
-    console.log('PASS live LM Studio progress, off/on reasoning, history, tools, cancellation, reasoning-history fallback and OpenAI experiment');
+    console.log('PASS live LM Studio progress, off/on reasoning, history, post-tool prompt progress, cancellation, reasoning-history fallback and OpenAI experiment');
   }
   console.log(`QA app: ${root} | user: progressqa | password: LocalProgressQA-211 | data: ${data}`);
   if (keep) await new Promise(() => {});

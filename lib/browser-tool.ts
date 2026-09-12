@@ -7,7 +7,6 @@ import type { ModelContentPart } from "./document-processing";
 import type { ToolSettings } from "./types";
 
 const ACTION_TIMEOUT_MS = 20_000;
-const SESSION_TTL_MS = 10 * 60_000;
 const MAX_SESSIONS = 8;
 const MAX_SESSIONS_PER_OWNER = 2;
 const MAX_TEXT_CHARACTERS = 24_000;
@@ -189,7 +188,13 @@ async function browserInstance() {
         ...(browserIsHeaded() ? ["--window-position=-32000,-32000", `--window-size=${VIEWPORT.width},${VIEWPORT.height}`] : []),
       ],
     });
-    browser.on("disconnected", () => { if (sharedBrowser === browser) sharedBrowser = undefined; });
+    browser.on("disconnected", () => {
+      if (sharedBrowser !== browser) return;
+      sharedBrowser = undefined;
+      // The pages are already gone; release their registry slots so a crashed browser cannot
+      // permanently exhaust the explicit session limits.
+      sessions.clear();
+    });
     sharedBrowser = browser;
     return browser;
   })().finally(() => { launchPromise = undefined; });
@@ -203,11 +208,6 @@ async function closeSession(session: BrowserSession) {
     const browser = sharedBrowser; sharedBrowser = undefined;
     await browser.close().catch(() => undefined);
   }
-}
-
-async function cleanupSessions() {
-  const expired = [...sessions.values()].filter((session) => Date.now() - session.touchedAt > SESSION_TTL_MS);
-  await Promise.all(expired.map(closeSession));
 }
 
 async function guardRoute(route: Route) {
@@ -255,13 +255,9 @@ function ownedTab(session: BrowserSession, tabId: string) {
 }
 
 async function newSession(ownerKey: string, maxTabs: number) {
-  await cleanupSessions();
-  const owned = [...sessions.values()].filter((session) => session.ownerKey === ownerKey).sort((left, right) => left.touchedAt - right.touchedAt);
-  while (owned.length >= MAX_SESSIONS_PER_OWNER) await closeSession(owned.shift()!);
-  if (sessions.size >= MAX_SESSIONS) {
-    const oldest = [...sessions.values()].sort((left, right) => left.touchedAt - right.touchedAt)[0];
-    if (oldest) await closeSession(oldest);
-  }
+  const owned = [...sessions.values()].filter((session) => session.ownerKey === ownerKey);
+  if (owned.length >= MAX_SESSIONS_PER_OWNER) throw new Error(`This conversation is limited to ${MAX_SESSIONS_PER_OWNER} browser sessions. Close an existing browser session before opening another.`);
+  if (sessions.size >= MAX_SESSIONS) throw new Error(`The browser is limited to ${MAX_SESSIONS} active sessions. Close an existing browser session before opening another.`);
   const context = await (await browserInstance()).newContext({ viewport: VIEWPORT, acceptDownloads: false, serviceWorkers: "block" });
   await context.route("**/*", guardRoute);
   await context.routeWebSocket("**/*", (webSocket) => webSocket.close());
@@ -277,7 +273,7 @@ async function newSession(ownerKey: string, maxTabs: number) {
 
 function ownedSession(ownerKey: string, sessionId: string) {
   const session = sessions.get(sessionId);
-  if (!session || session.ownerKey !== ownerKey) throw new Error("Browser session was not found or has expired.");
+  if (!session || session.ownerKey !== ownerKey) throw new Error("Browser session was not found or does not belong to this conversation.");
   session.touchedAt = Date.now();
   return session;
 }
@@ -287,8 +283,9 @@ export function assertOwnedBrowserSession(ownerKey: string, sessionId: string) {
 }
 
 function conversationSession(userId: string, conversationId: string, sessionId?: string) {
-  const prefix = `${userId}:${conversationId}:`;
-  const matching = [...sessions.values()].filter((session) => session.ownerKey.startsWith(prefix) && (!sessionId || session.id === sessionId));
+  const ownerKey = `${userId}:${conversationId}`;
+  const legacyPrefix = `${ownerKey}:`;
+  const matching = [...sessions.values()].filter((session) => (session.ownerKey === ownerKey || session.ownerKey.startsWith(legacyPrefix)) && (!sessionId || session.id === sessionId));
   const session = matching.sort((left, right) => right.touchedAt - left.touchedAt)[0];
   if (session) session.touchedAt = Date.now();
   return session;
@@ -346,7 +343,6 @@ async function viewState(session?: BrowserSession): Promise<BrowserViewState> {
 }
 
 export async function browserViewState(userId: string, conversationId: string) {
-  await cleanupSessions();
   return viewState(conversationSession(userId, conversationId));
 }
 
@@ -504,5 +500,6 @@ export async function executeBrowserTool(ownerKey: string, rawArguments: string,
 }
 
 export async function closeBrowserSessions(ownerKey: string) {
-  await Promise.all([...sessions.values()].filter((session) => session.ownerKey === ownerKey).map(closeSession));
+  const legacyPrefix = `${ownerKey}:`;
+  await Promise.all([...sessions.values()].filter((session) => session.ownerKey === ownerKey || session.ownerKey.startsWith(legacyPrefix)).map(closeSession));
 }

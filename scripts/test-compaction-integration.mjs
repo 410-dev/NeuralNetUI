@@ -16,8 +16,17 @@ const mock = http.createServer(async (req, res) => {
   if (req.url !== '/v1/chat/completions') { res.writeHead(404); return res.end('{}'); }
   const body = JSON.parse(raw);
   requests.push(body);
-  if (!body.stream && mode === 'failure') { res.writeHead(500); return res.end('failed'); }
-  if (!body.stream) { res.setHeader('Content-Type', 'application/json'); return res.end(JSON.stringify({choices:[{message:{content:'Short summary of progress.'},finish_reason:'stop'}]})); }
+  const compaction = body.messages?.[0]?.role === 'system' && String(body.messages[0].content).includes('Summarize the conversation');
+  if (compaction && mode === 'failure') { res.writeHead(500); return res.end('failed'); }
+  if (compaction) {
+    assert.equal(body.stream, true);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.write(`data: ${JSON.stringify({choices:[{delta:{reasoning_content:'Condensing context. '}}]})}\n\n`);
+    await delay(120);
+    res.write(`data: ${JSON.stringify({choices:[{delta:{content:'Short summary '}}]})}\n\n`);
+    await delay(120);
+    return res.end(`data: ${JSON.stringify({choices:[{delta:{content:'of progress.'},finish_reason:'stop'}]})}\n\ndata: [DONE]\n\n`);
+  }
   streams++;
   res.setHeader('Content-Type', 'text/event-stream');
   if ((mode === 'reasoning' || mode === 'content' || mode === 'limit' || mode === 'failure' || mode === 'zero' || mode === 'tool') && (streams === 1 || mode === 'limit')) {
@@ -84,18 +93,20 @@ try {
     const prior = scenario === 'presend' ? [{id:'old-u',role:'user',content:'old'.repeat(2500),createdAt:new Date().toISOString()},{id:'old-a',role:'assistant',content:'previous',createdAt:new Date().toISOString()}] : [];
     const result = await chat('standard','Original $& %COMPRESSED% request',{prior,expected:['limit','failure','zero'].includes(scenario) ? 'error' : 'completed'});
     const bodies = requests.filter(x => typeof x === 'object');
-    for (const request of bodies.filter(x => !x.stream)) assert.ok(estimateTokens(request.messages) + request.max_tokens < 4096);
+    const compactions = bodies.filter(x => x.messages?.[0]?.role === 'system' && String(x.messages[0].content).includes('Summarize the conversation'));
+    for (const request of compactions) assert.ok(estimateTokens(request.messages) + request.max_tokens < 4096);
     if (scenario === 'tool') assert.equal(result.message.toolEvents.length,0);
     if (scenario === 'zero') { assert.equal(streams,1); assert.equal(bodies.length,1); assert.match(result.error,/compaction|압축/i); console.log('PASS zero'); continue; }
-    assert.ok(bodies.some(x => x.stream === false), scenario);
+    assert.ok(compactions.length > 0, scenario);
     if (scenario === 'failure') { assert.equal(streams,1); assert.match(result.error,/Harness generation failed/); console.log('PASS failure'); continue; }
-    if (scenario === 'presend') assert.equal(bodies[0].stream,false);
+    assert.ok(result.snapshots.some(snapshot => snapshot.waitPhase === 'compacting-context' && snapshot.message.steps?.some(step => step.kind === 'compaction' && step.seconds === undefined && (step.reasoning || step.summary))), `${scenario}: live compaction output was not published`);
+    if (scenario === 'presend') assert.ok(compactions.includes(bodies[0]));
     else {
       assert.equal(streams,2);
-      const resumed = bodies.filter(x => x.stream)[1];
+      const resumed = bodies.filter(x => x.stream && !compactions.includes(x))[1];
       assert.match(JSON.stringify(resumed.messages),/SUMMARY=Short summary of progress/);
       assert.match(JSON.stringify(resumed.messages),/USER=Original \$& %COMPRESSED% request/);
-      assert.ok(bodies.filter(x => !x.stream).some(x => JSON.stringify(x.messages).includes('xxxx')));
+      assert.ok(compactions.some(x => JSON.stringify(x.messages).includes('xxxx')));
     }
     if (scenario === 'limit') assert.match(result.error,/compaction|압축/i);
     console.log('PASS',scenario);

@@ -2,7 +2,7 @@ import { progressEvent } from "./inference-progress";
 import { nativeChatResponse } from "./lm-studio-progress";
 import { DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rollingMessages, contextThresholdReached } from "./harness";
 import { contextUsage } from "./context-usage";
-import { harnessCompletion, prepareContext, compactForResume, type CompactionRecord } from "./harness-runtime";
+import { harnessCompletion, prepareContext, compactForResume, type CompactionRecord, type CompactionUpdate } from "./harness-runtime";
 import { effectiveContextWindowTokens } from "./model-context";
 import { db } from "./database";
 import { registerChatDisposal } from "./chat-disposal";
@@ -17,7 +17,7 @@ import { createResidencyAdapter } from "./residency-adapter";
 import { modelResidency } from "./residency-runtime";
 import { progressFetch, withSlowProgress } from "./chat-progress";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
-import { assertOwnedBrowserSession, closeBrowserSessions, executeBrowserTool } from "./browser-tool";
+import { assertOwnedBrowserSession, executeBrowserTool } from "./browser-tool";
 import type { ChatWaitPhase, Conversation, MessageStep, StoredMessage, ToolEvent, ToolSettings } from "./types";
 import type { ModelContentPart } from "./document-processing";
 
@@ -121,6 +121,15 @@ function completeCompaction(job: ChatJob, record: CompactionRecord) {
   const open = steps.findLastIndex(step => step.kind === "compaction" && step.seconds === undefined);
   if (open >= 0) steps[open] = finished; else steps.push(finished);
   job.message = { ...job.message, steps };
+}
+
+/** Streams the compaction model into the same open transcript fold that completion finalizes. */
+function updateCompaction(job: ChatJob, record: CompactionUpdate) {
+  const steps = job.message.steps ? [...job.message.steps] : [];
+  let open = steps.findLastIndex(step => step.kind === "compaction" && step.seconds === undefined);
+  if (open < 0) { steps.push({ kind: "compaction" }); open = steps.length - 1; }
+  steps[open] = { kind: "compaction", ...(record.summary ? { summary: record.summary } : {}), ...(record.reasoning ? { reasoning: record.reasoning } : {}) };
+  job.message = { ...job.message, steps }; broadcast(job);
 }
 
 function snapshot(job: ChatJob): ChatJobSnapshot {
@@ -341,7 +350,7 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
     return { result: await waitForBrowser(job, call) };
   }
   if (call.function.name === "browser" && enabled.browser) {
-    const ownerKey = `${job.userId}:${job.input.conversationId}:${job.message.id}`;
+    const ownerKey = `${job.userId}:${job.input.conversationId}`;
     if (String(args.action || "").toLowerCase() === "request_user") {
       const sessionId = String(args.session_id || "");
       assertOwnedBrowserSession(ownerKey, sessionId);
@@ -397,7 +406,7 @@ async function run(job: ChatJob) {
     let measuredInput = contextUsage(branchMessages, job.input.sendReasoning === true, "", systemPrompt).total;
     let compactedBeforeSending = false;
     messages = await prepareContext(harnessContext, job.input.branchId, messages, true, estimateTokens(tools), measuredInput,
-      record => { compactedBeforeSending = true; completeCompaction(job, record); });
+      record => { compactedBeforeSending = true; completeCompaction(job, record); }, record => updateCompaction(job, record));
     // A send-time compaction happened before any output, so it opens the transcript.
     if (compactedBeforeSending) { measuredInput = 0; broadcast(job, true); }
     job.message.contextTokens = estimateTokens(messages); broadcast(job, true);
@@ -429,7 +438,7 @@ async function run(job: ChatJob) {
       if (contextWindow && turn > 0 && harness.contextMode === "compacting" && projectedInput >= Math.min(contextWindow * .95, contextWindow * harness.compactThreshold / 100)) {
         releaseModel?.(); releaseModel = undefined;
         if (++compactionResumes > harness.maxCompactionResumes) throw compactionError();
-        messages = await compactForResume(harnessContext, messages, originalUser, recordCompaction);
+        messages = await compactForResume(harnessContext, messages, originalUser, recordCompaction, record => updateCompaction(job, record));
         measuredInput = 0;
         if (contextThresholdReached(estimateTokens(messages) + estimateTokens(tools), contextWindow, harness.compactThreshold)) throw compactionError();
         projectedInput = estimateTokens(messages) + estimateTokens(tools);
@@ -453,7 +462,7 @@ async function run(job: ChatJob) {
         // Incomplete tool arguments are historical data only; never execute them.
         messages.push({ role: "assistant", content: result.content, reasoning_content: result.reasoning,
           ...(result.calls.length ? { tool_calls: result.calls } : {}) });
-        messages = await compactForResume(harnessContext, messages, originalUser, recordCompaction);
+        messages = await compactForResume(harnessContext, messages, originalUser, recordCompaction, record => updateCompaction(job, record));
         measuredInput = 0;
         if (contextThresholdReached(estimateTokens(messages) + estimateTokens(tools), contextWindow, harness.compactThreshold)) throw compactionError();
         releaseModel = await acquireModel();
@@ -499,7 +508,6 @@ async function run(job: ChatJob) {
     await persist(job).catch(() => undefined); broadcast(job, true); finishSubscribers(job);
   } finally {
     releaseModel?.();
-    await closeBrowserSessions(`${job.userId}:${job.input.conversationId}:${job.message.id}`).catch(() => undefined);
     job.waiting.clear();
     job.input = { ...job.input, messages: [] };
     job.conversation = { ...job.conversation, branches: [] };

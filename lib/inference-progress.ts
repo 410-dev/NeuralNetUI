@@ -6,7 +6,7 @@ export type InferenceMessage = { role: string; content: unknown; reasoning_conte
 // SDK 1.5.0 cannot represent separate reasoning history or named effort levels. Preserve
 // these requests through Chat Completions rather than silently changing model input.
 export function nativeEligibility(messages: InferenceMessage[], effort?: string) {
-  return (!effort || ["off", "on", "none"].includes(effort)) && !messages.some(m => Boolean(m.reasoning_content));
+  return (!effort || ["off", "on", "none"].includes(effort)) && !messages.some(m => Boolean(m.reasoning_content) && !(m.role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length));
 }
 
 /** Official lmstudio-js API-token decomposition, for the pinned SDK's legacy auth fields. */
@@ -29,7 +29,11 @@ export function progressEvent(payload: Record<string, unknown>): { phase: ChatWa
 export async function nativeHistory(messages: InferenceMessage[], prepareImage: (dataUrl: string) => Promise<ChatMessagePartFileData>): Promise<ChatMessageData[]> {
   const result: ChatMessageData[] = [];
   for (const message of messages) {
-    if (message.reasoning_content) throw new Error("Separate reasoning history requires Chat Completions.");
+    const currentToolRound = message.role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+    // The SDK cannot encode separate reasoning, but tool-request messages retain their actual
+    // protocol state through content + toolCallRequest parts. Older standalone reasoning remains
+    // ineligible so it is never silently dropped from ordinary conversation history.
+    if (message.reasoning_content && !currentToolRound) throw new Error("Separate reasoning history requires Chat Completions.");
     if (message.role === "tool") {
       result.push({ role: "tool", content: [{ type: "toolCallResult", content: String(message.content ?? ""), toolCallId: message.tool_call_id }] });
       continue;

@@ -1164,6 +1164,7 @@ function ContextWindowIndicator({ c, locale, model, models, usage, includeReason
         [locale === "ko" ? "입력" : "Input", usage.input],
         [locale === "ko" ? "응답" : "Response", usage.response],
         [locale === "ko" ? "추론" : "Reasoning", usage.reasoning],
+        [locale === "ko" ? "도구" : "Tools", usage.tools],
         ...(usage.summary ? [[locale === "ko" ? "압축 요약" : "Compacted", usage.summary] as const] : []),
       ] as const).map(([label, value]) => <span key={label}><span>{label}</span><b>{formatTokens(value, locale)}</b></span>)}<small>{locale === "ko" ? `대화·작성 중 입력 기준 추정치 · 추론 ${includeReasoning ? "포함" : "제외"}. ${usage.summary ? "압축된 요약이 이전 대화를 대신하고 있습니다." : "실제 전송 시 컨텍스트 정리가 적용될 수 있습니다."}` : `History and draft estimate · reasoning ${includeReasoning ? "included" : "excluded"}. ${usage.summary ? "A compacted summary now stands in for the earlier turns." : "Context handling may reduce the actual request."}`}</small></span>}
     </span>
@@ -1489,9 +1490,9 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
   const steps = transcriptSteps(message);
   const liveContentIndex = lastContentStep(steps);
   const wholeReasoning = reasoningStepIsWhole(message);
+  const waitStatus = pending && waitPhase && waitPhase !== "compacting-context" ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
   const markdown = (text: string) => <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: true }], remarkMath]} rehypePlugins={[rehypeKatex]} components={{ a: (props) => <a {...props} target="_blank" rel="noreferrer" />, pre: ({ children }) => <CodeSnippet c={c}>{children}</CodeSnippet>, del: ({ node, children, ...props }) => renderStrikethrough ? <del {...props}>{children}</del> : <>{literalStrikethroughSource(text, node, String(children))}</> }}>{text}</ReactMarkdown>;
   return <div className="message-row assistant-message long-press-target" {...longPress}>
-    {pending && waitPhase && waitPhase !== "compacting-context" && <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div>}
     {editing
       ? <div className="assistant-edit"><textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => { setText(message.content); setEditing(false); }}>{c.cancel}</button><button className="save-response" onClick={() => { if (text.trim()) onEditAssistant(message.id, text); setEditing(false); }}><Check size={13} /> {c.saveEdit}</button></div></div>
       : <>{steps.map((step, index) => {
@@ -1507,6 +1508,7 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
           const body = live ? shownContent : step.text;
           return <div key={index} className={`assistant-copy markdown-body ${live && fading ? "stream-fade" : ""}`}>{body ? markdown(body) : null}</div>;
         })}
+        {waitStatus}
         {!steps.length && (pending && !waitingForChoice && !waitPhase ? <div className="assistant-copy markdown-body"><span className="typing"><i /><i /><i /></span></div> : null)}
       </>}
     {!pending && !editing && <div className="assistant-footer"><div className="assistant-actions"><button className="message-action-button" title={c.regenerate} aria-label={c.regenerate} onClick={() => onRegenerate(message.id)}><RefreshCw size={14} /></button>{message.content && <button className="message-action-button" title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={14} /></button>}<button className="message-action-button" title={c.editResponse} aria-label={c.editResponse} onClick={() => setEditing(true)}><Pencil size={14} /></button></div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /><MessageTokenStats c={c} locale={locale} message={message} /></div>}
@@ -1546,13 +1548,14 @@ function ReasoningStep({ c, locale, text, seconds, live }: { c: CopySet; locale:
  */
 function CompactionStep({ c, locale, step, live }: { c: CopySet; locale: Locale; step: Extract<MessageStep, { kind: "compaction" }>; live: boolean }) {
   const [open, setOpen] = useState(false);
-  const foldable = Boolean(step.reasoning || step.summary);
-  const shown = open && foldable;
+  const hasOutput = Boolean(step.reasoning || step.summary);
+  const shown = live || open && hasOutput;
   return <div className={`thinking-block compaction-block ${live ? "streaming" : ""}`}>
-    <button onClick={() => foldable && setOpen((value) => !value)} aria-expanded={shown} disabled={!foldable}><Minimize2 size={15} /> {live ? c.compactingNow : formatCompactionDuration(step.seconds || 1, locale)} {foldable && <ChevronDown size={14} className={open ? "rotate" : ""} />}</button>
+    <button onClick={() => !live && hasOutput && setOpen((value) => !value)} aria-expanded={shown} disabled={!live && !hasOutput}><Minimize2 size={15} /> {live ? c.compactingNow : formatCompactionDuration(step.seconds || 1, locale)} {!live && hasOutput && <ChevronDown size={14} className={open ? "rotate" : ""} />}</button>
     {shown && <div className="compaction-panes">
       {step.reasoning && <div className="compaction-pane"><small>{c.compactionThought}</small><div className="thinking-preview">{step.reasoning}</div></div>}
       {step.summary && <div className="compaction-pane"><small>{c.compactionSummary}</small><div className="thinking-preview">{step.summary}</div></div>}
+      {live && !hasOutput && <div className="compaction-pane"><small>{c.compactionSummary}</small><div className="thinking-preview live"><span className="typing"><i /><i /><i /></span></div></div>}
     </div>}
   </div>;
 }

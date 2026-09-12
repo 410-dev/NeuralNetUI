@@ -103,6 +103,10 @@ try {
   assert.equal(state.maxTabs, 2); assert.equal(state.tabs.length, 2); assert.equal(state.tabs[1].label, "Reference"); assert.equal(state.tabs[1].active, true); assert.match(state.url, /^https:\/\/example\.org\/?$/);
   const frame = await api(`/api/browser-view?conversationId=${conversationId}&frame=1&sessionId=${encodeURIComponent(state.sessionId)}`); assert.equal(frame.status, 200); assert.equal(frame.headers.get("content-type"), "image/jpeg"); assert.ok((await frame.arrayBuffer()).byteLength > 1_000);
   const limited = await api(`/api/browser-view?conversationId=${conversationId}`, "POST", { action: "new_tab", sessionId: state.sessionId }); assert.equal(limited.status, 400); assert.match(await limited.text(), /limited to 2 tabs/);
+  await json(`/api/chat/${conversationId}/input`, "POST", { toolCallId: "handoff-browser", value: { completed: true } });
+  await waitForSnapshot(conversationId, (snapshot) => snapshot.status === "completed" && snapshot.message.content.includes("Browser handoff completed."));
+  const persisted = await json(`/api/browser-view?conversationId=${conversationId}`);
+  assert.equal(persisted.available, true); assert.equal(persisted.sessionId, state.sessionId); assert.equal(persisted.tabs.length, 2);
   if (process.env.BROWSER_VIEW_QA_KEEP === "1") {
     console.log(`QA_READY ${root} browserqa BrowserLocal-20260913`);
     await new Promise((resolve) => {
@@ -111,11 +115,11 @@ try {
     });
     console.log("QA_STOPPED");
   } else {
-    const switched = await json(`/api/browser-view?conversationId=${conversationId}`, "POST", { action: "switch_tab", sessionId: state.sessionId, tabId: state.tabs[0].id }); assert.match(switched.url, /^https:\/\/example\.com\/?$/);
-    const closed = await json(`/api/browser-view?conversationId=${conversationId}`, "POST", { action: "close_tab", sessionId: state.sessionId, tabId: state.tabs[1].id }); assert.equal(closed.tabs.length, 1);
-    await json(`/api/chat/${conversationId}/input`, "POST", { toolCallId: "handoff-browser", value: { completed: true } });
-    await waitForSnapshot(conversationId, (snapshot) => snapshot.status === "completed" && snapshot.message.content.includes("Browser handoff completed."));
-    console.log("PASS: headed multi-tab session, model tab list/labels, authenticated UI controls, human handoff, and completion");
+    const switched = await json(`/api/browser-view?conversationId=${conversationId}`, "POST", { action: "switch_tab", sessionId: state.sessionId, tabId: persisted.tabs[0].id }); assert.match(switched.url, /^https:\/\/example\.com\/?$/);
+    const closed = await json(`/api/browser-view?conversationId=${conversationId}`, "POST", { action: "close_tab", sessionId: state.sessionId, tabId: persisted.tabs[1].id }); assert.equal(closed.tabs.length, 1);
+    const explicitlyClosed = await json(`/api/browser-view?conversationId=${conversationId}`, "POST", { action: "close_tab", sessionId: state.sessionId, tabId: closed.tabs[0].id });
+    assert.equal(explicitlyClosed.available, false);
+    console.log("PASS: headed multi-tab session, model tab list/labels, authenticated UI controls, human handoff, response-end persistence, and explicit close");
   }
 } catch (error) { console.error(logs); throw error; }
 finally {

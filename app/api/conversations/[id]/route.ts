@@ -7,6 +7,7 @@ import { readConfig } from "@/lib/config";
 import { DEFAULT_HARNESS_SETTINGS } from "@/lib/harness";
 import { harnessCompletion } from "@/lib/harness-runtime";
 import { connectionForModel } from "@/lib/connection-drivers";
+import { closeBrowserSessions } from "@/lib/browser-tool";
 
 /**
  * Titles a chat the user just promoted out of temporary mode, following the harness settings the
@@ -58,7 +59,12 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
-  try { const { id } = await context.params; const user = requireUser(request); await deleteConversation(id, user.id); return new Response(null, { status: 204 }); }
+  try {
+    const { id } = await context.params; const user = requireUser(request);
+    await deleteConversation(id, user.id);
+    await closeBrowserSessions(`${user.id}:${id}`);
+    return new Response(null, { status: 204 });
+  }
   catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "대화를 삭제하지 못했습니다." }, { status: 400 }); }
 }
 
