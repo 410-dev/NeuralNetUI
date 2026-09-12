@@ -5,6 +5,7 @@ import path from "node:path";
 import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
 import { classifyDocument, cleanupTemporaryDocuments, decodeTextDocument, pdfModelContent, sniffDocument, sniffRasterMimeType, type ModelContentPart } from "./document-processing";
+import { pageVisitHeaders } from "./page-visit-request";
 import type { ToolSettings } from "./types";
 
 export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; browser?: boolean; currentTime?: boolean; location?: boolean; multipleChoice?: boolean };
@@ -204,7 +205,7 @@ export async function visitPage(rawUrl: string, settings: ToolSettings): Promise
   await cleanupTemporaryDocuments(settings);
   let url = await assertPublicUrl(rawUrl); let response: Response | undefined;
   for (let redirects = 0; redirects <= 4; redirects += 1) {
-    response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(15_000), headers: { "User-Agent": "NeuralChat/1.0 (+local page reader)", Accept: "text/html,text/plain,application/json,application/pdf,image/avif,image/webp,image/png,image/jpeg,*/*;q=0.5" } });
+    response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(15_000), headers: pageVisitHeaders() });
     if (![301, 302, 303, 307, 308].includes(response.status)) break;
     const location = response.headers.get("location"); if (!location) break;
     url = await assertPublicUrl(new URL(location, url).toString());

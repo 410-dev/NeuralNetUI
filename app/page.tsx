@@ -14,7 +14,7 @@ import { chatWaitLabel } from "@/lib/chat-progress";
 import { normalizeReasoning, reasoningOptionName, isReasoningToggle } from "@/lib/reasoning-capabilities";
 
 import {
-  ArrowUp, Lightbulb, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CirclePlus, Copy, Download, FileJson,
+  ArrowDown, ArrowUp, Lightbulb, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CirclePlus, Copy, Download, FileJson,
   FileText, GitBranch, GripVertical, ImagePlus, KeyRound, LoaderCircle, Menu, MessageSquarePlus, Pencil, Plus, RefreshCw,
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
   LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload,
@@ -112,7 +112,7 @@ const translations = {
     streamRevealTitle: "Response appearance", streamRevealHelp: "How finished text settles into the thread while a response streams.", streamInstant: "Plain", streamInstantDesc: "Text appears as soon as it arrives.", streamFade: "Soft fade", streamFadeDesc: "New passages fade in and the leading edge stays soft.",
     streamPacingTitle: "Response pacing", streamPacingHelp: "Servers deliver text in bursts. Pacing spreads each burst out evenly.", streamImmediate: "Every token", streamImmediateDesc: "Show everything the moment it arrives.", streamChunked: "Even pace", streamChunkedDesc: "Release a fixed slice per frame so text reads as steady typing.", streamChunkSize: "Characters per step",
     nativePresetNote: "Built-in native levels cannot be renamed or removed, so they are offered only in the chat reasoning picker.",
-    hideActivity: "Hide tool and thinking history", showActivity: "Show tool and thinking history",
+    hideActivity: "Hide tool and thinking history", showActivity: "Show tool and thinking history", scrollToBottom: "Resume automatic scrolling",
     temporaryChat: "Temporary chat", saveChat: "Save this chat", savingChat: "Saving…", chatSaved: "Saved to your history.", chatSaveFailed: "This chat could not be saved.",
     returnToRegularChat: "Return to regular chat", temporaryGreeting: "Hello, traveler", temporaryChatHint: "Chats are not saved",
     reasoningNotesTitle: "Reasoning descriptions", reasoningNotesHelp: "Show a short line under each reasoning choice in the chat picker, and word it however you like.", reasoningNotesReset: "Leave a field empty to use the built-in wording.",
@@ -158,7 +158,7 @@ const translations = {
     streamRevealTitle: "응답 표시 방식", streamRevealHelp: "응답이 스트리밍되는 동안 글자가 화면에 자리 잡는 방식입니다.", streamInstant: "기본", streamInstantDesc: "도착한 글자를 그대로 즉시 표시합니다.", streamFade: "부드러운 페이드", streamFadeDesc: "새 문단이 서서히 나타나고 끝부분이 부드럽게 이어집니다.",
     streamPacingTitle: "응답 표시 속도", streamPacingHelp: "서버는 글자를 뭉치로 보냅니다. 속도 조절은 그 뭉치를 고르게 나눠 표시합니다.", streamImmediate: "전부 표시", streamImmediateDesc: "도착한 내용을 한 번에 모두 표시합니다.", streamChunked: "일정한 속도", streamChunkedDesc: "프레임마다 정해진 만큼만 내보내 타이핑처럼 보이게 합니다.", streamChunkSize: "한 번에 표시할 글자 수",
     nativePresetNote: "기본 제공 Native 추론 수준은 이름 변경과 삭제가 불가능하므로 채팅의 추론 선택 창에서만 제공됩니다.",
-    hideActivity: "도구 / 사고 기록 숨기기", showActivity: "도구 / 사고 기록 표시",
+    hideActivity: "도구 / 사고 기록 숨기기", showActivity: "도구 / 사고 기록 표시", scrollToBottom: "자동 스크롤 다시 시작",
     temporaryChat: "임시 채팅", saveChat: "이 채팅 저장", savingChat: "저장 중…", chatSaved: "채팅 기록에 저장했습니다.", chatSaveFailed: "채팅을 저장하지 못했습니다.",
     returnToRegularChat: "일반 채팅으로 돌아가기", temporaryGreeting: "안녕하세요, 여행자", temporaryChatHint: "채팅이 저장되지 않습니다",
     reasoningNotesTitle: "추론 강도 설명", reasoningNotesHelp: "채팅의 추론 선택 창에서 각 항목 아래에 짧은 설명을 표시하고, 문구를 직접 바꿉니다.", reasoningNotesReset: "비워 두면 기본 문구를 사용합니다.",
@@ -299,6 +299,7 @@ export default function Home() {
   const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
   const autoFollowThreadRef = useRef(true);
+  const [threadAutoFollow, setThreadAutoFollow] = useState(true);
   const selectedModelIdRef = useRef("");
   const pendingConversationIdRef = useRef("");
   const handledLocationCallsRef = useRef(new Set<string>());
@@ -553,7 +554,18 @@ export default function Home() {
 
   function handleThreadScroll() {
     const element = threadRef.current;
-    if (element) autoFollowThreadRef.current = isNearScrollBottom(element);
+    if (element) {
+      const following = isNearScrollBottom(element);
+      autoFollowThreadRef.current = following;
+      setThreadAutoFollow(following);
+    }
+  }
+
+  function resumeThreadAutoFollow() {
+    autoFollowThreadRef.current = true;
+    setThreadAutoFollow(true);
+    const element = threadRef.current;
+    if (element) element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
   }
 
   function navigateToChat(id: string, replace = false) {
@@ -570,6 +582,7 @@ export default function Home() {
     pendingConversationIdRef.current = uid("conversation");
     window.history[replaceUrl ? "replaceState" : "pushState"]({}, "", "/");
     autoFollowThreadRef.current = true;
+    setThreadAutoFollow(true);
     temporaryIdRef.current = ""; setTemporaryMode(temporary); setPromoting(false);
     setDraftAttachments([]); setRenderedMessageCount(60); setIsGenerating(false); setPendingWait(null); setConversation(null); setMessages([]); setDraft(""); setError(""); setMobileOpen(false);
     // Leaving a temporary chat discards it; the refresh tells the server it is no longer open.
@@ -596,6 +609,7 @@ export default function Home() {
       const next = normalizeConversationRevisions(body as Conversation);
       const branch = next.branches.find((item: ChatBranch) => item.id === next.activeBranchId) || next.branches[0];
       autoFollowThreadRef.current = true;
+      setThreadAutoFollow(true);
       if (selectedBranchId && next.branches.some(item => item.id === selectedBranchId)) { next.activeBranchId = selectedBranchId; await saveConversationRequest(next, false); }
       temporaryIdRef.current = next.temporary ? next.id : ""; setTemporaryMode(next.temporary === true); setPromoting(false);
       setConversation(next); setMessages((selectedBranchId ? next.branches.find(item => item.id === selectedBranchId) : branch)?.messages || []); selectedModelIdRef.current = next.modelId; setSelectedModelId(next.modelId);
@@ -983,9 +997,12 @@ export default function Home() {
 
         <div className="conversation-stage">
           {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} admin={isAdmin} applyingReasoningDefault={applyingDefault === "reasoning"} applyReasoningToEveryone={() => void applyDefaultToEveryone("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} /></div> : <>
-            <div className={`thread ${activityHidden ? "activity-hidden" : ""}`} ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
-              {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
-              {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
+            <div className="thread-shell">
+              <div className={`thread ${activityHidden ? "activity-hidden" : ""}`} ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
+                {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
+                {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
+              </div>
+              {!threadAutoFollow && <button type="button" className="scroll-resume thread-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeThreadAutoFollow}><ArrowDown size={18} /></button>}
             </div>
             <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} admin={isAdmin} applyingReasoningDefault={applyingDefault === "reasoning"} applyReasoningToEveryone={() => void applyDefaultToEveryone("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} onChoiceSubmit={submitToolInput} />
           </>}
@@ -1385,12 +1402,27 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
 
 function ReasoningStep({ c, locale, text, seconds, live }: { c: CopySet; locale: Locale; text: string; seconds?: number; live: boolean }) {
   const [open, setOpen] = useState(false);
+  const [autoFollow, setAutoFollow] = useState(true);
+  const autoFollowRef = useRef(true);
   const bodyRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { if (live && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight; }, [live, text]);
+  useEffect(() => {
+    if (live && autoFollowRef.current && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  }, [live, text]);
+  function handleScroll() {
+    if (!live || !bodyRef.current) return;
+    const following = isNearScrollBottom(bodyRef.current, 24);
+    autoFollowRef.current = following;
+    setAutoFollow(following);
+  }
+  function resumeAutoFollow() {
+    autoFollowRef.current = true;
+    setAutoFollow(true);
+    if (bodyRef.current) bodyRef.current.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" });
+  }
   const shown = live || open;
   return <div className={`thinking-block ${live ? "streaming" : ""}`}>
     <button onClick={() => !live && setOpen((value) => !value)} aria-expanded={shown}><Lightbulb size={15} /> {live ? c.thinking : formatThoughtDuration(seconds || 1, locale)} {!live && <ChevronRight size={14} className={open ? "disclosure-open" : ""} />}</button>
-    {shown && <div ref={bodyRef} className={`thinking-preview ${live ? "live" : ""}`}>{text}</div>}
+    {shown && <div className="thinking-preview-shell"><div ref={bodyRef} className={`thinking-preview ${live ? "live" : ""}`} onScroll={handleScroll}>{text}</div>{live && !autoFollow && <button type="button" className="scroll-resume reasoning-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeAutoFollow}><ArrowDown size={16} /></button>}</div>}
   </div>;
 }
 

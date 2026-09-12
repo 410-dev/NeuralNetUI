@@ -90,6 +90,7 @@
 
 - The shell owns its scrolling, so `html` and `body` set `overscroll-behavior: none` and every inner scroller sets `contain`. A downward drag inside the app must never become a browser refresh.
 - A popover anchored to an edge must cap its height against the viewport and scroll inside itself; a long list of choices cannot be allowed to run off screen.
+- Streaming reasoning and the full transcript follow new content only while the reader stays near the bottom. Moving away pauses that one scroller and reveals a compact down-arrow action that returns to the latest content and resumes following.
 
 ## Temporary chats
 
