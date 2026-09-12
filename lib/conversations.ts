@@ -25,7 +25,7 @@ const messageSchema = z.object({
     z.object({ kind: z.literal("reasoning"), text: z.string(), seconds: z.number().nonnegative().optional() }),
     z.object({ kind: z.literal("content"), text: z.string() }),
     z.object({ kind: z.literal("tools"), ids: z.array(z.string().min(1)) }),
-    z.object({ kind: z.literal("compaction"), seconds: z.number().nonnegative().optional(), summary: z.string().optional(), reasoning: z.string().optional() }),
+    z.object({ kind: z.literal("compaction"), seconds: z.number().nonnegative().optional(), summary: z.string().optional(), reasoning: z.string().optional(), retainedToolIds: z.array(z.string().min(1)).optional() }),
   ])).optional(),
   toolEvents: z.array(z.object({
     id: z.string().min(1),

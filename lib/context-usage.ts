@@ -10,7 +10,7 @@ const estimate = (text: string | undefined) => text ? estimateTokens(text) : 0;
  * turn with a summary, so the preview must begin at that turn and count the summary instead of
  * the history it stands in for.
  */
-function compactionBoundary(messages: StoredMessage[]): { start: number; summary: number; message: number; step: number } {
+function compactionBoundary(messages: StoredMessage[]): { start: number; summary: number; message: number; step: number; retainedToolIds: string[] } {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const steps = messages[index].steps || [];
     const stepIndex = steps.findLastIndex(step => step.kind === "compaction" && Boolean(step.summary));
@@ -18,9 +18,9 @@ function compactionBoundary(messages: StoredMessage[]): { start: number; summary
     if (!compaction || compaction.kind !== "compaction" || !compaction.summary) continue;
     let start = index;
     while (start > 0 && messages[start].role !== "user") start -= 1;
-    return { start, summary: estimate(compaction.summary), message: index, step: stepIndex };
+    return { start, summary: estimate(compaction.summary), message: index, step: stepIndex, retainedToolIds: compaction.retainedToolIds || [] };
   }
-  return { start: 0, summary: 0, message: -1, step: -1 };
+  return { start: 0, summary: 0, message: -1, step: -1, retainedToolIds: [] };
 }
 
 /** Next-request history preview, not the previous request's immutable usage receipt.
@@ -46,9 +46,14 @@ export function contextUsage(messages: StoredMessage[], includeReasoning: boolea
       const thinking = Math.min(output ?? Infinity, afterCompaction ? estimate(reasoningText) : count(message.reasoningTokens) ?? estimate(reasoningText));
       response += output === undefined ? estimate(contentText) : Math.max(0, output - thinking);
       if (includeReasoning) reasoning += thinking;
-      const trailingToolIds = afterCompaction ? new Set(afterCompaction.filter(step => step.kind === "tools").flatMap(step => step.ids)) : undefined;
+      const trailingToolIds = afterCompaction ? new Set([...boundary.retainedToolIds, ...afterCompaction.filter(step => step.kind === "tools").flatMap(step => step.ids)]) : undefined;
       // Tool calls/results and their protocol fields remain in the next request's input context.
-      for (const event of message.toolEvents || []) if (!trailingToolIds || trailingToolIds.has(event.id)) tools += estimateTokens({ name: event.name, arguments: event.arguments, result: event.result });
+      for (const event of message.toolEvents || []) if (!trailingToolIds || trailingToolIds.has(event.id)) {
+        const base = estimateTokens({ name: event.name, arguments: event.arguments, result: event.result });
+        const result = event.result && typeof event.result === "object" ? event.result as Record<string, unknown> : undefined;
+        const visual = result?.contextTokensConsumed !== true && Number.isFinite(Number(result?.contextTokens)) ? Math.max(0, Number(result?.contextTokens)) : 0;
+        tools += Math.max(base, visual);
+      }
     }
   }
   return { input, response, reasoning, tools, summary, total: input + response + reasoning + tools + summary };

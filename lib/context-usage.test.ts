@@ -95,3 +95,13 @@ test("an in-progress compaction immediately replaces covered content and tool ou
   assert.ok(compacted.tools < uncompacted.tools / 10);
   assert.ok(compacted.summary > 0);
 });
+
+test("transient browser vision tokens are visible until the follow-up inference consumes them", () => {
+  const event: NonNullable<StoredMessage["toolEvents"]>[number] = { id: "screen", name: "browser", status: "completed", arguments: {}, result: { screenshot: true, contextTokens: 24000 }, startedAt: "" };
+  const active = contextUsage([{ id: "a", role: "assistant", content: "", createdAt: new Date().toISOString(), toolEvents: [event] }], false);
+  const retained = contextUsage([{ id: "a", role: "assistant", content: "", createdAt: new Date().toISOString(), toolEvents: [event], steps: [{ kind: "tools", ids: ["screen"] }, { kind: "compaction", summary: "earlier history", retainedToolIds: ["screen"] }] }], false);
+  const consumed = contextUsage([{ id: "a", role: "assistant", content: "", createdAt: new Date().toISOString(), toolEvents: [{ ...event, result: { screenshot: true, contextTokens: 24000, contextTokensConsumed: true } }] }], false);
+  assert.ok(active.tools >= 24000);
+  assert.ok(retained.tools >= 24000);
+  assert.ok(consumed.tools < 100);
+});

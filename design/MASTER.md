@@ -54,6 +54,8 @@
 - Browser tabs belong to the conversation rather than one assistant response. Keep them available across completed responses and periods of inactivity; only an explicit user/model close, last-tab close, or conversation deletion ends the session. Capacity limits reject new sessions instead of evicting existing work.
 - Human handoff is explicit: state why the model is waiting and provide one completion action. Closing the visual panel does not claim the task is complete or discard the shared session.
 - Browser frames and controls are authenticated conversation surfaces, not public media endpoints. Keep ownership checks and public-network navigation policy active for every operation.
+- Bound model-facing page snapshots by both body length and final serialized size; labels and links must not bypass the page-text limit.
+- A full-page screenshot is a context-safe observation, not an unlimited bitmap. Cap its captured height, disclose truncation, estimate multimodal tokens conservatively, and let the model scroll for later sections.
 
 ## Selectable questions
 
@@ -118,6 +120,7 @@
 - Consecutive reasoning/tool folds use a compact gap. Keep a slightly larger, but still compact, gap where delivered prose meets a technical fold so the content boundary remains legible.
 - `content` and `reasoning` stay the concatenation of every stage, so copying, export and upstream history never depend on the transcript.
 - Context compaction is a stage of the answer, not a status line. It folds like a reasoning block and holds up to two panes: the compaction model's own reasoning and the summary that was kept. Never report it twice — while a stage is showing, the wait line stays quiet.
+- After a tool result, project context from the last authoritative server measurement plus every newly appended message. Tool-round compaction must retain the newest assistant tool request and its observation; a provider-reported context overflow gets one bounded compaction retry and then a concrete, stable error.
 - While compaction is active, keep its fold open and stream both the compaction model's reasoning and partial summary into their final panes.
 - Messages written before the transcript existed carry no stages; reconstruct their fixed layout rather than dropping their content.
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { contextThresholdReached, projectedInputTokens, DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages } from "./harness.ts";
+import { contextOverflowDetails, contextThresholdReached, projectedInputTokens, DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages } from "./harness.ts";
 
 test("resume substitution is literal and non-recursive; threshold includes equality", async () => {
   const { resumePrompt, contextThresholdReached } = await import("./harness.ts");
@@ -32,8 +32,16 @@ test("the compaction decision never uses the smaller of estimate and measurement
   assert.equal(projectedInputTokens(500, undefined), 500);
   assert.equal(projectedInputTokens(500, 0), 500);
   assert.equal(projectedInputTokens(500, Number.NaN), 500);
+  assert.equal(projectedInputTokens(4000, 3600, 3000), 4600);
+  assert.equal(projectedInputTokens(2500, 3600, 3000), 3600);
   // 89% of a window crosses an 80% threshold once the measurement is taken into account.
   const window = 4000;
   assert.equal(contextThresholdReached(projectedInputTokens(1000, 3560), window, 80), true);
   assert.equal(contextThresholdReached(projectedInputTokens(1000, undefined), window, 80), false);
+});
+
+test("image estimates honor internal vision budgets and context overflow errors are normalized", () => {
+  assert.equal(estimateTokens({ type: "image_url", image_url: { url: "data:image/jpeg;base64,x" }, _neural_context_tokens: 24000 }), 24000);
+  assert.deepEqual(contextOverflowDetails(new Error('Engine protocol predict request returned 400: {"error":{"type":"exceed_context_size_error","n_prompt_tokens":186236,"n_ctx":128000}}')), { promptTokens: 186236, contextWindow: 128000 });
+  assert.equal(contextOverflowDetails(new Error("connection refused")), undefined);
 });

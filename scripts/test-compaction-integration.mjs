@@ -28,6 +28,14 @@ const mock = http.createServer(async (req, res) => {
     return res.end(`data: ${JSON.stringify({choices:[{delta:{content:'of progress.'},finish_reason:'stop'}]})}\n\ndata: [DONE]\n\n`);
   }
   streams++;
+  if (mode === 'overflow' && streams === 1) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    return res.end(`data: ${JSON.stringify({choices:[{delta:{tool_calls:[{index:0,id:'clock',type:'function',function:{name:'get_current_time',arguments:'{}'}}]}}]})}\n\ndata: ${JSON.stringify({choices:[{delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:1200,completion_tokens:20}})}\n\ndata: [DONE]\n\n`);
+  }
+  if (mode === 'overflow' && streams === 2) {
+    res.writeHead(400, {'Content-Type':'application/json'});
+    return res.end(JSON.stringify({error:{code:400,message:'request (15000 tokens) exceeds the available context size (12800 tokens), try increasing it',type:'exceed_context_size_error',n_prompt_tokens:15000,n_ctx:12800}}));
+  }
   res.setHeader('Content-Type', 'text/event-stream');
   if ((mode === 'reasoning' || mode === 'content' || mode === 'limit' || mode === 'failure' || mode === 'zero' || mode === 'tool') && (streams === 1 || mode === 'limit')) {
     res.write(`data: ${JSON.stringify({choices:[{delta:(mode === 'tool' ? {tool_calls:[{index:0,id:'partial',type:'function',function:{name:'get_current_time',arguments:'x'.repeat(7000)}}]} : {[mode === 'content' ? 'content' : 'reasoning_content']:'x'.repeat(7000)})}]})}\n\n`);
@@ -86,19 +94,32 @@ try {
   config.models = [model]; config.preferences.onDemand = false;
   Object.assign(config.harnessSettings, {contextMode:'compacting',compactThreshold:50,maxCompactionResumes:1,resumePrompt:'SUMMARY=%COMPRESSED% USER=%USER_PROMPT%'});
   config = await json('/api/config','PUT',config);
-  for (const scenario of ['reasoning','content','limit','presend','failure','zero','tool']) {
+  for (const scenario of ['reasoning','content','limit','presend','failure','zero','tool','overflow']) {
     mode = scenario; streams = 0; requests.length = 0;
-    config.harnessSettings.maxCompactionResumes = scenario === 'zero' ? 0 : 1;
+    if (scenario === 'overflow') { config.models[0].contextWindowTokens = 12800; config.connections[0].models[0].contextWindowTokens = 12800; }
+    config.harnessSettings.maxCompactionResumes = scenario === 'zero' ? 0 : scenario === 'overflow' ? 2 : 1;
     config = await json('/api/config','PUT',config);
     const prior = scenario === 'presend' ? [{id:'old-u',role:'user',content:'old'.repeat(2500),createdAt:new Date().toISOString()},{id:'old-a',role:'assistant',content:'previous',createdAt:new Date().toISOString()}] : [];
-    const result = await chat('standard','Original $& %COMPRESSED% request',{prior,expected:['limit','failure','zero'].includes(scenario) ? 'error' : 'completed'});
+    const prompt = scenario === 'overflow' ? `Original request ${'browser history '.repeat(900)}` : 'Original $& %COMPRESSED% request';
+    const result = await chat('standard',prompt,{prior,tools:scenario === 'overflow' ? {currentTime:true} : undefined,expected:['limit','failure','zero'].includes(scenario) ? 'error' : 'completed'});
     const bodies = requests.filter(x => typeof x === 'object');
     const compactions = bodies.filter(x => x.messages?.[0]?.role === 'system' && String(x.messages[0].content).includes('Summarize the conversation'));
-    for (const request of compactions) assert.ok(estimateTokens(request.messages) + request.max_tokens < 4096);
+    for (const request of compactions) assert.ok(estimateTokens(request.messages) + request.max_tokens < (scenario === 'overflow' ? 12800 : 4096));
     if (scenario === 'tool') assert.equal(result.message.toolEvents.length,0);
     if (scenario === 'zero') { assert.equal(streams,1); assert.equal(bodies.length,1); assert.match(result.error,/compaction|압축/i); console.log('PASS zero'); continue; }
     assert.ok(compactions.length > 0, scenario);
     if (scenario === 'failure') { assert.equal(streams,1); assert.match(result.error,/Harness generation failed/); console.log('PASS failure'); continue; }
+    if (scenario === 'overflow') {
+      assert.equal(streams,3);
+      const retried = bodies.filter(x => x.stream && !compactions.includes(x)).at(-1);
+      assert.match(JSON.stringify(retried.messages),/Conversation summary \(historical data\):/);
+      assert.ok(retried.messages.some(message => message.role === 'tool' && message.tool_call_id === 'clock'));
+      const compactionStep = result.message.steps.find(step => step.kind === 'compaction');
+      assert.ok(result.message.steps.findIndex(step => step.kind === 'compaction') > result.message.steps.findIndex(step => step.kind === 'tools'));
+      assert.deepEqual(compactionStep.retainedToolIds, ['clock']);
+      console.log('PASS overflow recovery');
+      continue;
+    }
     assert.ok(result.snapshots.some(snapshot => snapshot.waitPhase === 'compacting-context' && snapshot.message.steps?.some(step => step.kind === 'compaction' && step.seconds === undefined && (step.reasoning || step.summary))), `${scenario}: live compaction output was not published`);
     if (scenario === 'presend') assert.ok(compactions.includes(bodies[0]));
     else {

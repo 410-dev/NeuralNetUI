@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeBrowserAction, normalizeBrowserViewAction, privateBrowserAddress } from "./browser-tool.ts";
+import { boundedBrowserScreenshot, browserImageTokenEstimate, normalizeBrowserAction, normalizeBrowserViewAction, privateBrowserAddress } from "./browser-tool.ts";
 
 test("browser address guard rejects local IPv4 and IPv6 ranges", () => {
   for (const address of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.8", "169.254.1.1", "::1", "fd00::1", "fe80::1"]) {
@@ -45,4 +45,10 @@ test("browser view controls clamp coordinates and keep only supported modifiers"
   });
   assert.throws(() => normalizeBrowserViewAction({ action: "navigate", sessionId: "abc" }), /url/i);
   assert.throws(() => normalizeBrowserViewAction({ action: "insert_text", sessionId: "abc", text: "" }), /1 to 4000/i);
+});
+
+test("long-page screenshots are pixel-bounded and carry a conservative vision-token estimate", () => {
+  assert.deepEqual(boundedBrowserScreenshot(2200, 8000, true), { width: 1440, height: 1600, pageHeight: 8000, truncated: true });
+  assert.deepEqual(boundedBrowserScreenshot(1280, 900, false), { width: 1280, height: 800, pageHeight: 900, truncated: false });
+  assert.ok(browserImageTokenEstimate(1440, 1600) > 20_000);
 });

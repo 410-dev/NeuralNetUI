@@ -177,7 +177,7 @@ export type MessageStep =
   | { kind: "reasoning"; text: string; seconds?: number }
   | { kind: "content"; text: string }
   | { kind: "tools"; ids: string[] }
-  | { kind: "compaction"; seconds?: number; summary?: string; reasoning?: string };
+  | { kind: "compaction"; seconds?: number; summary?: string; reasoning?: string; retainedToolIds?: string[] };
 
 export interface StoredMessage {
   id: string;

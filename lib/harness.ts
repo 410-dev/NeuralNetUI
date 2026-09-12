@@ -19,7 +19,10 @@ export function estimateTokens(value: unknown): number {
   if (Array.isArray(value)) return value.reduce((n, item) => n + estimateTokens(item), 0);
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
-    if (record.type === "image_url") return 1600;
+    if (record.type === "image_url") {
+      const explicit = Number(record._neural_context_tokens);
+      return Number.isFinite(explicit) && explicit > 0 ? Math.max(1600, Math.ceil(explicit)) : 1600;
+    }
     return Object.values(record).reduce<number>((n, item) => n + estimateTokens(item), 8);
   }
   const text = typeof value === "string" ? value : String(value ?? "");
@@ -50,6 +53,22 @@ export function contextThresholdReached(tokens: number, window: number | undefin
  * tokenizer actually charges, so never decide on the smaller of the two numbers: the interface
  * shows the same floor, and compaction has to trigger when that reading crosses the threshold.
  */
-export function projectedInputTokens(estimate: number, measured?: number): number {
-  return Math.max(estimate, typeof measured === "number" && Number.isFinite(measured) && measured > 0 ? Math.floor(measured) : 0);
+export function projectedInputTokens(estimate: number, measured?: number, estimateAtMeasurement?: number): number {
+  const measuredFloor = typeof measured === "number" && Number.isFinite(measured) && measured > 0 ? Math.floor(measured) : 0;
+  const anchor = typeof estimateAtMeasurement === "number" && Number.isFinite(estimateAtMeasurement) && estimateAtMeasurement >= 0
+    ? Math.floor(estimateAtMeasurement) : undefined;
+  const appended = anchor === undefined ? 0 : Math.max(0, Math.floor(estimate) - anchor);
+  return Math.max(estimate, measuredFloor + appended);
+}
+
+export type ContextOverflowDetails = { promptTokens?: number; contextWindow?: number };
+
+/** Normalize native-SDK and OpenAI-compatible context overflow errors without relying on one server's JSON envelope. */
+export function contextOverflowDetails(error: unknown): ContextOverflowDetails | undefined {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (!/(exceed(?:s|ed)?|overflow|too (?:large|long)).{0,80}context|context.{0,80}(?:exceed(?:s|ed)?|overflow|too (?:large|long))/i.test(message) &&
+      !/exceed_context_size_error/i.test(message)) return;
+  const prompt = /request\s*\((\d+)\s*tokens?\)/i.exec(message)?.[1] || /"n_prompt_tokens"\s*:\s*(\d+)/i.exec(message)?.[1];
+  const window = /context size\s*\((\d+)\s*tokens?\)/i.exec(message)?.[1] || /"n_ctx"\s*:\s*(\d+)/i.exec(message)?.[1];
+  return { ...(prompt ? { promptTokens: Number(prompt) } : {}), ...(window ? { contextWindow: Number(window) } : {}) };
 }

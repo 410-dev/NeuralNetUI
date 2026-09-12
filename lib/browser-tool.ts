@@ -10,6 +10,8 @@ const ACTION_TIMEOUT_MS = 20_000;
 const MAX_SESSIONS = 8;
 const MAX_SESSIONS_PER_OWNER = 2;
 const MAX_TEXT_CHARACTERS = 24_000;
+const MAX_SNAPSHOT_CHARACTERS = 32_000;
+const MAX_FULL_PAGE_SCREENSHOT_HEIGHT = 1_600;
 const ALLOWED_ACTIONS = new Set(["open", "inspect", "click", "type", "select", "press", "scroll", "wait", "screenshot", "list_tabs", "new_tab", "switch_tab", "close_tab", "set_tab_metadata", "close"]);
 const VIEWPORT = { width: 1280, height: 800 } as const;
 const BROWSER_VIEW_ACTIONS = new Set(["click", "drag", "scroll", "key", "insert_text", "navigate", "back", "forward", "reload", "new_tab", "switch_tab", "close_tab"]);
@@ -390,8 +392,9 @@ function targetSelector(target: string) {
   return target;
 }
 
-async function snapshot(page: Page) {
-  return page.evaluate((characterLimit) => {
+async function snapshot(page: Page, configuredCharacterLimit = MAX_TEXT_CHARACTERS) {
+  return page.evaluate(({ characterLimit, serializedLimit }) => {
+    const clipped = (value: string | null | undefined, maximum: number) => value?.replace(/\s+/g, " ").trim().slice(0, maximum) || undefined;
     const candidates = Array.from(document.querySelectorAll<HTMLElement>("a[href],button,input,textarea,select,[role=button],[role=link],[contenteditable=true]"));
     const elements = candidates.filter((element) => {
       const style = getComputedStyle(element); const bounds = element.getBoundingClientRect();
@@ -403,31 +406,54 @@ async function snapshot(page: Page) {
         ref,
         tag: element.tagName.toLowerCase(),
         role: element.getAttribute("role") || undefined,
-        text: (element.innerText || input.value || "").replace(/\s+/g, " ").trim().slice(0, 240) || undefined,
-        label: element.getAttribute("aria-label") || element.getAttribute("title") || undefined,
-        placeholder: input.placeholder || undefined,
+        text: clipped(element.innerText || input.value, 240),
+        label: clipped(element.getAttribute("aria-label") || element.getAttribute("title"), 240),
+        placeholder: clipped(input.placeholder, 240),
         type: input.type || undefined,
-        href: element instanceof HTMLAnchorElement ? element.href : undefined,
+        href: element instanceof HTMLAnchorElement ? element.href.slice(0, 600) : undefined,
         disabled: "disabled" in input ? Boolean(input.disabled) : undefined,
       };
     });
     const bodyText = (document.body?.innerText || "").replace(/\n{3,}/g, "\n\n").trim();
-    return { title: document.title, url: location.href, text: bodyText.slice(0, characterLimit), truncated: bodyText.length > characterLimit, elements };
-  }, MAX_TEXT_CHARACTERS);
+    const result = { title: document.title.slice(0, 500), url: location.href.slice(0, 2_000), text: bodyText.slice(0, characterLimit), truncated: bodyText.length > characterLimit, elements };
+    while (result.elements.length && JSON.stringify(result).length > serializedLimit) result.elements.pop();
+    if (JSON.stringify(result).length > serializedLimit) {
+      const withoutText = JSON.stringify({ ...result, text: "" }).length;
+      result.text = result.text.slice(0, Math.max(0, serializedLimit - withoutText));
+      result.truncated = true;
+      while (result.text && JSON.stringify(result).length > serializedLimit) {
+        const excess = JSON.stringify(result).length - serializedLimit;
+        result.text = result.text.slice(0, Math.max(0, result.text.length - Math.max(1, excess)));
+      }
+    }
+    return result;
+  }, { characterLimit: Math.min(MAX_TEXT_CHARACTERS, Math.max(1_000, configuredCharacterLimit)), serializedLimit: MAX_SNAPSHOT_CHARACTERS });
+}
+
+export function browserImageTokenEstimate(width: number, height: number) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return 1600;
+  // Two tokens per 14x14 vision patch is deliberately conservative across local multimodal models.
+  return Math.max(1600, Math.ceil(width / 14) * Math.ceil(height / 14) * 2);
+}
+
+export function boundedBrowserScreenshot(width: number, pageHeight: number, fullPage: boolean) {
+  const boundedWidth = Math.min(1440, Math.max(1, Math.floor(width)));
+  const requestedHeight = fullPage ? pageHeight : VIEWPORT.height;
+  const height = Math.min(fullPage ? MAX_FULL_PAGE_SCREENSHOT_HEIGHT : VIEWPORT.height, Math.max(1, Math.floor(requestedHeight)));
+  return { width: boundedWidth, height, pageHeight: Math.max(1, Math.floor(pageHeight)), truncated: fullPage && pageHeight > height };
 }
 
 async function capture(session: BrowserSession, fullPage: boolean) {
   const tab = activeTab(session); const page = tab.page;
-  const dimensions = fullPage ? await page.evaluate(() => ({
-    width: Math.min(1440, Math.max(document.documentElement.clientWidth, document.body?.scrollWidth || 0)),
-    height: Math.min(8000, Math.max(document.documentElement.clientHeight, document.body?.scrollHeight || 0)),
-  })) : undefined;
-  const buffer = await page.screenshot({ type: "jpeg", quality: 78, animations: "disabled", ...(dimensions ? { clip: { x: 0, y: 0, ...dimensions } } : {}) });
+  const pageDimensions = await page.evaluate(() => ({ width: Math.max(document.documentElement.clientWidth, document.body?.scrollWidth || 0), height: Math.max(document.documentElement.clientHeight, document.body?.scrollHeight || 0) }));
+  const dimensions = boundedBrowserScreenshot(fullPage ? pageDimensions.width : page.viewportSize()?.width || VIEWPORT.width, pageDimensions.height, fullPage);
+  const buffer = await page.screenshot({ type: "jpeg", quality: 78, animations: "disabled", ...(fullPage ? { clip: { x: 0, y: 0, width: dimensions.width, height: dimensions.height } } : {}) });
+  const contextTokens = browserImageTokenEstimate(dimensions.width, dimensions.height);
   return {
-    result: { sessionId: session.id, tabId: tab.id, url: page.url(), screenshot: true, fullPage, bounded: fullPage, size: buffer.length },
+    result: { sessionId: session.id, tabId: tab.id, url: page.url(), screenshot: true, fullPage, bounded: true, capturedWidth: dimensions.width, capturedHeight: dimensions.height, pageHeight: dimensions.pageHeight, truncated: dimensions.truncated, contextTokens, size: buffer.length },
     content: [
-      { type: "text", text: JSON.stringify({ sessionId: session.id, tabId: tab.id, url: page.url(), screenshot: true, fullPage }) },
-      { type: "image_url", image_url: { url: `data:image/jpeg;base64,${buffer.toString("base64")}` } },
+      { type: "text", text: JSON.stringify({ sessionId: session.id, tabId: tab.id, url: page.url(), screenshot: true, fullPage, capturedWidth: dimensions.width, capturedHeight: dimensions.height, pageHeight: dimensions.pageHeight, truncated: dimensions.truncated }) },
+      { type: "image_url", image_url: { url: `data:image/jpeg;base64,${buffer.toString("base64")}` }, _neural_context_tokens: contextTokens },
     ] satisfies ModelContentPart[],
   };
 }
@@ -447,7 +473,7 @@ export async function executeBrowserTool(ownerKey: string, rawArguments: string,
       const tab = activeTab(session); await tab.page.goto(url.toString(), { waitUntil: "domcontentloaded" });
       await pause(action.waitSeconds);
       if (action.screenshot) return capture(session, action.fullPage);
-      const state = await snapshot(tab.page);
+      const state = await snapshot(tab.page, settings.textCharacterLimit);
       const result = { sessionId: session.id, tabId: tab.id, maxTabs: session.maxTabs, ...state };
       return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
     } catch (error) { await closeSession(session); throw error; }
@@ -463,12 +489,12 @@ export async function executeBrowserTool(ownerKey: string, rawArguments: string,
     tab.label = action.label; tab.note = action.note;
     if (url) await page.goto(url.toString(), { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(120);
-    const state = await snapshot(page); const result = { sessionId: session.id, tabId: tab.id, maxTabs: session.maxTabs, ...state };
+    const state = await snapshot(page, settings.textCharacterLimit); const result = { sessionId: session.id, tabId: tab.id, maxTabs: session.maxTabs, ...state };
     return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
   }
   if (action.action === "switch_tab") {
     const tab = ownedTab(session, action.tabId); session.activeTabId = tab.id; await tab.page.bringToFront();
-    const state = await snapshot(tab.page); const result = { sessionId: session.id, tabId: tab.id, ...state };
+    const state = await snapshot(tab.page, settings.textCharacterLimit); const result = { sessionId: session.id, tabId: tab.id, ...state };
     return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
   }
   if (action.action === "set_tab_metadata") {
@@ -480,7 +506,7 @@ export async function executeBrowserTool(ownerKey: string, rawArguments: string,
   if (action.action === "close_tab") {
     const tab = ownedTab(session, action.tabId); await tab.page.close();
     if (!session.tabs.size) { await closeSession(session); return { result: { sessionId: session.id, tabId: tab.id, closed: true, sessionClosed: true } }; }
-    const next = activeTab(session); const state = await snapshot(next.page); const result = { sessionId: session.id, tabId: next.id, closedTabId: tab.id, ...state };
+    const next = activeTab(session); const state = await snapshot(next.page, settings.textCharacterLimit); const result = { sessionId: session.id, tabId: next.id, closedTabId: tab.id, ...state };
     return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
   }
   const page = activeTab(session).page;
@@ -495,7 +521,7 @@ export async function executeBrowserTool(ownerKey: string, rawArguments: string,
   if (action.action === "scroll") await page.mouse.wheel(0, action.deltaY);
   if (action.action === "screenshot") { await pause(action.waitSeconds); return capture(session, action.fullPage); }
   await page.waitForTimeout(250);
-  const state = await snapshot(page); const tab = activeTab(session); const result = { sessionId: session.id, tabId: tab.id, ...state };
+  const state = await snapshot(page, settings.textCharacterLimit); const tab = activeTab(session); const result = { sessionId: session.id, tabId: tab.id, ...state };
   return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
 }
 

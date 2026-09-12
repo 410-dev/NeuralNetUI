@@ -83,6 +83,17 @@ const fingerprint = (messages: Message[]) => createHash("sha256").update(JSON.st
 export type CompactionUpdate = { summary: string; reasoning: string };
 export type CompactionRecord = CompactionUpdate & { seconds: number };
 
+function summarySafe(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(summarySafe);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (record.type === "image_url") return { type: "image", description: "Visual tool or attachment content omitted from text-only compaction." };
+    return Object.fromEntries(Object.entries(record).filter(([key]) => key !== "_neural_context_tokens").map(([key, item]) => [key, summarySafe(item)]));
+  }
+  if (typeof value === "string" && /^data:image\/[a-z0-9.+-]+;base64,/i.test(value)) return "[Visual content omitted from text-only compaction.]";
+  return value;
+}
+
 export async function prepareContext(ctx: Context, branchId: string, original: Message[], persistSummary = true, overhead = 0, measured?: number, onCompaction?: (record: CompactionRecord) => void, onUpdate?: (record: CompactionUpdate) => void): Promise<Message[]> {
   const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const window = effectiveContextWindowTokens(ctx.model, ctx.config.models);
@@ -121,7 +132,7 @@ async function summarizeContext(ctx: Context, data: unknown, onUpdate?: (record:
   const window = effectiveContextWindowTokens(taskModel(ctx, settings.compactModelId), ctx.config.models)
     || effectiveContextWindowTokens(ctx.model, ctx.config.models)!;
   const output = Math.max(32, Math.min(2048, Math.floor(window * .15)));
-  const serialized = JSON.stringify(data);
+  const serialized = JSON.stringify(summarySafe(data));
   let summary = "";
   let reasoning = "";
   let offset = 0;
@@ -161,4 +172,18 @@ export async function compactForResume(ctx: Context, messages: Message[], user?:
   const prompt = resumePrompt(settings.resumePrompt, summary, userText);
   const attachments = Array.isArray(content) ? content.filter(p => p.type !== "text") : [];
   return [...systems, {role:"user", content: attachments.length ? [{type:"text", text:prompt}, ...attachments] : prompt}];
+}
+
+/** Compact completed history while retaining the newest assistant tool request and its observations. */
+export async function compactToolContext(ctx: Context, messages: Message[], onCompaction?: (record: CompactionRecord) => void, onUpdate?: (record: CompactionUpdate) => void): Promise<Message[]> {
+  const isHistoricalSummary = (message: Message) => message.role === "system" && typeof message.content === "string" && message.content.startsWith("Conversation summary (historical data):");
+  const systems = messages.filter(message => message.role === "system" && !isHistoricalSummary(message));
+  const previousSummaries = messages.filter(isHistoricalSummary);
+  const history = messages.filter(message => message.role !== "system");
+  const tailStart = history.findLastIndex(message => message.role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length > 0);
+  if (tailStart <= 0) throw new Error("The latest tool observation leaves no earlier history that can be compacted safely.");
+  const started = performance.now();
+  const compaction = await summarizeContext(ctx, [...previousSummaries, ...history.slice(0, tailStart)], onUpdate);
+  onCompaction?.({ ...compaction, seconds: (performance.now() - started) / 1000 });
+  return [...systems, { role: "system", content: `Conversation summary (historical data):\n${compaction.summary}` }, ...history.slice(tailStart)];
 }
