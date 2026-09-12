@@ -1,6 +1,6 @@
 import { lmStudioEndpoint, modelsEndpoint } from "./connection-drivers.ts";
 import { inferenceEndpoint } from "./inference-control.ts";
-import { progressFetch, withSlowProgress } from "./chat-progress.ts";
+import { progressFetch, SERVER_RESPONSE_TIMEOUT_MS, withSlowProgress } from "./chat-progress.ts";
 import type { ChatWaitPhase, ConnectionConfig } from "./types.ts";
 import { ModelBusyError, type ResidencyAdapter, type ResidentModel } from "./model-residency.ts";
 
@@ -43,7 +43,7 @@ export function createResidencyAdapter(connection: ConnectionConfig, headers: Re
     return response;
   }
   async function json(response: Response) {
-    const result = await withSlowProgress(() => response.json(), () => onPhase("waiting-server")); onPhase(phase); return result;
+    const result = await withSlowProgress(() => response.json(), () => onPhase("waiting-server"), SERVER_RESPONSE_TIMEOUT_MS); onPhase(phase); return result;
   }
   async function ensureOk(response: Response) { if (!response.ok) throw new Error(`Model management failed (${response.status}): ${await response.text()}`); }
   return {
@@ -65,7 +65,7 @@ export function createResidencyAdapter(connection: ConnectionConfig, headers: Re
       for (const id of model.instanceIds) {
         const response = await call(mode === "native" ? lmStudioEndpoint(connection.baseUrl, "unload") : inferenceEndpoint(connection.baseUrl, "unload"), signal, mode === "native" ? { instance_id: id } : { model_path: id });
         if (response.status === 409) { await response.text(); throw new ModelBusyError("The model server reports that the model is busy."); }
-        await ensureOk(response); await withSlowProgress(() => response.text(), () => onPhase("waiting-server"));
+        await ensureOk(response); await withSlowProgress(() => response.text(), () => onPhase("waiting-server"), SERVER_RESPONSE_TIMEOUT_MS);
       }
     },
     async load(model, signal) {
@@ -77,7 +77,7 @@ export function createResidencyAdapter(connection: ConnectionConfig, headers: Re
       const response = await call(mode === "native" ? lmStudioEndpoint(connection.baseUrl, "load") : inferenceEndpoint(connection.baseUrl, "load"), signal, mode === "native" ? { model, ...(contextWindowTokens ? { context_length: contextWindowTokens } : {}) } : legacyLoadBody(model));
       if (response.status !== 409) await ensureOk(response);
       // A 409 is accepted only if the manager's subsequent list confirms the load.
-      await withSlowProgress(() => response.text(), () => onPhase("waiting-server"));
+      await withSlowProgress(() => response.text(), () => onPhase("waiting-server"), SERVER_RESPONSE_TIMEOUT_MS);
     },
   };
 }

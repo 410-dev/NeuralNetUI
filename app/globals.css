@@ -196,6 +196,19 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .choice-composer-card > footer { min-height: 51px; display: flex; justify-content: flex-end; align-items: center; padding: 6px 18px 10px; }
 .choice-submit { min-width: 104px; min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 17px; border-radius: var(--radius-pill); color: white; background: var(--accent); font-size: 11.5px; }
 .choice-submit:disabled { color: var(--dim); background: rgba(255,255,255,.05); }
+.host-approval-card > header { display:flex; justify-content:space-between; }
+.host-approval-card > header > span { display:flex; align-items:center; gap:7px; }
+.host-approval-card > header > strong { padding:5px 10px; border-radius:var(--radius-pill); color:#efaaa7; background:rgba(210,123,120,.09); font-size:10px; font-weight:600; }
+.host-approval-body { display:grid; gap:10px; padding:16px 18px 5px; }
+.host-approval-body > p { margin:0; color:var(--text); font-size:14px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
+.host-approval-body details { color:var(--muted); font-size:11px; }
+.host-approval-body summary { cursor:pointer; }
+.host-approval-body .structured-json { max-height:180px; overflow:auto; margin:8px 0 0; }
+.host-approval-card > .choice-other { margin:10px 18px 2px; }
+.host-approval-actions { flex-wrap:wrap; gap:7px; }
+.host-approval-actions button { min-height:38px; display:flex; align-items:center; justify-content:center; gap:6px; padding:0 15px; border:1px solid var(--border); border-radius:var(--radius-pill); color:var(--muted); background:rgba(255,255,255,.035); font-size:11px; }
+.host-approval-actions button:first-child { border-color:rgb(var(--accent-bright-rgb) / .35); color:white; background:var(--accent); }
+.host-approval-actions button:disabled { opacity:.45; }
 .choice-response-row { width: 100%; display: flex; justify-content: flex-end; margin: 3px 0 12px; }
 .choice-response-bubble { max-width: 75%; display: grid; gap: 10px; padding: 12px 17px; border: 1px solid rgba(255,255,255,.035); border-radius: 26px 26px 12px 26px; color: var(--text); background: #232329; white-space: normal; }
 .choice-response-bubble small, .choice-response-bubble strong { display: block; }
@@ -666,6 +679,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .harness-settings .section-title { margin-bottom:0; }
 .harness-settings .settings-help { margin-top:0; }
 .harness-settings .general-setting-card + .general-setting-card { margin-top:0; }
+.host-risk-matrix { gap:8px; }
+.host-risk-matrix .general-setting-card { min-height:48px; padding:10px 13px; border-radius:17px; }
 
 /* Radio cards make a small set of exclusive modes readable without opening a menu. */
 .option-cards { display:grid; grid-template-columns:1fr 1fr; gap:10px; }

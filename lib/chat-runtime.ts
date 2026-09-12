@@ -15,10 +15,12 @@ import { readUploadModelContent } from "./uploads";
 import { chatEndpoint, connectionForModel, connectionHeaders, connectionRoot } from "./connection-drivers";
 import { createResidencyAdapter } from "./residency-adapter";
 import { modelResidency } from "./residency-runtime";
-import { progressFetch, withSlowProgress } from "./chat-progress";
+import { progressFetch, SERVER_RESPONSE_TIMEOUT_MS, withSlowProgress } from "./chat-progress";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
 import { assertOwnedBrowserSession, executeBrowserTool } from "./browser-tool";
-import type { ChatWaitPhase, Conversation, MessageStep, StoredMessage, ToolEvent, ToolSettings } from "./types";
+import { deterministicHostAssessment, executeHostComputerTool, hostActionRequiresApproval, hostComputerToolDefinition, isShellHostAction, type HostRiskAssessment } from "./host-computer-tool";
+import { canUseHostComputer } from "./host-environment";
+import type { ChatWaitPhase, Conversation, HarnessSettings, MessageStep, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
 import type { ModelContentPart } from "./document-processing";
 
 type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
@@ -46,11 +48,12 @@ export type StartChatJobInput = {
   sendReasoning?: boolean;
   tools?: EnabledWebTools;
   messages: InputMessage[];
-  clientContext?: { timeZone?: string; locale?: string };
+  clientContext?: { timeZone?: string; locale?: string; language?: "en" | "ko" };
 };
 
 type ChatJob = {
   userId: string;
+  userRole: UserRole;
   input: StartChatJobInput;
   status: JobStatus;
   message: StoredMessage;
@@ -277,7 +280,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   };
   try {
     while (!terminated) {
-      const { done, value } = await withSlowProgress(() => reader.read(), () => setWaitPhase(job, "waiting-server")); if (done) break;
+      const { done, value } = await withSlowProgress(() => reader.read(), () => setWaitPhase(job, "waiting-server"), SERVER_RESPONSE_TIMEOUT_MS); if (done) break;
       buffer += decoder.decode(value, { stream: true }); const records = buffer.split(/\r?\n\r?\n/); buffer = records.pop() || "";
       for (const record of records) { consume(record); if (terminated) break; }
     }
@@ -321,6 +324,34 @@ function waitForBrowser(job: ChatJob, call: ToolCall) {
   });
 }
 
+function parseHostAssessment(text: string): HostRiskAssessment {
+  const candidate = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const parsed = JSON.parse(candidate) as Record<string, unknown>;
+  const riskLevel = Math.floor(Number(parsed.riskLevel)); const explanation = String(parsed.explanation || "").trim();
+  if (![1, 2, 3, 4, 5].includes(riskLevel) || !explanation) throw new Error("The command assessor returned an invalid result.");
+  return { riskLevel: riskLevel as HostRiskAssessment["riskLevel"], explanation };
+}
+
+type HostExecutionPolicy = {
+  enabled: boolean;
+  settings: HarnessSettings;
+  locale: string;
+  assessShell: (args: Record<string, unknown>) => Promise<HostRiskAssessment>;
+};
+
+async function authorizeHostAction(job: ChatJob, call: ToolCall, args: Record<string, unknown>, policy: HostExecutionPolicy) {
+  if (!policy.enabled || job.userRole !== "superadmin") throw new Error("The host computer tool is restricted to Superadmin.");
+  const assessment = isShellHostAction(args) ? await policy.assessShell(args) : deterministicHostAssessment(args, policy.locale);
+  setWaitPhase(job, undefined);
+  updateToolEvent(job, call.id, { arguments: { ...args, authorization: assessment } });
+  if (!hostActionRequiresApproval(policy.settings, assessment.riskLevel)) return { approved: true, assessment };
+  const response = await waitForBrowser(job, call);
+  const value = response && typeof response === "object" ? response as Record<string, unknown> : {};
+  const decision = String(value.decision || "reject");
+  if (decision === "approve") return { approved: true, assessment };
+  return { approved: false, assessment, result: { executed: false, rejected: true, decision: decision === "redirect" ? "redirect" : "reject", ...(decision === "redirect" && String(value.instruction || "").trim() ? { instruction: String(value.instruction).trim() } : {}) } };
+}
+
 function validateQuestions(value: unknown, maximum: number) {
   const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const questions = Array.isArray(record.questions) ? record.questions.slice(0, maximum) : [];
@@ -336,7 +367,7 @@ function validateQuestions(value: unknown, maximum: number) {
 
 type ToolExecution = { result: unknown; content?: ModelContentPart[] };
 
-async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings): Promise<ToolExecution> {
+async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings, hostPolicy: HostExecutionPolicy): Promise<ToolExecution> {
   const args = parseArguments(call.function.arguments);
   if (call.function.name === "get_current_time" && enabled.currentTime) return { result: currentTime(job.input.clientContext?.timeZone, job.input.clientContext?.locale || "en-US") };
   if (call.function.name === "get_current_location" && enabled.location) {
@@ -358,6 +389,11 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
       return { result: { session_id: sessionId, ...(response && typeof response === "object" ? response as Record<string, unknown> : { completed: true }) } };
     }
     return executeBrowserTool(ownerKey, call.function.arguments, settings);
+  }
+  if (call.function.name === "host_computer") {
+    const authorization = await authorizeHostAction(job, call, args, hostPolicy);
+    if (!authorization.approved) return { result: authorization.result };
+    return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args);
   }
   return executeWebTool(call.function.name, call.function.arguments, enabled, settings);
 }
@@ -382,10 +418,26 @@ async function run(job: ChatJob) {
       internetSearch: job.input.tools?.internetSearch === true, pageVisit: job.input.tools?.pageVisit === true,
       browser: job.input.tools?.browser === true && config.experimental?.browserTool === true,
       currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
+      hostComputer: job.input.tools?.hostComputer === true && canUseHostComputer(job.userRole, config.experimental?.hostComputerTool === true),
     };
     const tools = toolDefinitions(enabled, config.toolSettings);
     const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
     const harnessContext = { config, model, userId: job.userId, signal: job.controller.signal, onPhase: (phase: ChatWaitPhase) => setWaitPhase(job, phase) };
+    if (enabled.hostComputer) tools.push(hostComputerToolDefinition());
+    const hostLocale = job.input.clientContext?.language === "ko" || job.input.clientContext?.locale?.toLowerCase().startsWith("ko") ? "ko" : "en";
+    const hostPolicy: HostExecutionPolicy = {
+      enabled: enabled.hostComputer === true, settings: harness, locale: hostLocale,
+      assessShell: async args => {
+        try {
+          const request = JSON.stringify({ language: hostLocale === "ko" ? "Korean" : "English", shell: args.shell, command: args.command, cwd: args.cwd || null });
+          const result = await harnessCompletion(harnessContext, harness.hostCommandModelId || job.input.modelId, harness.hostCommandEffort, harness.hostCommandAnalysisPrompt, request, 700);
+          return parseHostAssessment(result.text);
+        } catch (error) {
+          job.controller.signal.throwIfAborted();
+          return { riskLevel: 5, explanation: hostLocale === "ko" ? `명령어 “${String(args.command || "")}”의 독립 위험도 분석에 실패하여 가장 높은 5단계로 분류했습니다. 실행 시 지정된 ${String(args.shell || "shell")} 셸이 이 명령 전체를 처리합니다.` : `Independent analysis failed, so command “${String(args.command || "")}” was assigned the highest risk level 5. The selected ${String(args.shell || "shell")} shell will process the complete command if approved.` };
+        }
+      },
+    };
     const firstResponse = !job.conversation.branches.some(b => b.messages.some(m => m.role === "assistant" && m.content));
     const generateTitle = async () => {
       if (!harness.titleEnabled || !firstResponse) return;
@@ -451,6 +503,7 @@ async function run(job: ChatJob) {
       const outputLimit = harness.maxOutputTokens > 0
         ? (remainingTokens ? Math.min(harness.maxOutputTokens, remainingTokens) : harness.maxOutputTokens)
         : remainingTokens;
+      if (!releaseModel) releaseModel = await acquireModel();
       const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(outputLimit ? { max_tokens: outputLimit } : {}), stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
       const result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled, harness.contextMode === "compacting" && contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined, projectedInput); reasoningSeconds += result.reasoningDurationSeconds;
       // The server's own input count is authoritative once it arrives.
@@ -485,7 +538,10 @@ async function run(job: ChatJob) {
       const visualToolContent: ModelContentPart[] = [];
       for (const call of result.calls) {
         addToolEvent(job, call); let execution: ToolExecution;
-        try { execution = await executeTool(job, call, enabled, config.toolSettings); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
+        // A host action may wait for approval or run an isolated assessment model. Do not hold
+        // this chat's residency lease through either operation (serial policy would self-deadlock).
+        if (call.function.name === "host_computer") { releaseModel?.(); releaseModel = undefined; }
+        try { execution = await executeTool(job, call, enabled, config.toolSettings, hostPolicy); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
         catch (error) {
           if ((error as Error).name === "AbortError") throw error;
           execution = { result: { error: error instanceof Error ? error.message : "Tool execution failed." } };
@@ -520,7 +576,7 @@ async function run(job: ChatJob) {
   }
 }
 
-export async function startChatJob(input: StartChatJobInput, userId: string) {
+export async function startChatJob(input: StartChatJobInput, userId: string, userRole: UserRole = "user") {
   let existing = jobs.get(input.conversationId);
   if (existing && existing.userId === userId && ["running", "waiting"].includes(existing.status)) return snapshot(existing);
   const conversation = await readConversation(input.conversationId, userId);
@@ -529,7 +585,7 @@ export async function startChatJob(input: StartChatJobInput, userId: string) {
   existing = jobs.get(input.conversationId);
   if (existing && existing.userId === userId && ["running", "waiting"].includes(existing.status)) return snapshot(existing);
   const job: ChatJob = {
-    userId, input, conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
+    userId, userRole, input, conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
     message: { id: input.assistantMessageId, revisionGroupId: input.revisionGroupId, role: "assistant", content: "", reasoning: "", toolEvents: [], createdAt: new Date().toISOString() },
   };
   if (existing) discardJob(existing);

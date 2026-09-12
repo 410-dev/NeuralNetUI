@@ -11,12 +11,13 @@ import { inferApiContextWindowTokens } from "./model-context";
 import { mergeModelPresets } from "./model-edits";
 import { inferReasoning, normalizeReasoning } from "./reasoning-capabilities";
 import { resolveConnectionModels } from "./connection-drivers";
+import { isHostComputerAvailable } from "./host-environment";
 
 const presetSchema = z.object({ id: z.string().min(1), name: z.string().min(1), kind: z.enum(["builtin", "custom"]), effort: z.string().optional(), systemPrompt: z.string().optional(), systemPromptMode: z.enum(["replace", "prepend", "append"]).default("append"), ownerId: z.string().optional() });
 const modelSchema = z.object({ id: z.string().min(1), name: z.string().min(1), sourceModel: z.string().min(1), description: z.string().optional(), systemPrompt: z.string().optional(), isAlias: z.boolean(), visible: z.boolean().default(true), reasoningSupported: z.boolean(), reasoningEfforts: z.array(z.string()).optional(), reasoningPresets: z.array(presetSchema), contextWindowTokens: z.number().int().positive().optional(), apiContextWindowTokens: z.number().int().positive().optional(), ownerId: z.string().optional(), isPublic: z.boolean().optional(), connectionId: z.string().min(1).optional() });
 const connectionSchema = z.object({ id: z.string().min(1), name: z.string().min(1), driver: z.enum(["openai", "lmstudio"]), baseUrl: z.string().url(), apiKey: z.string(), clearApiKey: z.boolean().optional(), maxResidentModels: z.number().int().min(0).max(128).default(0), modelWaitPolicy: z.enum(["capacity", "serial"]).default("capacity"), models: z.array(modelSchema).default([]) });
 
-export const DEFAULT_EXPERIMENTAL: Required<ExperimentalFeatures> = { browserTool: false, openAIProgress: false };
+export const DEFAULT_EXPERIMENTAL: Required<ExperimentalFeatures> = { browserTool: false, openAIProgress: false, hostComputerTool: false };
 export const DEFAULT_TOOL_SETTINGS: ToolSettings = { maxToolRounds: 8, maxBrowserTabs: 8, maxMultipleChoiceQuestions: 3, maxAttachmentsPerMessage: 12, textDownloadLimitMb: 1, textCharacterLimit: 24_000, imageDownloadLimitMb: 10, imageUploadLimitMb: 20, pdfSizeLimitMb: 25, pdfPageLimit: 100, pdfTextCharacterLimit: 100_000, pdfVisionPageLimit: 6, pdfProcessingTimeoutSeconds: 30, temporaryFileTtlMinutes: 60, orphanUploadTtlHours: 24 };
 const toolSettingsSchema = z.object({ maxToolRounds: z.number().int().min(1).max(32), maxBrowserTabs: z.number().int().min(1).max(20).default(DEFAULT_TOOL_SETTINGS.maxBrowserTabs), maxMultipleChoiceQuestions: z.number().int().min(1).max(10).default(DEFAULT_TOOL_SETTINGS.maxMultipleChoiceQuestions), maxAttachmentsPerMessage: z.number().int().min(1).max(50), textDownloadLimitMb: z.number().min(0.0625).max(10), textCharacterLimit: z.number().int().min(1_000).max(1_000_000), imageDownloadLimitMb: z.number().min(1).max(50), imageUploadLimitMb: z.number().min(1).max(50), pdfSizeLimitMb: z.number().min(1).max(100), pdfPageLimit: z.number().int().min(1).max(500), pdfTextCharacterLimit: z.number().int().min(1_000).max(1_000_000), pdfVisionPageLimit: z.number().int().min(0).max(20), pdfProcessingTimeoutSeconds: z.number().int().min(5).max(120), temporaryFileTtlMinutes: z.number().int().min(5).max(1_440), orphanUploadTtlHours: z.number().min(1).max(168) }).default(DEFAULT_TOOL_SETTINGS);
 const appearanceSchema = z.object({
@@ -42,8 +43,13 @@ const harnessSettingsSchema = z.object({
   compactModelId: z.string().max(500), compactEffort: z.string().max(40), compactPrompt: z.string().trim().min(1).max(32000),
   titleEnabled: z.boolean(), titleTiming: z.enum(["before", "after"]), titleModelId: z.string().max(500),
   titleEffort: z.string().max(40), titlePrompt: z.string().trim().min(1).max(32000),
+  hostTrustMode: z.enum(["full", "partial", "none"]).default(DEFAULT_HARNESS_SETTINGS.hostTrustMode),
+  hostTrustedRiskLevels: z.array(z.boolean()).length(5).default(DEFAULT_HARNESS_SETTINGS.hostTrustedRiskLevels),
+  hostCommandModelId: z.string().max(500).default(DEFAULT_HARNESS_SETTINGS.hostCommandModelId),
+  hostCommandEffort: z.string().max(40).default(DEFAULT_HARNESS_SETTINGS.hostCommandEffort),
+  hostCommandAnalysisPrompt: z.string().trim().min(1).max(32000).default(DEFAULT_HARNESS_SETTINGS.hostCommandAnalysisPrompt),
 }).default(DEFAULT_HARNESS_SETTINGS);
-const experimentalSchema = z.object({ browserTool: z.boolean().default(false), openAIProgress: z.boolean().default(false) }).default(DEFAULT_EXPERIMENTAL);
+const experimentalSchema = z.object({ browserTool: z.boolean().default(false), openAIProgress: z.boolean().default(false), hostComputerTool: z.boolean().default(false) }).default(DEFAULT_EXPERIMENTAL);
 const loginAppearanceSchema = z.object({
   accentPalette: z.enum(["blue", "violet", "teal", "amber", "rose", "graphite", "custom"]).default(DEFAULT_LOGIN_APPEARANCE.accentPalette),
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default(DEFAULT_LOGIN_APPEARANCE.accentColor),
@@ -90,7 +96,13 @@ function visiblePreset(preset: ReasoningPreset, user: AuthUser) { return preset.
 
 export function publicConfig(config: AppConfig, user: AuthUser): PublicConfig {
   const preferences: AppConfig["preferences"] = { ...config.preferences, sendReasoningToModel: typeof user.preferences.sendReasoningToModel === "boolean" ? user.preferences.sendReasoningToModel : config.preferences.sendReasoningToModel, exportReasoning: typeof user.preferences.exportReasoning === "boolean" ? user.preferences.exportReasoning : config.preferences.exportReasoning, language: user.preferences.language === "ko" || user.preferences.language === "en" ? user.preferences.language : config.preferences.language, showModelIdentifiers: typeof user.preferences.showModelIdentifiers === "boolean" ? user.preferences.showModelIdentifiers : config.preferences.showModelIdentifiers, renderStrikethrough: typeof user.preferences.renderStrikethrough === "boolean" ? user.preferences.renderStrikethrough : config.preferences.renderStrikethrough, defaultModelId: typeof user.preferences.defaultModelId === "string" ? user.preferences.defaultModelId : config.preferences.defaultModelId, defaultReasoningPresetId: typeof user.preferences.defaultReasoningPresetId === "string" ? user.preferences.defaultReasoningPresetId : config.preferences.defaultReasoningPresetId, appearance: normalizeAppearance((user.preferences.appearance as Partial<typeof DEFAULT_APPEARANCE>) || config.preferences.appearance) };
-  return { ...config, loginAppearance: normalizeLoginAppearance(config.loginAppearance), profile: { name: user.displayName }, preferences, models: config.models.filter((model) => canUseModel(model, user)).map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), connections: config.connections.map((connection) => ({ ...connection, models: connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), apiKey: "", hasApiKey: Boolean(!connection.clearApiKey && (connection.apiKey || (connection.driver === "openai" && process.env.OPENAI_API_KEY))) })), account: { id: user.id, username: user.username, displayName: user.displayName, role: user.role } };
+  const superadmin = user.role === "superadmin";
+  const harnessSettings = superadmin ? config.harnessSettings : { ...(config.harnessSettings || DEFAULT_HARNESS_SETTINGS), ...{
+    hostTrustMode: DEFAULT_HARNESS_SETTINGS.hostTrustMode,
+    hostTrustedRiskLevels: DEFAULT_HARNESS_SETTINGS.hostTrustedRiskLevels,
+    hostCommandModelId: "", hostCommandEffort: "off", hostCommandAnalysisPrompt: DEFAULT_HARNESS_SETTINGS.hostCommandAnalysisPrompt,
+  } };
+  return { ...config, harnessSettings, experimental: { ...config.experimental, hostComputerTool: superadmin && config.experimental.hostComputerTool }, hostComputerAvailable: superadmin && isHostComputerAvailable(), loginAppearance: normalizeLoginAppearance(config.loginAppearance), profile: { name: user.displayName }, preferences, models: config.models.filter((model) => canUseModel(model, user)).map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), connections: config.connections.map((connection) => ({ ...connection, models: connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), apiKey: "", hasApiKey: Boolean(!connection.clearApiKey && (connection.apiKey || (connection.driver === "openai" && process.env.OPENAI_API_KEY))) })), account: { id: user.id, username: user.username, displayName: user.displayName, role: user.role } };
 }
 
 export async function writeConfigForUser(input: unknown, user: AuthUser): Promise<AppConfig> {
@@ -109,7 +121,18 @@ export async function writeConfigForUser(input: unknown, user: AuthUser): Promis
   const protectedAliases = current.models.filter((model) => model.isAlias && model.ownerId && model.ownerId !== user.id && !incomingAliases.some((candidate) => candidate.id === model.id));
   const aliasesById = new Map(incomingAliases.map((model) => [model.id, model]));
   const orderedIncoming = incoming.models.map((model) => model.isAlias ? aliasesById.get(model.id) : connections.find(c => c.id === model.connectionId)?.models.find(m => m.id === model.id)).filter((model): model is ModelConfig => Boolean(model));
-  return writeConfig({ ...incoming, connections, models: [...orderedIncoming, ...protectedAliases], profile: current.profile, preferences: { ...current.preferences, ...incoming.preferences } });
+  const hostProtected = user.role === "superadmin" ? incoming : {
+    ...incoming,
+    experimental: { ...incoming.experimental, hostComputerTool: current.experimental.hostComputerTool },
+    harnessSettings: { ...(incoming.harnessSettings || DEFAULT_HARNESS_SETTINGS),
+      hostTrustMode: (current.harnessSettings || DEFAULT_HARNESS_SETTINGS).hostTrustMode,
+      hostTrustedRiskLevels: (current.harnessSettings || DEFAULT_HARNESS_SETTINGS).hostTrustedRiskLevels,
+      hostCommandModelId: (current.harnessSettings || DEFAULT_HARNESS_SETTINGS).hostCommandModelId,
+      hostCommandEffort: (current.harnessSettings || DEFAULT_HARNESS_SETTINGS).hostCommandEffort,
+      hostCommandAnalysisPrompt: (current.harnessSettings || DEFAULT_HARNESS_SETTINGS).hostCommandAnalysisPrompt,
+    },
+  };
+  return writeConfig({ ...hostProtected, connections, models: [...orderedIncoming, ...protectedAliases], profile: current.profile, preferences: { ...current.preferences, ...incoming.preferences } });
 }
 
 /**

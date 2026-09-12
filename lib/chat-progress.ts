@@ -1,5 +1,8 @@
 import type { ChatWaitPhase, Locale } from "./types.ts";
 
+/** Only call the server unresponsive after a real response timeout window, not a short token gap. */
+export const SERVER_RESPONSE_TIMEOUT_MS = 30_000;
+
 const labels: Record<Locale, Record<ChatWaitPhase, string>> = {
   ko: {
     "processing-prompt": "프롬프트를 처리중입니다",
@@ -40,24 +43,24 @@ export function delayWithSignal(ms: number, signal: AbortSignal) {
   });
 }
 
-export async function withSlowProgress<T>(operation: () => Promise<T>, onSlow: () => void, timeoutMs = 5_000): Promise<T> {
+export async function withSlowProgress<T>(operation: () => Promise<T>, onSlow: () => void, timeoutMs = SERVER_RESPONSE_TIMEOUT_MS): Promise<T> {
   const timer = setTimeout(onSlow, timeoutMs);
   try { return await operation(); } finally { clearTimeout(timer); }
 }
 
 /** Retry only connection refusal / DNS failure, where no inference was dispatched. */
-export async function progressFetch(url: string, init: RequestInit, onPhase: (phase: ChatWaitPhase) => void, phase: ChatWaitPhase, request: typeof fetch = fetch): Promise<Response> {
+export async function progressFetch(url: string, init: RequestInit, onPhase: (phase: ChatWaitPhase) => void, phase: ChatWaitPhase, request: typeof fetch = fetch, serverResponseTimeoutMs = SERVER_RESPONSE_TIMEOUT_MS): Promise<Response> {
   const signal = init.signal || AbortSignal.timeout(300_000);
   const started = Date.now();
   for (;;) {
     signal.throwIfAborted(); onPhase(phase);
     try {
-      const response = await withSlowProgress(() => request(url, { ...init, signal }), () => onPhase("waiting-server"));
+      const response = await withSlowProgress(() => request(url, { ...init, signal }), () => onPhase("waiting-server"), serverResponseTimeoutMs);
       onPhase(phase); return response;
     } catch (error) {
       const code = (error as { cause?: { code?: string } })?.cause?.code;
       if (signal.aborted || !["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"].includes(code || "") || Date.now() - started >= 30_000) throw error;
-      onPhase("waiting-server"); await delayWithSignal(1_000, signal);
+      await delayWithSignal(1_000, signal);
     }
   }
 }

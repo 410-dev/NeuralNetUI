@@ -218,6 +218,7 @@ internal static class Program
         start.Environment["NEURAL_CHAT_DATA_DIR"] = options.DataDirectory;
         start.Environment["NEURAL_CHAT_SERVER_CONFIG"] = options.ConfigPath;
         start.Environment["NEURAL_CHAT_PYTHON"] = Path.Combine(options.AppDirectory, "app", ".python", "python.exe");
+        start.Environment["NEURAL_CHAT_WINDOWS_SERVICE"] = "1";
         node = Process.Start(start) ?? throw new InvalidOperationException("Unable to start the bundled Node.js runtime.");
         node.OutputDataReceived += (_, e) => { if (e.Data is not null) WriteLog("node: " + e.Data); };
         node.ErrorDataReceived += (_, e) => { if (e.Data is not null) WriteLog("node: " + e.Data); };

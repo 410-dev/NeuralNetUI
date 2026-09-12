@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.Sockets;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Security.Principal;
 using System.Text.Json;
 
@@ -77,6 +79,8 @@ internal static class Program
         private readonly ToolStripMenuItem exitItem;
         private bool busy;
         private bool initialOpen;
+        private readonly CancellationTokenSource hostAgentCancellation = new();
+        private readonly Task hostAgentTask;
 
         public TrayApplicationContext(EventWaitHandle openEvent, bool openOnLaunch)
         {
@@ -113,6 +117,47 @@ internal static class Program
                 }
             };
             requestTimer.Start();
+            hostAgentTask = Task.Run(() => RunHostAgentAsync(hostAgentCancellation.Token));
+        }
+
+        private static async Task RunHostAgentAsync(CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await using var pipe = new NamedPipeServerStream("NeuralNetUI.HostAgent", PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                    await pipe.WaitForConnectionAsync(token);
+                    string localSystem = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null).Translate(typeof(NTAccount)).Value;
+                    if (!pipe.GetImpersonationUserName().Equals(localSystem, StringComparison.OrdinalIgnoreCase))
+                        throw new UnauthorizedAccessException("Only the NeuralNetUI LocalSystem service may use the host-agent bridge.");
+                    using var reader = new StreamReader(pipe, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true);
+                    await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), bufferSize: 1024, leaveOpen: true) { AutoFlush = true };
+                    string? request = await reader.ReadLineAsync(token);
+                    using JsonDocument document = JsonDocument.Parse(request ?? "{}");
+                    if (document.RootElement.TryGetProperty("action", out JsonElement action) && action.GetString() == "screenshot")
+                    {
+                        byte[] image = CaptureDesktop();
+                        await writer.WriteLineAsync(JsonSerializer.Serialize(new { ok = true, mimeType = "image/png", data = Convert.ToBase64String(image) }));
+                    }
+                    else await writer.WriteLineAsync(JsonSerializer.Serialize(new { ok = false, error = "Unsupported host-agent action." }));
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { break; }
+                catch (Exception error)
+                {
+                    try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "NeuralNetUI.Tray.log"), $"{DateTimeOffset.Now:O} host agent: {error}\n"); } catch { }
+                    if (token.IsCancellationRequested) break;
+                    await Task.Delay(500, token).ConfigureAwait(false);
+                }
+            }
+        }
+
+        private static byte[] CaptureDesktop()
+        {
+            Rectangle bounds = SystemInformation.VirtualScreen;
+            using var image = new Bitmap(bounds.Width, bounds.Height);
+            using (Graphics graphics = Graphics.FromImage(image)) graphics.CopyFromScreen(bounds.Left, bounds.Top, 0, 0, bounds.Size);
+            using var output = new MemoryStream(); image.Save(output, System.Drawing.Imaging.ImageFormat.Png); return output.ToArray();
         }
 
         private async Task OpenUiAsync()
@@ -207,10 +252,12 @@ internal static class Program
         {
             if (disposing)
             {
+                hostAgentCancellation.Cancel();
                 requestTimer.Stop();
                 requestTimer.Dispose();
                 trayIcon.Visible = false;
                 trayIcon.Dispose();
+                hostAgentCancellation.Dispose();
             }
             base.Dispose(disposing);
         }

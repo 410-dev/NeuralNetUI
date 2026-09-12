@@ -7,6 +7,7 @@ test("known tool names are localized and unknown names remain readable", () => {
   assert.equal(getToolDisplayName("internet_search", "ko"), "인터넷 검색");
   assert.equal(getToolDisplayName("visit_page", "en"), "Page visit");
   assert.equal(getToolDisplayName("browser", "ko"), "브라우저");
+  assert.equal(getToolDisplayName("host_computer", "ko"), "호스트 컴퓨터");
   assert.equal(getToolDisplayName("custom_data_lookup", "en"), "Custom data lookup");
 });
 

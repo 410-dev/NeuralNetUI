@@ -15,7 +15,8 @@ const mock=http.createServer(async(req,res)=>{
  calls.push(body);
  if(!body.stream)return res.end(JSON.stringify({choices:[{message:{content:body.messages[0].content==='TITLE'?'Generated title':'Earlier facts retained in summary.'},finish_reason:'stop'}]}));
  res.setHeader('Content-Type','text/event-stream');
- res.end(`data: ${JSON.stringify({choices:[{delta:{content:'Answer'},finish_reason:'stop'}],usage:{prompt_tokens:90,completion_tokens:10,total_tokens:100}})}\n\ndata: [DONE]\n\n`);
+ const streamed=String(body.messages?.[0]?.content||'').startsWith('Summarize the conversation')?'Earlier facts retained in summary.':'Answer';
+ res.end(`data: ${JSON.stringify({choices:[{delta:{content:streamed},finish_reason:'stop'}],usage:{prompt_tokens:90,completion_tokens:10,total_tokens:100}})}\n\ndata: [DONE]\n\n`);
 });
 mock.listen(0,'127.0.0.1');await once(mock,'listening');
 const data=await mkdtemp(path.join(os.tmpdir(),'neural-harness-'));

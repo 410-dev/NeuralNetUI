@@ -16,10 +16,18 @@ test('ambiguous inference failures are not automatically replayed', async () => 
   await assert.rejects(progressFetch('http://host', { method: 'POST' }, () => {}, 'preparing-response', request));
   assert.equal(requests, 1);
 });
-test('connection refusal shows the server wait message and can be cancelled', async () => {
+test('a server response timeout shows the wait message and can be cancelled', async () => {
   const controller = new AbortController(); const phases: string[] = [];
-  const request: typeof fetch = async () => { throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } }); };
-  const pending = progressFetch('http://host', { signal: controller.signal }, phase => { phases.push(phase); if (phase === 'waiting-server') controller.abort(); }, 'loading-model', request);
+  const request: typeof fetch = async (_url, init) => new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true }));
+  const pending = progressFetch('http://host', { signal: controller.signal }, phase => { phases.push(phase); if (phase === 'waiting-server') controller.abort(); }, 'loading-model', request, 5);
   await assert.rejects(pending, { name: 'AbortError' }); assert.ok(phases.includes('waiting-server'));
   assert.equal(chatWaitLabel('freeing-space', 'ko'), '모델을 로드할 공간을 확보중입니다');
+});
+test('server wait is not emitted before the response timeout, preserving prompt progress', async () => {
+  const phases: string[] = [];
+  const response = await progressFetch('http://host', {}, phase => phases.push(phase), 'processing-prompt', async () => {
+    await new Promise(resolve => setTimeout(resolve, 8)); return new Response('ok');
+  }, 40);
+  assert.equal(response.status, 200);
+  assert.deepEqual(phases, ['processing-prompt', 'processing-prompt']);
 });

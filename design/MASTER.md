@@ -142,6 +142,14 @@
 
 - Unfinished capabilities live behind an administrator switch in their own settings tab, listed after the harness tab.
 - While a feature is off, hide its control in the chat menus and refuse it on the server as well; a client must not be able to ask for it.
+- The host-computer experiment is visible and usable only to Superadmin accounts and only on a non-containerized server. One feature switch exposes one chat tool.
+- Host actions that are not trusted by the harness appear in a single approval card above the composer. Always show the numeric risk, concrete interpretation, full arguments, and Allow / Deny / Deny and redirect choices before execution.
+- Partial trust is a five-row risk matrix; full trust never interrupts, and no trust interrupts every action.
+
+## Host progress and command safety (3.0 beta 1)
+
+- PowerShell and Bash commands are assessed in an isolated model request containing no chat history. Keep `prompt_processing` percentage visible until the server has crossed the real response-timeout threshold.
+- A shell assessment speaks the user's interface language and names actual paths, programs, destinations, and side effects. Unknown, obfuscated, or failed assessments are risk level 5.
 
 ## Appearance choices
 

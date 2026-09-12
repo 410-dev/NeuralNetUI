@@ -5,6 +5,7 @@ import type { ChatBranch, Conversation, ConversationSummary, StoredAttachment, S
 import { completeStorageMigration, dataDir, db, storageMigrationCompleted } from "./database";
 import { deleteUploadFiles, ensureLegacyUploadsMigrated } from "./uploads";
 import { discardChatJobs, hasChatDisposal } from "./chat-disposal";
+import { closeHostComputerSession } from "./host-computer-tool";
 
 const messageSchema = z.object({
   id: z.string().min(1),
@@ -367,6 +368,7 @@ export async function deleteConversation(id: string, userId: string) {
     return orphaned.map(({ id: uploadId }) => uploadId);
   })();
   discardChatJobs(userId, id);
+  closeHostComputerSession(`${userId}:${id}`);
   await Promise.all(orphanedIds.map((uploadId) => deleteUploadFiles(uploadId)));
 }
 

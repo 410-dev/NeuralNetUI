@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     const user = requireUser(request);
-    const snapshot = await startChatJob(await request.json() as StartChatJobInput, user.id);
+    const snapshot = await startChatJob(await request.json() as StartChatJobInput, user.id, user.role);
     return Response.json(snapshot, { status: 202 });
   } catch (error) {
     const auth = authErrorResponse(error); if (auth.status !== 500) return auth;

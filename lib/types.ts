@@ -132,12 +132,21 @@ export interface HarnessSettings {
   titleModelId: string;
   titleEffort: string;
   titlePrompt: string;
+  /** Confirmation policy for the Superadmin-only host computer tool. */
+  hostTrustMode: "full" | "partial" | "none";
+  /** One entry for each risk level (1..5). Used only in partial trust mode. */
+  hostTrustedRiskLevels: boolean[];
+  /** Optional isolated model used to classify and explain shell commands. */
+  hostCommandModelId: string;
+  hostCommandEffort: string;
+  hostCommandAnalysisPrompt: string;
 }
 
 /** Opt-in features an administrator must switch on before anyone can use them. */
 export interface ExperimentalFeatures {
   openAIProgress?: boolean;
   browserTool: boolean;
+  hostComputerTool: boolean;
 }
 
 export interface ToolSettings {
@@ -220,6 +229,7 @@ export interface EnabledTools {
   currentTime: boolean;
   location: boolean;
   multipleChoice: boolean;
+  hostComputer: boolean;
 }
 
 export interface StoredAttachment {
@@ -269,4 +279,6 @@ export type PublicConnectionConfig = Omit<ConnectionConfig, "apiKey"> & { apiKey
 export type PublicConfig = Omit<AppConfig, "connections"> & {
   connections: PublicConnectionConfig[];
   account?: AccountInfo;
+  /** Runtime capability, computed by the server and never persisted. */
+  hostComputerAvailable?: boolean;
 };

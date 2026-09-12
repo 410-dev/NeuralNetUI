@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Pencil, Check, Layers, Type, RotateCw, Minimize2, Clock, Zap } from "lucide-react";
+import { X, Pencil, Check, Layers, Type, RotateCw, Minimize2, Clock, Zap, ShieldCheck, ShieldQuestion, ShieldX } from "lucide-react";
 import type { HarnessSettings, PublicConfig } from "@/lib/types";
 import { DEFAULT_HARNESS_SETTINGS } from "@/lib/harness";
 import { useModalFocus } from "@/lib/use-modal-focus";
@@ -27,7 +27,8 @@ function OptionCards({ label, options, value, onSelect }: { label:string; option
 export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDraft:React.Dispatch<React.SetStateAction<PublicConfig>>}) {
   const ko=draft.preferences.language==="ko";
   const h=draft.harnessSettings || DEFAULT_HARNESS_SETTINGS;
-  const [prompt,setPrompt]=useState<"compactPrompt"|"resumePrompt"|"titlePrompt"|null>(null);
+  const [prompt,setPrompt]=useState<"compactPrompt"|"resumePrompt"|"titlePrompt"|"hostCommandAnalysisPrompt"|null>(null);
+  const superadmin=draft.account?.role==="superadmin";
   const patch=(value:Partial<HarnessSettings>)=>setDraft(d=>({...d,harnessSettings:{...(d.harnessSettings || DEFAULT_HARNESS_SETTINGS),...value}}));
   const effortLabel=(value:string)=>{ const label=EFFORT_LABELS[value]; return label ? label[ko?1:0] : value; };
   function modelFields(kind:"compact"|"title") {
@@ -79,6 +80,25 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
         <button type="button" className="subtle-action" onClick={()=>setPrompt("titlePrompt")}><Pencil size={16}/>{ko?"제목 생성 프롬프트 편집":"Edit title prompt"}</button>
       </div>}
     </section>
-    {prompt&&<TextDialog title={prompt==="compactPrompt"?(ko?"압축 프롬프트":"Compacting prompt"):prompt==="resumePrompt"?(ko?"재개 프롬프트":"Resume prompt"):(ko?"제목 생성 프롬프트":"Title prompt")} help={prompt==="resumePrompt"?(ko?"출력을 재개할 때 사용합니다. %COMPRESSED%는 압축된 맥락으로, %USER_PROMPT%는 원래 사용자 메시지로 치환됩니다.":"Used when resuming an interrupted response. %COMPRESSED% is replaced with the compacted context and %USER_PROMPT% with the original user message."):undefined} value={h[prompt]} multiline onClose={()=>setPrompt(null)} onSave={text=>{patch({[prompt]:text});setPrompt(null);}}/>}
+    {superadmin && <section className="settings-section wide">
+      <SectionTitle icon={<ShieldCheck size={19}/>} title={ko?"호스트 컴퓨터 권한":"Host computer permissions"} description={ko?"Superadmin 전용 에이전트 작업의 확인 범위와 독립 셸 명령 분석기를 설정합니다.":"Set confirmation boundaries and the isolated shell-command assessor for the Superadmin-only agent tool."}/>
+      <OptionCards label={ko?"신뢰 수준":"Trust mode"} value={h.hostTrustMode} onSelect={id=>patch({hostTrustMode:id as HarnessSettings["hostTrustMode"]})} options={[
+        { id:"full", icon:<ShieldCheck size={17}/>, title:ko?"완전 신뢰":"Full trust", description:ko?"어떤 작업에도 확인을 요청하지 않습니다.":"Never ask before a host action." },
+        { id:"partial", icon:<ShieldQuestion size={17}/>, title:ko?"부분 신뢰":"Partial trust", description:ko?"아래에서 선택한 위험도만 자동 허용합니다.":"Auto-allow only the selected risk levels." },
+        { id:"none", icon:<ShieldX size={17}/>, title:ko?"신뢰 안 함":"No trust", description:ko?"모든 호스트 작업을 매번 확인합니다.":"Confirm every host action." },
+      ]}/>
+      {h.hostTrustMode==="partial" && <div className="harness-advanced host-risk-matrix"><h4>{ko?"자동 허용 위험도":"Automatically trusted risk levels"}</h4>{[
+        ko?"1단계 · 파일 내용을 읽지 않는 상태 및 메타데이터 확인":"Level 1 · Status and metadata inspection without file contents",
+        ko?"2단계 · 파일 내용 또는 현재 화면 읽기":"Level 2 · Read file contents or the current screen",
+        ko?"3단계 · 생성, 수정, 복사, 이름·위치 변경, 실행 또는 업로드":"Level 3 · Create, modify, copy, rename, move, run, or upload",
+        ko?"4단계 · 영구 삭제 또는 프로세스 종료":"Level 4 · Permanent deletion or process termination",
+        ko?"5단계 · 컴퓨터 설정 변경 또는 목적 밖 작업":"Level 5 · Computer configuration or out-of-scope work",
+      ].map((label,index)=><div className="general-setting-card general-toggle-card" key={label}><div><strong>{label}</strong></div><button type="button" role="switch" aria-label={label} aria-checked={h.hostTrustedRiskLevels[index]===true} className={`toggle ${h.hostTrustedRiskLevels[index]?"on":""}`} onClick={()=>{const levels=[...h.hostTrustedRiskLevels];levels[index]=!levels[index];patch({hostTrustedRiskLevels:levels});}}><i/></button></div>)}</div>}
+      <div className="harness-advanced"><h4>{ko?"독립 셸 명령 분석":"Isolated shell-command analysis"}</h4><div className="form-grid">
+        <label className="field"><span>{ko?"분석 모델":"Assessment model"}</span><SelectMenu label={ko?"분석 모델":"Assessment model"} value={h.hostCommandModelId} options={[{value:"",label:ko?"현재 채팅의 기반 모델":"Current chat's base model"},...draft.models.filter(m=>!m.isAlias&&m.visible!==false).map(m=>({value:m.id,label:m.name}))]} onChange={value=>patch({hostCommandModelId:value,hostCommandEffort:"off"})}/><small>{ko?"명령어만 포함하는 별도 요청이며 채팅 기록을 전달하지 않습니다.":"This separate request contains only the command, never chat history."}</small></label>
+        <label className="field"><span>{ko?"추론 강도":"Reasoning effort"}</span><SelectMenu label={ko?"추론 강도":"Reasoning effort"} value={h.hostCommandEffort} options={[...new Set(["off",...(draft.models.find(m=>m.id===h.hostCommandModelId)?.reasoningEfforts||["on","minimal","low","medium","high","xhigh"])])].map(value=>({value,label:effortLabel(value)}))} onChange={value=>patch({hostCommandEffort:value})}/></label>
+      </div><button type="button" className="subtle-action" onClick={()=>setPrompt("hostCommandAnalysisPrompt")}><Pencil size={16}/>{ko?"위험도 분석 프롬프트 편집":"Edit risk-analysis prompt"}</button></div>
+    </section>}
+    {prompt&&<TextDialog title={prompt==="compactPrompt"?(ko?"압축 프롬프트":"Compacting prompt"):prompt==="resumePrompt"?(ko?"재개 프롬프트":"Resume prompt"):prompt==="hostCommandAnalysisPrompt"?(ko?"셸 명령 위험도 분석 프롬프트":"Shell-command risk analysis prompt"):(ko?"제목 생성 프롬프트":"Title prompt")} help={prompt==="resumePrompt"?(ko?"출력을 재개할 때 사용합니다. %COMPRESSED%는 압축된 맥락으로, %USER_PROMPT%는 원래 사용자 메시지로 치환됩니다.":"Used when resuming an interrupted response. %COMPRESSED% is replaced with the compacted context and %USER_PROMPT% with the original user message."):prompt==="hostCommandAnalysisPrompt"?(ko?"채팅 맥락과 분리된 요청의 시스템 프롬프트입니다. JSON 위험도와 투명한 설명을 요구해야 합니다.":"System prompt for the context-isolated request. It must require JSON risk and a transparent explanation."):undefined} value={h[prompt]} multiline onClose={()=>setPrompt(null)} onSave={text=>{patch({[prompt]:text});setPrompt(null);}}/>}
   </div>;
 }
