@@ -14,12 +14,40 @@ const mock = http.createServer(async (request, response) => {
   const body = raw ? JSON.parse(raw) : {};
   if (request.url !== "/v1/chat/completions") { response.writeHead(404).end(); return; }
   const browserResults = (body.messages || []).filter((message) => message.role === "tool" && message.name === "browser");
+  const choiceResults = (body.messages || []).filter((message) => message.role === "tool" && message.name === "ask_multiple_choice");
+  if (!browserResults.length) {
+    const browserTool = body.tools?.find((tool) => tool.function?.name === "browser")?.function;
+    const choicesTool = body.tools?.find((tool) => tool.function?.name === "ask_multiple_choice")?.function;
+    assert.match(browserTool.description, /up to 2 tabs/);
+    assert.ok(browserTool.parameters.properties.action.enum.includes("list_tabs"));
+    assert.ok(browserTool.parameters.properties.action.enum.includes("set_tab_metadata"));
+    assert.equal(choicesTool.parameters.properties.questions.maxItems, 5);
+  }
   response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
   if (!browserResults.length) {
-    sendEvent(response, { choices: [{ delta: { tool_calls: [{ index: 0, id: "open-browser", type: "function", function: { name: "browser", arguments: JSON.stringify({ action: "open", url: "https://example.com" }) } }] }, finish_reason: "tool_calls" }] });
+    sendEvent(response, { choices: [{ delta: { reasoning_content: "Opening a source tab. ", tool_calls: [{ index: 0, id: "open-browser", type: "function", function: { name: "browser", arguments: JSON.stringify({ action: "open", url: "https://example.com" }) } }] }, finish_reason: "tool_calls" }] });
     return;
   }
   if (browserResults.length === 1) {
+    const opened = JSON.parse(browserResults[0].content);
+    sendEvent(response, { choices: [{ delta: { reasoning_content: "Opening a comparison tab. ", tool_calls: [{ index: 0, id: "new-browser-tab", type: "function", function: { name: "browser", arguments: JSON.stringify({ action: "new_tab", session_id: opened.sessionId, url: "https://example.org" }) } }] }, finish_reason: "tool_calls" }] });
+    return;
+  }
+  if (browserResults.length === 2) {
+    const opened = JSON.parse(browserResults[0].content); const second = JSON.parse(browserResults[1].content);
+    sendEvent(response, { choices: [{ delta: { reasoning_content: "Labeling the reference. ", tool_calls: [{ index: 0, id: "label-browser-tab", type: "function", function: { name: "browser", arguments: JSON.stringify({ action: "set_tab_metadata", session_id: opened.sessionId, tab_id: second.tabId, label: "Reference", note: "Compare this source with the first tab." }) } }] }, finish_reason: "tool_calls" }] });
+    return;
+  }
+  if (browserResults.length === 3) {
+    const opened = JSON.parse(browserResults[0].content);
+    sendEvent(response, { choices: [{ delta: { tool_calls: [{ index: 0, id: "list-browser-tabs", type: "function", function: { name: "browser", arguments: JSON.stringify({ action: "list_tabs", session_id: opened.sessionId }) } }] }, finish_reason: "tool_calls" }] });
+    return;
+  }
+  if (browserResults.length === 4 && !choiceResults.length) {
+    sendEvent(response, { choices: [{ delta: { reasoning_content: "Confirming comparison preferences. ", tool_calls: [{ index: 0, id: "choice-check", type: "function", function: { name: "ask_multiple_choice", arguments: JSON.stringify({ questions: [{ question: "Keep both sources?", type: "single_select", options: ["Yes", "No"] }, { question: "Preferred source?", type: "single_select", options: ["First", "Reference"] }] }) } }] }, finish_reason: "tool_calls" }] });
+    return;
+  }
+  if (browserResults.length === 4 && choiceResults.length === 1) {
     const opened = JSON.parse(browserResults[0].content);
     sendEvent(response, { choices: [{ delta: { tool_calls: [{ index: 0, id: "handoff-browser", type: "function", function: { name: "browser", arguments: JSON.stringify({ action: "request_user", session_id: opened.sessionId, message: "Verify the shared page." }) } }] }, finish_reason: "tool_calls" }] });
     return;
@@ -47,7 +75,7 @@ async function waitForSnapshot(conversationId, predicate) {
     while (true) {
       const { done, value } = await reader.read(); if (done) break; buffered += decoder.decode(value, { stream: true });
       const lines = buffered.split("\n"); buffered = lines.pop() || "";
-      for (const line of lines) if (line.startsWith("data: {") && predicate(JSON.parse(line.slice(6)))) return;
+      for (const line of lines) if (line.startsWith("data: {") ) { const snapshot = JSON.parse(line.slice(6)); if (predicate(snapshot)) return snapshot; }
     }
   } finally { await reader.cancel().catch(() => undefined); }
   throw new Error("Expected chat snapshot was not received.");
@@ -60,17 +88,21 @@ try {
   let config = await json("/api/config");
   const model = { id: "browser-model", sourceModel: "browser-model", name: "Browser model", isAlias: false, visible: true, connectionId: "test", reasoningSupported: false, reasoningPresets: [] };
   config.connections = [{ id: "test", name: "Mock", driver: "openai", baseUrl: `http://127.0.0.1:${mock.address().port}/v1`, apiKey: "", models: [model] }];
-  config.models = [model]; config.experimental.browserTool = true;
+  config.models = [model]; config.experimental.browserTool = true; config.toolSettings.maxBrowserTabs = 2; config.toolSettings.maxMultipleChoiceQuestions = 5;
   await json("/api/config", "PUT", config);
   const stamp = new Date().toISOString(); const conversationId = "browser-view";
   const message = { id: "browser-request", role: "user", content: "Open the browser", createdAt: stamp };
   await json("/api/conversations", "POST", { id: conversationId, title: "Browser view", modelId: model.id, activeBranchId: "main", createdAt: stamp, updatedAt: stamp, branches: [{ id: "main", name: "Main", messages: [message], createdAt: stamp, updatedAt: stamp }] });
-  await json("/api/chat", "POST", { conversationId, branchId: "main", assistantMessageId: "browser-response", modelId: model.id, messages: [message], tools: { browser: true } });
-  await waitForSnapshot(conversationId, (snapshot) => snapshot.status === "waiting" && snapshot.message.toolEvents?.some((event) => event.id === "handoff-browser" && event.status === "waiting"));
+  await json("/api/chat", "POST", { conversationId, branchId: "main", assistantMessageId: "browser-response", modelId: model.id, messages: [message], tools: { browser: true, multipleChoice: true } });
+  await waitForSnapshot(conversationId, (snapshot) => snapshot.status === "waiting" && snapshot.message.toolEvents?.some((event) => event.id === "choice-check" && event.status === "waiting"));
+  await json(`/api/chat/${conversationId}/input`, "POST", { toolCallId: "choice-check", value: { answers: [{ question: "Keep both sources?", type: "single_select", selections: ["Yes"] }, { question: "Preferred source?", type: "single_select", selections: ["Reference"] }] } });
+  const waiting = await waitForSnapshot(conversationId, (snapshot) => snapshot.status === "waiting" && snapshot.message.toolEvents?.some((event) => event.id === "handoff-browser" && event.status === "waiting"));
+  const listed = waiting.message.toolEvents.find((event) => event.id === "list-browser-tabs")?.result;
+  assert.equal(listed.tabs.length, 2); assert.equal(listed.tabs[1].label, "Reference"); assert.match(listed.tabs[1].note, /Compare this source/);
   const state = await json(`/api/browser-view?conversationId=${conversationId}`); assert.equal(state.available, true); assert.equal(state.headed, process.platform === "win32" || process.platform === "darwin" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY));
-  assert.match(state.url, /^https:\/\/example\.com\/?$/);
+  assert.equal(state.maxTabs, 2); assert.equal(state.tabs.length, 2); assert.equal(state.tabs[1].label, "Reference"); assert.equal(state.tabs[1].active, true); assert.match(state.url, /^https:\/\/example\.org\/?$/);
   const frame = await api(`/api/browser-view?conversationId=${conversationId}&frame=1&sessionId=${encodeURIComponent(state.sessionId)}`); assert.equal(frame.status, 200); assert.equal(frame.headers.get("content-type"), "image/jpeg"); assert.ok((await frame.arrayBuffer()).byteLength > 1_000);
-  const navigated = await json(`/api/browser-view?conversationId=${conversationId}`, "POST", { action: "navigate", sessionId: state.sessionId, url: "https://example.org" }); assert.match(navigated.url, /^https:\/\/example\.org\/?$/);
+  const limited = await api(`/api/browser-view?conversationId=${conversationId}`, "POST", { action: "new_tab", sessionId: state.sessionId }); assert.equal(limited.status, 400); assert.match(await limited.text(), /limited to 2 tabs/);
   if (process.env.BROWSER_VIEW_QA_KEEP === "1") {
     console.log(`QA_READY ${root} browserqa BrowserLocal-20260913`);
     await new Promise((resolve) => {
@@ -79,9 +111,11 @@ try {
     });
     console.log("QA_STOPPED");
   } else {
+    const switched = await json(`/api/browser-view?conversationId=${conversationId}`, "POST", { action: "switch_tab", sessionId: state.sessionId, tabId: state.tabs[0].id }); assert.match(switched.url, /^https:\/\/example\.com\/?$/);
+    const closed = await json(`/api/browser-view?conversationId=${conversationId}`, "POST", { action: "close_tab", sessionId: state.sessionId, tabId: state.tabs[1].id }); assert.equal(closed.tabs.length, 1);
     await json(`/api/chat/${conversationId}/input`, "POST", { toolCallId: "handoff-browser", value: { completed: true } });
     await waitForSnapshot(conversationId, (snapshot) => snapshot.status === "completed" && snapshot.message.content.includes("Browser handoff completed."));
-    console.log("PASS: headed browser session, authenticated frame, navigation, human handoff, and completion");
+    console.log("PASS: headed multi-tab session, model tab list/labels, authenticated UI controls, human handoff, and completion");
   }
 } catch (error) { console.error(logs); throw error; }
 finally {

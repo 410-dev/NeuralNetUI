@@ -49,6 +49,8 @@
 - When browser mode is active, place one quiet monitor control with the other top-of-chat actions. A model handoff opens the same surface automatically so the user never has to hunt for it.
 - Keep desktop chat and browser as peers in a split layout. On narrow screens, let the browser become a dismissible full-screen surface instead of squeezing either pane or introducing horizontal scrolling.
 - The browser frame represents the exact Chromium page shared with the model. Preserve aspect ratio, map pointer and wheel coordinates back to the fixed browser viewport, and keep navigation and focused-field text entry immediately adjacent to the frame.
+- Put a horizontally scrollable tab strip above navigation. Titles come from pages, while model-assigned labels lead and notes remain available as concise tab context. New-tab availability must visibly follow the administrator's session limit.
+- Human and model controls operate on the same active tab. The model can list, label, note, open, switch, and close tabs by stable per-session identifiers; closing the last tab ends that browser session.
 - Human handoff is explicit: state why the model is waiting and provide one completion action. Closing the visual panel does not claim the task is complete or discard the shared session.
 - Browser frames and controls are authenticated conversation surfaces, not public media endpoints. Keep ownership checks and public-network navigation policy active for every operation.
 
@@ -58,6 +60,7 @@
 - Show one question at a time and use a short horizontal slide transition between questions.
 - Let the model choose single selection, multiple selection, or ranked selection according to the question.
 - Render submitted question-and-answer pairs as right-aligned user message bubbles before the model continues.
+- Align submitted question-and-answer bubbles to the same right edge as ordinary user messages, even though they belong to the assistant transcript in storage.
 - Keep the regular message composer visually secondary and unavailable while an answer is required.
 - Keep generation cancellation available while a question is waiting; restore ordinary input when the task stops or is no longer available.
 - Use motion only for active status indicators; completed and failed states must remain legible without animation.
@@ -69,6 +72,7 @@
 - Present a small set of exclusive modes as radio cards with an icon, a short name and one explanatory line, not as a bare dropdown.
 - Gather the controls that depend on a mode or switch inside one quiet bordered block under the choice that reveals them.
 - Break long numeric limit lists into labelled groups of related fields so each group reads as a short topic.
+- Put browser-tab and selectable-question caps in an Interactive tools group; schema validation and generated tool schemas must use the same saved limits.
 - Show a bounded percentage as a slider with its current value beside it.
 - Edit long harness prompts in a large separate modal; nested dialogs suspend the parent focus trap.
 - Search original history in a dedicated modal, show branch matches with snippets, and open the selected branch directly.
@@ -110,6 +114,7 @@
 
 - An assistant turn is a sequence, not a set of sections. Reasoning, delivered text, tool rounds and context compaction render in the order they happened, so text after a tool round sits after that round rather than above it.
 - Each stage owns its own fold and its own duration. Several reasoning blocks in one answer are normal.
+- Consecutive reasoning/tool folds use a compact gap. Keep a slightly larger, but still compact, gap where delivered prose meets a technical fold so the content boundary remains legible.
 - `content` and `reasoning` stay the concatenation of every stage, so copying, export and upstream history never depend on the transcript.
 - Context compaction is a stage of the answer, not a status line. It folds like a reasoning block and holds up to two panes: the compaction model's own reasoning and the summary that was kept. Never report it twice — while a stage is showing, the wait line stays quiet.
 - Messages written before the transcript existed carry no stages; reconstruct their fixed layout rather than dropping their content.

@@ -312,9 +312,9 @@ function waitForBrowser(job: ChatJob, call: ToolCall) {
   });
 }
 
-function validateQuestions(value: unknown) {
+function validateQuestions(value: unknown, maximum: number) {
   const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const questions = Array.isArray(record.questions) ? record.questions.slice(0, 3) : [];
+  const questions = Array.isArray(record.questions) ? record.questions.slice(0, maximum) : [];
   if (!questions.length) throw new Error("No multiple-choice questions were provided.");
   return { questions: questions.map((item, index) => {
     const question = item && typeof item === "object" ? item as Record<string, unknown> : {};
@@ -337,7 +337,7 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
     return { result: await reverseGeocode(Number(value.latitude), Number(value.longitude), Number(value.accuracy)) };
   }
   if (call.function.name === "ask_multiple_choice" && enabled.multipleChoice) {
-    const normalized = validateQuestions(args); updateToolEvent(job, call.id, { arguments: normalized });
+    const normalized = validateQuestions(args, settings.maxMultipleChoiceQuestions); updateToolEvent(job, call.id, { arguments: normalized });
     return { result: await waitForBrowser(job, call) };
   }
   if (call.function.name === "browser" && enabled.browser) {
@@ -348,7 +348,7 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
       const response = await waitForBrowser(job, call);
       return { result: { session_id: sessionId, ...(response && typeof response === "object" ? response as Record<string, unknown> : { completed: true }) } };
     }
-    return executeBrowserTool(ownerKey, call.function.arguments);
+    return executeBrowserTool(ownerKey, call.function.arguments, settings);
   }
   return executeWebTool(call.function.name, call.function.arguments, enabled, settings);
 }
@@ -374,7 +374,7 @@ async function run(job: ChatJob) {
       browser: job.input.tools?.browser === true && config.experimental?.browserTool === true,
       currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
     };
-    const tools = toolDefinitions(enabled);
+    const tools = toolDefinitions(enabled, config.toolSettings);
     const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
     const harnessContext = { config, model, userId: job.userId, signal: job.controller.signal, onPhase: (phase: ChatWaitPhase) => setWaitPhase(job, phase) };
     const firstResponse = !job.conversation.branches.some(b => b.messages.some(m => m.role === "assistant" && m.content));

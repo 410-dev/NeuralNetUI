@@ -122,9 +122,12 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 @keyframes message-enter { from { opacity: 0; transform: translateY(9px) scale(.992); } to { opacity: 1; transform: none; } }
 .user-message { display: flex; justify-content: flex-end; }
 .message-bubble { max-width: 75%; white-space: pre-wrap; font-size: 17px; line-height: 1.55; padding: 12px 17px; border-radius: 26px 26px 12px 26px; background: #232329; border: 1px solid rgba(255,255,255,.035); }
-.assistant-message { width: min(760px, 92%); white-space: pre-wrap; line-height: 1.75; color: #e6e8ec; }
+.assistant-message { width: 100%; white-space: pre-wrap; line-height: 1.75; color: #e6e8ec; }
+.assistant-message > .chat-wait-status, .assistant-message > .assistant-edit, .assistant-message > .assistant-copy, .assistant-message > .thinking-block, .assistant-message > .transcript-tools, .assistant-message > .assistant-footer { width: min(760px, 92%); }
+.assistant-message > .transcript-tools:has(.choice-response-row) { width: 100%; }
+.assistant-message > .transcript-tools > .tool-activity-group { width: min(760px, 92%); }
 .assistant-copy { min-height: 26px; }
-.thinking-block { margin-bottom: 14px; }
+.thinking-block { margin-bottom: 0; }
 .thinking-block > button { min-height: 39px; padding: 2px 0; display: flex; align-items: center; gap: 7px; color: var(--muted); background: transparent; font-size: 13px; }
 .thinking-preview-shell { position: relative; margin-top: 9px; }
 .thinking-preview { color: #93969d; font-size: 12.5px; line-height: 1.65; max-height: 260px; overflow-y: auto; overscroll-behavior: contain; margin-top: 0; padding: 11px 13px; white-space: pre-wrap; border-radius: 17px; background: rgba(24,24,28,.72); border: 1px solid rgba(255,255,255,.035); }
@@ -136,7 +139,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .thread-scroll-resume { position: absolute; z-index: 5; left: 50%; bottom: 15px; transform: translateX(-50%); }
 .thread-scroll-resume:hover { transform: translate(-50%, -2px); }
 .reasoning-scroll-resume { position: absolute; z-index: 2; right: 10px; bottom: 10px; width: 32px; height: 32px; }
-.tool-activity-group { margin: 11px 0 17px; white-space: normal; }
+.tool-activity-group { margin: 0; white-space: normal; }
 .tool-activity-group > summary, .tool-activity > summary { list-style: none; cursor: pointer; user-select: none; }
 .tool-activity-group > summary::-webkit-details-marker, .tool-activity > summary::-webkit-details-marker { display: none; }
 .tool-activity-group > summary { min-height: 39px; display: grid; grid-template-columns: 18px minmax(0,auto) 18px; align-items: center; justify-content: start; gap: 7px; color: var(--muted); font: inherit; }
@@ -193,7 +196,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .choice-composer-card > footer { min-height: 51px; display: flex; justify-content: flex-end; align-items: center; padding: 6px 18px 10px; }
 .choice-submit { min-width: 104px; min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 17px; border-radius: var(--radius-pill); color: white; background: var(--accent); font-size: 11.5px; }
 .choice-submit:disabled { color: var(--dim); background: rgba(255,255,255,.05); }
-.choice-response-row { width: 100%; display: flex; justify-content: flex-end; margin: 3px 0 18px; }
+.choice-response-row { width: 100%; display: flex; justify-content: flex-end; margin: 3px 0 12px; }
 .choice-response-bubble { max-width: 75%; display: grid; gap: 10px; padding: 12px 17px; border: 1px solid rgba(255,255,255,.035); border-radius: 26px 26px 12px 26px; color: var(--text); background: #232329; white-space: normal; }
 .choice-response-bubble small, .choice-response-bubble strong { display: block; }
 .choice-response-bubble small { margin-bottom: 3px; color: var(--muted); font-size: 10px; line-height: 1.4; }
@@ -844,10 +847,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
    2.1.4: the assistant transcript runs in sequence, and a compaction stage folds like reasoning.
    ============================================================================================ */
 
-/* Consecutive stages need the same rhythm the single content block used to have. */
-.assistant-message > .assistant-copy + .assistant-copy { margin-top: 12px; }
-.assistant-message > .transcript-tools + .assistant-copy, .assistant-message > .thinking-block + .assistant-copy { margin-top: 4px; }
-.assistant-message > .assistant-copy + .thinking-block, .assistant-message > .assistant-copy + .transcript-tools { margin-top: 14px; }
+/* Technical folds cluster tightly; prose keeps a slightly larger, still compact boundary. */
+.assistant-message > .assistant-copy + .assistant-copy { margin-top: 10px; }
+.assistant-message > .transcript-tools + .assistant-copy, .assistant-message > .thinking-block + .assistant-copy { margin-top: 9px; }
+.assistant-message > .assistant-copy + .thinking-block, .assistant-message > .assistant-copy + .transcript-tools { margin-top: 10px; }
+.assistant-message > .thinking-block + .thinking-block, .assistant-message > .thinking-block + .transcript-tools, .assistant-message > .transcript-tools + .thinking-block, .assistant-message > .transcript-tools + .transcript-tools { margin-top: 2px; }
 .transcript-tools:empty { display: none; }
 
 .compaction-block > button { color: var(--muted); }
@@ -880,6 +884,16 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .browser-split-head button, .browser-nav button { flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; color: var(--muted); background: transparent; }
 .browser-split-head button { width: 32px; height: 32px; }
 .browser-split-head button:hover, .browser-nav button:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,.06); }
+.browser-tabs { min-height: 38px; display: flex; align-items: end; gap: 3px; padding: 5px 8px 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; border-bottom: 1px solid var(--border); background: #141418; scrollbar-width: thin; }
+.browser-tab { min-width: 84px; max-width: 180px; height: 32px; flex: 0 1 180px; display: grid; grid-template-columns: minmax(0,1fr) 25px; align-items: center; border: 1px solid transparent; border-bottom: 0; border-radius: 13px 13px 0 0; color: var(--dim); background: rgba(255,255,255,.025); }
+.browser-tab.active { color: var(--text); border-color: var(--border); background: #1c1c21; }
+.browser-tab > button { min-width: 0; height: 100%; display: flex; align-items: center; gap: 7px; padding: 0 4px 0 10px; overflow: hidden; color: inherit; background: transparent; font-size: 10px; text-align: left; }
+.browser-tab > button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-tab > button > i { width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: var(--accent-bright); }
+.browser-tab > .browser-tab-close { width: 25px; padding: 0; justify-content: center; color: var(--dim); }
+.browser-tab > .browser-tab-close:hover { color: var(--text); }
+.browser-new-tab { width: 29px; height: 29px; flex: 0 0 29px; display: grid; place-items: center; margin-bottom: 2px; border-radius: 50%; color: var(--muted); background: transparent; }
+.browser-new-tab:hover { color: var(--text); background: rgba(255,255,255,.06); }
 .browser-nav { min-height: 48px; display: grid; grid-template-columns: 30px 30px 30px minmax(0,1fr) 31px; align-items: center; gap: 4px; padding: 7px 9px; border-bottom: 1px solid var(--border); }
 .browser-nav button { width: 30px; height: 30px; }
 .browser-nav input { min-width: 0; height: 34px; padding: 0 13px; border: 1px solid var(--border); border-radius: var(--radius-pill); outline: 0; color: #dfe1e5; background: #0c0c0f; font-size: 10.5px; }

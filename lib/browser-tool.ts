@@ -4,15 +4,16 @@ import { isIP } from "node:net";
 import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page, type Route } from "playwright-core";
 import type { ModelContentPart } from "./document-processing";
+import type { ToolSettings } from "./types";
 
 const ACTION_TIMEOUT_MS = 20_000;
 const SESSION_TTL_MS = 10 * 60_000;
 const MAX_SESSIONS = 8;
 const MAX_SESSIONS_PER_OWNER = 2;
 const MAX_TEXT_CHARACTERS = 24_000;
-const ALLOWED_ACTIONS = new Set(["open", "inspect", "click", "type", "select", "press", "scroll", "wait", "screenshot", "close"]);
+const ALLOWED_ACTIONS = new Set(["open", "inspect", "click", "type", "select", "press", "scroll", "wait", "screenshot", "list_tabs", "new_tab", "switch_tab", "close_tab", "set_tab_metadata", "close"]);
 const VIEWPORT = { width: 1280, height: 800 } as const;
-const BROWSER_VIEW_ACTIONS = new Set(["click", "drag", "scroll", "key", "insert_text", "navigate", "back", "forward", "reload"]);
+const BROWSER_VIEW_ACTIONS = new Set(["click", "drag", "scroll", "key", "insert_text", "navigate", "back", "forward", "reload", "new_tab", "switch_tab", "close_tab"]);
 
 type BrowserAction =
   | { action: "open"; url: string; waitSeconds: number; screenshot: boolean; fullPage: boolean }
@@ -24,19 +25,27 @@ type BrowserAction =
   | { action: "scroll"; sessionId: string; deltaY: number }
   | { action: "wait"; sessionId: string; waitSeconds: number }
   | { action: "screenshot"; sessionId: string; waitSeconds: number; fullPage: boolean }
+  | { action: "list_tabs"; sessionId: string }
+  | { action: "new_tab"; sessionId: string; url?: string; label: string; note: string }
+  | { action: "switch_tab" | "close_tab"; sessionId: string; tabId: string }
+  | { action: "set_tab_metadata"; sessionId: string; tabId: string; label?: string; note?: string }
   | { action: "close"; sessionId: string };
 
+type BrowserTab = { id: string; label: string; note: string; page: Page; createdAt: number };
 type BrowserSession = {
   id: string;
   ownerKey: string;
   context: BrowserContext;
-  page: Page;
+  tabs: Map<string, BrowserTab>;
+  activeTabId: string;
+  maxTabs: number;
   createdAt: number;
   touchedAt: number;
 };
 
 export type BrowserToolExecution = { result: unknown; content?: ModelContentPart[] };
-export type BrowserViewState = { available: boolean; sessionId?: string; url?: string; title?: string; width: number; height: number; headed: boolean };
+export type BrowserTabState = { id: string; title: string; url: string; label: string; note: string; active: boolean };
+export type BrowserViewState = { available: boolean; sessionId?: string; activeTabId?: string; tabs: BrowserTabState[]; maxTabs: number; url?: string; title?: string; width: number; height: number; headed: boolean };
 export type BrowserViewAction =
   | { action: "click"; sessionId: string; x: number; y: number }
   | { action: "drag"; sessionId: string; x: number; y: number; endX: number; endY: number }
@@ -44,6 +53,8 @@ export type BrowserViewAction =
   | { action: "key"; sessionId: string; key: string; modifiers: string[] }
   | { action: "insert_text"; sessionId: string; text: string }
   | { action: "navigate"; sessionId: string; url: string }
+  | { action: "new_tab"; sessionId: string }
+  | { action: "switch_tab" | "close_tab"; sessionId: string; tabId: string }
   | { action: "back" | "forward" | "reload"; sessionId: string };
 
 const sessions = new Map<string, BrowserSession>();
@@ -83,6 +94,19 @@ function stringValue(value: unknown, name: string, required = true) {
   return normalized;
 }
 
+function metadataValue(value: unknown, name: string, maximum: number) {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw new Error(`${name} must be text.`);
+  const normalized = value.trim();
+  if (normalized.length > maximum) throw new Error(`${name} is too long.`);
+  return normalized;
+}
+
+function optionalMetadataValue(value: unknown, name: string, maximum: number) {
+  if (value === undefined || value === null) return undefined;
+  return metadataValue(value, name, maximum);
+}
+
 function waitSeconds(value: unknown) {
   const number = Number(value || 0);
   return Number.isFinite(number) ? Math.max(0, Math.min(30, number)) : 0;
@@ -94,7 +118,15 @@ export function normalizeBrowserAction(value: unknown): BrowserAction {
   if (!ALLOWED_ACTIONS.has(action)) throw new Error("A supported browser action is required.");
   if (action === "open") return { action, url: stringValue(args.url, "url"), waitSeconds: waitSeconds(args.wait_seconds), screenshot: args.screenshot === true, fullPage: args.full_page === true };
   const sessionId = stringValue(args.session_id, "session_id");
-  if (action === "inspect" || action === "close") return { action, sessionId };
+  if (action === "inspect" || action === "list_tabs" || action === "close") return { action, sessionId };
+  if (action === "new_tab") return { action, sessionId, url: stringValue(args.url, "url", false) || undefined, label: metadataValue(args.label, "label", 80), note: metadataValue(args.note, "note", 1_000) };
+  if (action === "switch_tab" || action === "close_tab") return { action, sessionId, tabId: stringValue(args.tab_id, "tab_id") };
+  if (action === "set_tab_metadata") {
+    const label = optionalMetadataValue(args.label, "label", 80);
+    const note = optionalMetadataValue(args.note, "note", 1_000);
+    if (label === undefined && note === undefined) throw new Error("set_tab_metadata requires label or note.");
+    return { action, sessionId, tabId: stringValue(args.tab_id, "tab_id"), label, note };
+  }
   if (action === "wait") return { action, sessionId, waitSeconds: waitSeconds(args.wait_seconds) };
   if (action === "screenshot") return { action, sessionId, waitSeconds: waitSeconds(args.wait_seconds), fullPage: args.full_page === true };
   if (action === "scroll") {
@@ -185,7 +217,44 @@ async function guardRoute(route: Route) {
   catch { await route.abort("blockedbyclient"); }
 }
 
-async function newSession(ownerKey: string) {
+function configurePage(page: Page) {
+  page.setDefaultTimeout(ACTION_TIMEOUT_MS);
+  page.setDefaultNavigationTimeout(ACTION_TIMEOUT_MS);
+  page.on("dialog", (dialog) => void dialog.dismiss().catch(() => undefined));
+  page.on("download", (download) => void download.cancel().catch(() => undefined));
+}
+
+function registerTab(session: BrowserSession, page: Page, activate = true) {
+  const existing = [...session.tabs.values()].find((tab) => tab.page === page);
+  if (existing) { if (activate) session.activeTabId = existing.id; return existing; }
+  if (session.tabs.size >= session.maxTabs) { void page.close().catch(() => undefined); return undefined; }
+  configurePage(page);
+  const tab: BrowserTab = { id: crypto.randomUUID(), label: "", note: "", page, createdAt: Date.now() };
+  session.tabs.set(tab.id, tab);
+  if (activate) session.activeTabId = tab.id;
+  page.on("close", () => {
+    session.tabs.delete(tab.id);
+    if (session.activeTabId === tab.id) session.activeTabId = [...session.tabs.values()].sort((left, right) => right.createdAt - left.createdAt)[0]?.id || "";
+  });
+  return tab;
+}
+
+function activeTab(session: BrowserSession) {
+  const selected = session.tabs.get(session.activeTabId);
+  if (selected && !selected.page.isClosed()) return selected;
+  const fallback = [...session.tabs.values()].find((tab) => !tab.page.isClosed());
+  if (!fallback) throw new Error("The browser session has no open tabs.");
+  session.activeTabId = fallback.id;
+  return fallback;
+}
+
+function ownedTab(session: BrowserSession, tabId: string) {
+  const tab = session.tabs.get(tabId);
+  if (!tab || tab.page.isClosed()) throw new Error("Browser tab was not found or has been closed.");
+  return tab;
+}
+
+async function newSession(ownerKey: string, maxTabs: number) {
   await cleanupSessions();
   const owned = [...sessions.values()].filter((session) => session.ownerKey === ownerKey).sort((left, right) => left.touchedAt - right.touchedAt);
   while (owned.length >= MAX_SESSIONS_PER_OWNER) await closeSession(owned.shift()!);
@@ -196,18 +265,11 @@ async function newSession(ownerKey: string) {
   const context = await (await browserInstance()).newContext({ viewport: VIEWPORT, acceptDownloads: false, serviceWorkers: "block" });
   await context.route("**/*", guardRoute);
   await context.routeWebSocket("**/*", (webSocket) => webSocket.close());
+  const session: BrowserSession = { id: crypto.randomUUID(), ownerKey, context, tabs: new Map(), activeTabId: "", maxTabs, createdAt: Date.now(), touchedAt: Date.now() };
   const page = await context.newPage();
-  page.setDefaultTimeout(ACTION_TIMEOUT_MS);
-  page.setDefaultNavigationTimeout(ACTION_TIMEOUT_MS);
-  page.on("dialog", (dialog) => void dialog.dismiss().catch(() => undefined));
-  page.on("download", (download) => void download.cancel().catch(() => undefined));
-  const session: BrowserSession = { id: crypto.randomUUID(), ownerKey, context, page, createdAt: Date.now(), touchedAt: Date.now() };
+  registerTab(session, page);
   context.on("page", (nextPage) => {
-    if (nextPage === page) return;
-    nextPage.setDefaultTimeout(ACTION_TIMEOUT_MS); nextPage.setDefaultNavigationTimeout(ACTION_TIMEOUT_MS);
-    nextPage.on("dialog", (dialog) => void dialog.dismiss().catch(() => undefined));
-    nextPage.on("download", (download) => void download.cancel().catch(() => undefined));
-    session.page = nextPage;
+    if (nextPage !== page) registerTab(session, nextPage);
   });
   sessions.set(session.id, session);
   return session;
@@ -261,12 +323,26 @@ export function normalizeBrowserViewAction(value: unknown): BrowserViewAction {
     return { action, sessionId, text };
   }
   if (action === "navigate") return { action, sessionId, url: stringValue(input.url, "url") };
+  if (action === "new_tab") return { action, sessionId };
+  if (action === "switch_tab" || action === "close_tab") return { action, sessionId, tabId: stringValue(input.tabId, "tabId") };
   return { action: action as "back" | "forward" | "reload", sessionId };
 }
 
+async function tabStates(session: BrowserSession) {
+  return Promise.all([...session.tabs.values()].filter((tab) => !tab.page.isClosed()).map(async (tab): Promise<BrowserTabState> => ({
+    id: tab.id,
+    title: await tab.page.title().catch(() => ""),
+    url: tab.page.url(),
+    label: tab.label,
+    note: tab.note,
+    active: tab.id === session.activeTabId,
+  })));
+}
+
 async function viewState(session?: BrowserSession): Promise<BrowserViewState> {
-  if (!session || session.page.isClosed()) return { available: false, width: VIEWPORT.width, height: VIEWPORT.height, headed: browserIsHeaded() };
-  return { available: true, sessionId: session.id, url: session.page.url(), title: await session.page.title().catch(() => ""), width: VIEWPORT.width, height: VIEWPORT.height, headed: browserIsHeaded() };
+  if (!session || !session.tabs.size) return { available: false, tabs: [], maxTabs: session?.maxTabs || 0, width: VIEWPORT.width, height: VIEWPORT.height, headed: browserIsHeaded() };
+  const tab = activeTab(session);
+  return { available: true, sessionId: session.id, activeTabId: tab.id, tabs: await tabStates(session), maxTabs: session.maxTabs, url: tab.page.url(), title: await tab.page.title().catch(() => ""), width: VIEWPORT.width, height: VIEWPORT.height, headed: browserIsHeaded() };
 }
 
 export async function browserViewState(userId: string, conversationId: string) {
@@ -276,28 +352,40 @@ export async function browserViewState(userId: string, conversationId: string) {
 
 export async function captureBrowserView(userId: string, conversationId: string, sessionId: string) {
   const session = conversationSession(userId, conversationId, sessionId);
-  if (!session || session.page.isClosed()) throw new Error("Browser session was not found or has expired.");
-  return session.page.screenshot({ type: "jpeg", quality: 76, animations: "disabled" });
+  if (!session) throw new Error("Browser session was not found or has expired.");
+  return activeTab(session).page.screenshot({ type: "jpeg", quality: 76, animations: "disabled" });
 }
 
 export async function controlBrowserView(userId: string, conversationId: string, raw: unknown) {
   const action = normalizeBrowserViewAction(raw);
   const session = conversationSession(userId, conversationId, action.sessionId);
-  if (!session || session.page.isClosed()) throw new Error("Browser session was not found or has expired.");
+  if (!session) throw new Error("Browser session was not found or has expired.");
   session.touchedAt = Date.now();
-  if (action.action === "click") await session.page.mouse.click(action.x, action.y);
-  if (action.action === "drag") {
-    await session.page.mouse.move(action.x, action.y); await session.page.mouse.down();
-    await session.page.mouse.move(action.endX, action.endY, { steps: 12 }); await session.page.mouse.up();
+  if (action.action === "new_tab") {
+    if (session.tabs.size >= session.maxTabs) throw new Error(`This browser session is limited to ${session.maxTabs} tabs.`);
+    const page = await session.context.newPage(); registerTab(session, page);
+    return viewState(session);
   }
-  if (action.action === "scroll") { await session.page.mouse.move(action.x, action.y); await session.page.mouse.wheel(action.deltaX, action.deltaY); }
-  if (action.action === "key") await session.page.keyboard.press([...action.modifiers, action.key].join("+"));
-  if (action.action === "insert_text") await session.page.keyboard.insertText(action.text);
-  if (action.action === "navigate") await session.page.goto((await assertPublicBrowserUrl(action.url)).toString(), { waitUntil: "domcontentloaded" });
-  if (action.action === "back") await session.page.goBack({ waitUntil: "domcontentloaded" });
-  if (action.action === "forward") await session.page.goForward({ waitUntil: "domcontentloaded" });
-  if (action.action === "reload") await session.page.reload({ waitUntil: "domcontentloaded" });
-  await session.page.waitForTimeout(120);
+  if (action.action === "switch_tab") { session.activeTabId = ownedTab(session, action.tabId).id; await activeTab(session).page.bringToFront(); return viewState(session); }
+  if (action.action === "close_tab") {
+    const tab = ownedTab(session, action.tabId); await tab.page.close();
+    if (!session.tabs.size) { await closeSession(session); return viewState(); }
+    return viewState(session);
+  }
+  const page = activeTab(session).page;
+  if (action.action === "click") await page.mouse.click(action.x, action.y);
+  if (action.action === "drag") {
+    await page.mouse.move(action.x, action.y); await page.mouse.down();
+    await page.mouse.move(action.endX, action.endY, { steps: 12 }); await page.mouse.up();
+  }
+  if (action.action === "scroll") { await page.mouse.move(action.x, action.y); await page.mouse.wheel(action.deltaX, action.deltaY); }
+  if (action.action === "key") await page.keyboard.press([...action.modifiers, action.key].join("+"));
+  if (action.action === "insert_text") await page.keyboard.insertText(action.text);
+  if (action.action === "navigate") await page.goto((await assertPublicBrowserUrl(action.url)).toString(), { waitUntil: "domcontentloaded" });
+  if (action.action === "back") await page.goBack({ waitUntil: "domcontentloaded" });
+  if (action.action === "forward") await page.goForward({ waitUntil: "domcontentloaded" });
+  if (action.action === "reload") await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(120);
   return viewState(session);
 }
 
@@ -333,15 +421,16 @@ async function snapshot(page: Page) {
 }
 
 async function capture(session: BrowserSession, fullPage: boolean) {
-  const dimensions = fullPage ? await session.page.evaluate(() => ({
+  const tab = activeTab(session); const page = tab.page;
+  const dimensions = fullPage ? await page.evaluate(() => ({
     width: Math.min(1440, Math.max(document.documentElement.clientWidth, document.body?.scrollWidth || 0)),
     height: Math.min(8000, Math.max(document.documentElement.clientHeight, document.body?.scrollHeight || 0)),
   })) : undefined;
-  const buffer = await session.page.screenshot({ type: "jpeg", quality: 78, animations: "disabled", ...(dimensions ? { clip: { x: 0, y: 0, ...dimensions } } : {}) });
+  const buffer = await page.screenshot({ type: "jpeg", quality: 78, animations: "disabled", ...(dimensions ? { clip: { x: 0, y: 0, ...dimensions } } : {}) });
   return {
-    result: { sessionId: session.id, url: session.page.url(), screenshot: true, fullPage, bounded: fullPage, size: buffer.length },
+    result: { sessionId: session.id, tabId: tab.id, url: page.url(), screenshot: true, fullPage, bounded: fullPage, size: buffer.length },
     content: [
-      { type: "text", text: JSON.stringify({ sessionId: session.id, url: session.page.url(), screenshot: true, fullPage }) },
+      { type: "text", text: JSON.stringify({ sessionId: session.id, tabId: tab.id, url: page.url(), screenshot: true, fullPage }) },
       { type: "image_url", image_url: { url: `data:image/jpeg;base64,${buffer.toString("base64")}` } },
     ] satisfies ModelContentPart[],
   };
@@ -351,36 +440,67 @@ async function pause(seconds: number) {
   if (seconds > 0) await new Promise((resolve) => setTimeout(resolve, seconds * 1_000));
 }
 
-export async function executeBrowserTool(ownerKey: string, rawArguments: string): Promise<BrowserToolExecution> {
+export async function executeBrowserTool(ownerKey: string, rawArguments: string, settings: ToolSettings): Promise<BrowserToolExecution> {
   let raw: unknown;
   try { raw = JSON.parse(rawArguments || "{}"); } catch { throw new Error("Browser tool arguments were not valid JSON."); }
   const action = normalizeBrowserAction(raw);
   if (action.action === "open") {
     const url = await assertPublicBrowserUrl(action.url);
-    const session = await newSession(ownerKey);
+    const session = await newSession(ownerKey, settings.maxBrowserTabs);
     try {
-      await session.page.goto(url.toString(), { waitUntil: "domcontentloaded" });
+      const tab = activeTab(session); await tab.page.goto(url.toString(), { waitUntil: "domcontentloaded" });
       await pause(action.waitSeconds);
       if (action.screenshot) return capture(session, action.fullPage);
-      const state = await snapshot(session.page);
-      return { result: { sessionId: session.id, ...state }, content: [{ type: "text", text: JSON.stringify({ sessionId: session.id, ...state }) }] };
+      const state = await snapshot(tab.page);
+      const result = { sessionId: session.id, tabId: tab.id, maxTabs: session.maxTabs, ...state };
+      return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
     } catch (error) { await closeSession(session); throw error; }
   }
   const session = ownedSession(ownerKey, action.sessionId);
   if (action.action === "close") { await closeSession(session); return { result: { sessionId: action.sessionId, closed: true } }; }
-  if (action.action === "wait") await pause(action.waitSeconds);
-  if (action.action === "click") await session.page.locator(targetSelector(action.target)).first().click();
-  if (action.action === "type") await session.page.locator(targetSelector(action.target)).first().fill(action.text);
-  if (action.action === "select") await session.page.locator(targetSelector(action.target)).first().selectOption(action.value);
-  if (action.action === "press") {
-    if (action.target) await session.page.locator(targetSelector(action.target)).first().press(action.key);
-    else await session.page.keyboard.press(action.key);
+  if (action.action === "list_tabs") return { result: { sessionId: session.id, activeTabId: session.activeTabId, maxTabs: session.maxTabs, tabs: await tabStates(session) } };
+  if (action.action === "new_tab") {
+    if (session.tabs.size >= session.maxTabs) throw new Error(`This browser session is limited to ${session.maxTabs} tabs.`);
+    const url = action.url ? await assertPublicBrowserUrl(action.url) : undefined;
+    const page = await session.context.newPage(); const tab = registerTab(session, page);
+    if (!tab) throw new Error(`This browser session is limited to ${session.maxTabs} tabs.`);
+    tab.label = action.label; tab.note = action.note;
+    if (url) await page.goto(url.toString(), { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(120);
+    const state = await snapshot(page); const result = { sessionId: session.id, tabId: tab.id, maxTabs: session.maxTabs, ...state };
+    return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
   }
-  if (action.action === "scroll") await session.page.mouse.wheel(0, action.deltaY);
+  if (action.action === "switch_tab") {
+    const tab = ownedTab(session, action.tabId); session.activeTabId = tab.id; await tab.page.bringToFront();
+    const state = await snapshot(tab.page); const result = { sessionId: session.id, tabId: tab.id, ...state };
+    return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
+  }
+  if (action.action === "set_tab_metadata") {
+    const tab = ownedTab(session, action.tabId);
+    if (action.label !== undefined) tab.label = action.label;
+    if (action.note !== undefined) tab.note = action.note;
+    return { result: { sessionId: session.id, tabId: tab.id, label: tab.label, note: tab.note, tabs: await tabStates(session) } };
+  }
+  if (action.action === "close_tab") {
+    const tab = ownedTab(session, action.tabId); await tab.page.close();
+    if (!session.tabs.size) { await closeSession(session); return { result: { sessionId: session.id, tabId: tab.id, closed: true, sessionClosed: true } }; }
+    const next = activeTab(session); const state = await snapshot(next.page); const result = { sessionId: session.id, tabId: next.id, closedTabId: tab.id, ...state };
+    return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
+  }
+  const page = activeTab(session).page;
+  if (action.action === "wait") await pause(action.waitSeconds);
+  if (action.action === "click") await page.locator(targetSelector(action.target)).first().click();
+  if (action.action === "type") await page.locator(targetSelector(action.target)).first().fill(action.text);
+  if (action.action === "select") await page.locator(targetSelector(action.target)).first().selectOption(action.value);
+  if (action.action === "press") {
+    if (action.target) await page.locator(targetSelector(action.target)).first().press(action.key);
+    else await page.keyboard.press(action.key);
+  }
+  if (action.action === "scroll") await page.mouse.wheel(0, action.deltaY);
   if (action.action === "screenshot") { await pause(action.waitSeconds); return capture(session, action.fullPage); }
-  await session.page.waitForTimeout(250);
-  const state = await snapshot(session.page);
-  return { result: { sessionId: session.id, ...state }, content: [{ type: "text", text: JSON.stringify({ sessionId: session.id, ...state }) }] };
+  await page.waitForTimeout(250);
+  const state = await snapshot(page); const tab = activeTab(session); const result = { sessionId: session.id, tabId: tab.id, ...state };
+  return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
 }
 
 export async function closeBrowserSessions(ownerKey: string) {

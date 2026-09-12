@@ -11,7 +11,7 @@ import type { ToolSettings } from "./types";
 export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; browser?: boolean; currentTime?: boolean; location?: boolean; multipleChoice?: boolean };
 export type WebToolExecution = { result: unknown; content?: ModelContentPart[] };
 
-export function toolDefinitions(enabled: EnabledWebTools) {
+export function toolDefinitions(enabled: EnabledWebTools, settings: ToolSettings) {
   const tools: Array<Record<string, unknown>> = [];
   if (enabled.internetSearch) tools.push({
     type: "function",
@@ -33,13 +33,16 @@ export function toolDefinitions(enabled: EnabledWebTools) {
     type: "function",
     function: {
       name: "browser",
-      description: "Control a real JavaScript-enabled browser for pages that visit_page cannot render. Open a public page, inspect its visible text and numbered element refs, then click, type, select, press keys, scroll, wait, or take a screenshot. Reuse the returned session_id for later actions. If a CAPTCHA or another step needs the person, use request_user with that session; they can operate the same browser in split view and mark the handoff complete. To capture a page n seconds after opening, use action=open with wait_seconds=n and screenshot=true. Close the session when finished.",
+      description: `Control a real JavaScript-enabled browser for pages that visit_page cannot render. One session supports up to ${settings.maxBrowserTabs} tabs. Open a session, inspect and interact with its active tab, and use list_tabs, new_tab, switch_tab, close_tab, and set_tab_metadata to organize parallel work. Tab listings include title, URL, model-assigned label, and note. Reuse session_id and tab_id values exactly. If a CAPTCHA or another step needs the person, use request_user; they can operate the same tabs in split view and mark the handoff complete. Close the session when finished.`,
       parameters: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["open", "inspect", "click", "type", "select", "press", "scroll", "wait", "screenshot", "request_user", "close"] },
+          action: { type: "string", enum: ["open", "inspect", "click", "type", "select", "press", "scroll", "wait", "screenshot", "list_tabs", "new_tab", "switch_tab", "close_tab", "set_tab_metadata", "request_user", "close"] },
           url: { type: "string", description: "Public HTTP(S) URL; required for open" },
           session_id: { type: "string", description: "Session returned by open; required for every other action" },
+          tab_id: { type: "string", description: "Tab identifier from open, new_tab, or list_tabs; required for switch_tab, close_tab, and set_tab_metadata" },
+          label: { type: "string", description: "Short model-assigned tab label for new_tab or set_tab_metadata; omitted fields are preserved and an empty string clears one" },
+          note: { type: "string", description: "Model note describing the tab's purpose or findings; omitted fields are preserved and an empty string clears one" },
           target: { type: "string", description: "Element ref such as e3 from the latest snapshot, or a CSS selector" },
           text: { type: "string", description: "Replacement text for type" },
           value: { type: "string", description: "Option value for select" },
@@ -74,12 +77,12 @@ export function toolDefinitions(enabled: EnabledWebTools) {
     type: "function",
     function: {
       name: "ask_multiple_choice",
-      description: "Ask the user up to 3 concise questions using selectable options. Choose single_select when exactly one answer is appropriate, multi_select when several answers may be chosen, or rank_priorities when order matters. Use for ambiguous preferences, not for already-clear or emotional conversational questions. The tool pauses the turn until the user answers each question.",
+      description: `Ask the user up to ${settings.maxMultipleChoiceQuestions} concise questions using selectable options. Choose single_select when exactly one answer is appropriate, multi_select when several answers may be chosen, or rank_priorities when order matters. Use for ambiguous preferences, not for already-clear or emotional conversational questions. The tool pauses the turn until the user answers each question.`,
       parameters: {
         type: "object",
         properties: {
           questions: {
-            type: "array", minItems: 1, maxItems: 3,
+            type: "array", minItems: 1, maxItems: settings.maxMultipleChoiceQuestions,
             items: {
               type: "object",
               properties: {

@@ -142,6 +142,8 @@ export interface ExperimentalFeatures {
 
 export interface ToolSettings {
   maxToolRounds: number;
+  maxBrowserTabs: number;
+  maxMultipleChoiceQuestions: number;
   maxAttachmentsPerMessage: number;
   textDownloadLimitMb: number;
   textCharacterLimit: number;
