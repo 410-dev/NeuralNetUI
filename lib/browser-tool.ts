@@ -11,6 +11,8 @@ const MAX_SESSIONS = 8;
 const MAX_SESSIONS_PER_OWNER = 2;
 const MAX_TEXT_CHARACTERS = 24_000;
 const ALLOWED_ACTIONS = new Set(["open", "inspect", "click", "type", "select", "press", "scroll", "wait", "screenshot", "close"]);
+const VIEWPORT = { width: 1280, height: 800 } as const;
+const BROWSER_VIEW_ACTIONS = new Set(["click", "drag", "scroll", "key", "insert_text", "navigate", "back", "forward", "reload"]);
 
 type BrowserAction =
   | { action: "open"; url: string; waitSeconds: number; screenshot: boolean; fullPage: boolean }
@@ -34,10 +36,23 @@ type BrowserSession = {
 };
 
 export type BrowserToolExecution = { result: unknown; content?: ModelContentPart[] };
+export type BrowserViewState = { available: boolean; sessionId?: string; url?: string; title?: string; width: number; height: number; headed: boolean };
+export type BrowserViewAction =
+  | { action: "click"; sessionId: string; x: number; y: number }
+  | { action: "drag"; sessionId: string; x: number; y: number; endX: number; endY: number }
+  | { action: "scroll"; sessionId: string; x: number; y: number; deltaX: number; deltaY: number }
+  | { action: "key"; sessionId: string; key: string; modifiers: string[] }
+  | { action: "insert_text"; sessionId: string; text: string }
+  | { action: "navigate"; sessionId: string; url: string }
+  | { action: "back" | "forward" | "reload"; sessionId: string };
 
 const sessions = new Map<string, BrowserSession>();
 let sharedBrowser: Browser | undefined;
 let launchPromise: Promise<Browser> | undefined;
+
+function browserIsHeaded() {
+  return process.platform === "win32" || process.platform === "darwin" || Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+}
 
 export function privateBrowserAddress(address: string) {
   const normalized = address.toLowerCase().split("%")[0];
@@ -136,8 +151,11 @@ async function browserInstance() {
   if (!launchPromise) launchPromise = (async () => {
     const browser = await chromium.launch({
       executablePath: await executablePath(),
-      headless: true,
-      args: process.platform === "linux" ? ["--disable-dev-shm-usage", "--no-sandbox"] : [],
+      headless: !browserIsHeaded(),
+      args: [
+        ...(process.platform === "linux" ? ["--disable-dev-shm-usage", "--no-sandbox"] : []),
+        ...(browserIsHeaded() ? ["--window-position=-32000,-32000", `--window-size=${VIEWPORT.width},${VIEWPORT.height}`] : []),
+      ],
     });
     browser.on("disconnected", () => { if (sharedBrowser === browser) sharedBrowser = undefined; });
     sharedBrowser = browser;
@@ -175,7 +193,7 @@ async function newSession(ownerKey: string) {
     const oldest = [...sessions.values()].sort((left, right) => left.touchedAt - right.touchedAt)[0];
     if (oldest) await closeSession(oldest);
   }
-  const context = await (await browserInstance()).newContext({ viewport: { width: 1280, height: 800 }, acceptDownloads: false, serviceWorkers: "block" });
+  const context = await (await browserInstance()).newContext({ viewport: VIEWPORT, acceptDownloads: false, serviceWorkers: "block" });
   await context.route("**/*", guardRoute);
   await context.routeWebSocket("**/*", (webSocket) => webSocket.close());
   const page = await context.newPage();
@@ -200,6 +218,87 @@ function ownedSession(ownerKey: string, sessionId: string) {
   if (!session || session.ownerKey !== ownerKey) throw new Error("Browser session was not found or has expired.");
   session.touchedAt = Date.now();
   return session;
+}
+
+export function assertOwnedBrowserSession(ownerKey: string, sessionId: string) {
+  return ownedSession(ownerKey, sessionId);
+}
+
+function conversationSession(userId: string, conversationId: string, sessionId?: string) {
+  const prefix = `${userId}:${conversationId}:`;
+  const matching = [...sessions.values()].filter((session) => session.ownerKey.startsWith(prefix) && (!sessionId || session.id === sessionId));
+  const session = matching.sort((left, right) => right.touchedAt - left.touchedAt)[0];
+  if (session) session.touchedAt = Date.now();
+  return session;
+}
+
+export function normalizeBrowserViewAction(value: unknown): BrowserViewAction {
+  const input = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const action = String(input.action || "").toLowerCase();
+  if (!BROWSER_VIEW_ACTIONS.has(action)) throw new Error("A supported browser view action is required.");
+  const sessionId = stringValue(input.sessionId, "sessionId");
+  const coordinate = (raw: unknown, maximum: number) => {
+    const number = Number(raw);
+    if (!Number.isFinite(number)) throw new Error("Browser coordinates must be finite numbers.");
+    return Math.max(0, Math.min(maximum, number));
+  };
+  if (action === "click") return { action, sessionId, x: coordinate(input.x, VIEWPORT.width), y: coordinate(input.y, VIEWPORT.height) };
+  if (action === "drag") return { action, sessionId, x: coordinate(input.x, VIEWPORT.width), y: coordinate(input.y, VIEWPORT.height), endX: coordinate(input.endX, VIEWPORT.width), endY: coordinate(input.endY, VIEWPORT.height) };
+  if (action === "scroll") {
+    const finiteDelta = (raw: unknown) => Number.isFinite(Number(raw)) ? Math.max(-10_000, Math.min(10_000, Number(raw))) : 0;
+    return { action, sessionId, x: coordinate(input.x, VIEWPORT.width), y: coordinate(input.y, VIEWPORT.height), deltaX: finiteDelta(input.deltaX), deltaY: finiteDelta(input.deltaY) };
+  }
+  if (action === "key") {
+    const key = stringValue(input.key, "key");
+    if (key.length > 80) throw new Error("The browser key is too long.");
+    const allowedModifiers = new Set(["Alt", "Control", "Meta", "Shift"]);
+    const modifiers = Array.isArray(input.modifiers) ? input.modifiers.map(String).filter((item) => allowedModifiers.has(item)).slice(0, 4) : [];
+    return { action, sessionId, key, modifiers };
+  }
+  if (action === "insert_text") {
+    const text = typeof input.text === "string" ? input.text : "";
+    if (!text || text.length > 4_000) throw new Error("Browser text must contain 1 to 4000 characters.");
+    return { action, sessionId, text };
+  }
+  if (action === "navigate") return { action, sessionId, url: stringValue(input.url, "url") };
+  return { action: action as "back" | "forward" | "reload", sessionId };
+}
+
+async function viewState(session?: BrowserSession): Promise<BrowserViewState> {
+  if (!session || session.page.isClosed()) return { available: false, width: VIEWPORT.width, height: VIEWPORT.height, headed: browserIsHeaded() };
+  return { available: true, sessionId: session.id, url: session.page.url(), title: await session.page.title().catch(() => ""), width: VIEWPORT.width, height: VIEWPORT.height, headed: browserIsHeaded() };
+}
+
+export async function browserViewState(userId: string, conversationId: string) {
+  await cleanupSessions();
+  return viewState(conversationSession(userId, conversationId));
+}
+
+export async function captureBrowserView(userId: string, conversationId: string, sessionId: string) {
+  const session = conversationSession(userId, conversationId, sessionId);
+  if (!session || session.page.isClosed()) throw new Error("Browser session was not found or has expired.");
+  return session.page.screenshot({ type: "jpeg", quality: 76, animations: "disabled" });
+}
+
+export async function controlBrowserView(userId: string, conversationId: string, raw: unknown) {
+  const action = normalizeBrowserViewAction(raw);
+  const session = conversationSession(userId, conversationId, action.sessionId);
+  if (!session || session.page.isClosed()) throw new Error("Browser session was not found or has expired.");
+  session.touchedAt = Date.now();
+  if (action.action === "click") await session.page.mouse.click(action.x, action.y);
+  if (action.action === "drag") {
+    await session.page.mouse.move(action.x, action.y); await session.page.mouse.down();
+    await session.page.mouse.move(action.endX, action.endY, { steps: 12 }); await session.page.mouse.up();
+  }
+  if (action.action === "scroll") { await session.page.mouse.move(action.x, action.y); await session.page.mouse.wheel(action.deltaX, action.deltaY); }
+  if (action.action === "key") await session.page.keyboard.press([...action.modifiers, action.key].join("+"));
+  if (action.action === "insert_text") await session.page.keyboard.insertText(action.text);
+  if (action.action === "navigate") await session.page.goto((await assertPublicBrowserUrl(action.url)).toString(), { waitUntil: "domcontentloaded" });
+  if (action.action === "back") await session.page.goBack({ waitUntil: "domcontentloaded" });
+  if (action.action === "forward") await session.page.goForward({ waitUntil: "domcontentloaded" });
+  if (action.action === "reload") await session.page.reload({ waitUntil: "domcontentloaded" });
+  await session.page.waitForTimeout(120);
+  return viewState(session);
 }
 
 function targetSelector(target: string) {

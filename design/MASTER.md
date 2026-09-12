@@ -44,6 +44,14 @@
 - Match tool headings to the reasoning heading typography: unboxed icons, regular weight, and the same font sizing.
 - Show localized tool-call markers only in the rendered reasoning view; never mix those markers into stored or upstream reasoning content.
 
+## Shared browser surface
+
+- When browser mode is active, place one quiet monitor control with the other top-of-chat actions. A model handoff opens the same surface automatically so the user never has to hunt for it.
+- Keep desktop chat and browser as peers in a split layout. On narrow screens, let the browser become a dismissible full-screen surface instead of squeezing either pane or introducing horizontal scrolling.
+- The browser frame represents the exact Chromium page shared with the model. Preserve aspect ratio, map pointer and wheel coordinates back to the fixed browser viewport, and keep navigation and focused-field text entry immediately adjacent to the frame.
+- Human handoff is explicit: state why the model is waiting and provide one completion action. Closing the visual panel does not claim the task is complete or discard the shared session.
+- Browser frames and controls are authenticated conversation surfaces, not public media endpoints. Keep ownership checks and public-network navigation policy active for every operation.
+
 ## Selectable questions
 
 - Present model questions above the composer rather than inside the technical tool disclosure.

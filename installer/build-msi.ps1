@@ -62,7 +62,7 @@ try {
     $previousBrowserPath = $env:PLAYWRIGHT_BROWSERS_PATH
     try {
         $env:PLAYWRIGHT_BROWSERS_PATH = $browserRoot
-        & (Join-Path $repoRoot "node_modules\.bin\playwright-core.cmd") install chromium
+        & (Join-Path $repoRoot "node_modules\.bin\playwright-core.cmd") install chromium --no-shell
         if ($LASTEXITCODE -ne 0) { throw "The Chromium browser runtime could not be bundled." }
     } finally {
         $env:PLAYWRIGHT_BROWSERS_PATH = $previousBrowserPath
@@ -98,7 +98,7 @@ try {
         -ext WixToolset.UI.wixext `
         -d "StagePath=$stageRoot" `
         -intermediatefolder (Join-Path $buildRoot "wixobj") `
-        -o (Join-Path $outputRoot "NeuralNetUI-2.1.8-x64.msi")
+        -o (Join-Path $outputRoot "NeuralNetUI-2.2.0-beta.1-x64.msi")
     if ($LASTEXITCODE -ne 0) { throw "The MSI build failed." }
 } finally {
     Pop-Location

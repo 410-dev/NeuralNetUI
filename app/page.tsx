@@ -18,9 +18,9 @@ import {
   FileText, GitBranch, GripVertical, ImagePlus, KeyRound, LoaderCircle, Menu, MessageSquarePlus, Pencil, Plus, RefreshCw,
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
   LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload,
-  Palette, PanelLeftClose, PanelLeftOpen, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save, Minimize2, Eye, EyeOff,
+  Palette, PanelLeftClose, PanelLeftOpen, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard,
 } from "lucide-react";
-import { FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
@@ -100,7 +100,7 @@ const translations = {
     attachImages: "Attach images or PDFs", uploadingImages: "Preparing and uploading files…", removeImage: "Remove attachment", loadEarlier: "Load earlier messages",
     imagesAttached: "files attached", imageChat: "File chat", imageUploadFailed: "File upload failed.", maxImages: "You have reached the configured attachment limit.",
     thinking: "Thinking…", compactingNow: "Compacting context…", compactionThought: "Compaction reasoning", compactionSummary: "Summary kept in context", editResponse: "Edit response", saveEdit: "Save", thoughtFor: "Thought for", useWrapping: "Use wrapping", copied: "Copied",
-    addMenu: "Add", tools: "Tools", internetSearch: "Internet search", internetSearchDesc: "Let the model search DuckDuckGo", pageVisit: "Visit pages", pageVisitDesc: "Let the model read public web pages", browserTool: "Browser", browserToolDesc: "Render JavaScript pages, interact, and take screenshots", currentTime: "Current time", currentTimeDesc: "Provide local time and time zone to the model", locationTool: "Current location", locationToolDesc: "Use browser location and detailed reverse geocoding", multipleChoice: "Multiple choice", multipleChoiceDesc: "Let the model ask up to three selectable questions", usingTool: "Using a tool…", toolCall: "Tool call", toolResult: "Tool result", submitChoices: "Submit answers", otherChoice: "Or type a direct answer…", choiceNext: "Next", choiceBack: "Previous question", choiceProgress: "Question", choiceWaiting: "Answer the question above to continue", locationPermission: "Waiting for browser location permission…",
+    addMenu: "Add", tools: "Tools", internetSearch: "Internet search", internetSearchDesc: "Let the model search DuckDuckGo", pageVisit: "Visit pages", pageVisitDesc: "Let the model read public web pages", browserTool: "Browser", browserToolDesc: "Render JavaScript pages, interact, and take screenshots", browserView: "Show browser", browserViewTitle: "Live browser", browserWaiting: "The model has not opened a browser page yet.", browserHeaded: "Headed Chromium", browserFallback: "Compatibility mode", browserAddress: "Address", browserText: "Type into the focused field", browserSendText: "Type", browserBack: "Back", browserForward: "Forward", browserReload: "Reload", browserComplete: "I finished interacting", browserCompleteHelp: "The model is waiting for you to finish this browser step.", currentTime: "Current time", currentTimeDesc: "Provide local time and time zone to the model", locationTool: "Current location", locationToolDesc: "Use browser location and detailed reverse geocoding", multipleChoice: "Multiple choice", multipleChoiceDesc: "Let the model ask up to three selectable questions", usingTool: "Using a tool…", toolCall: "Tool call", toolResult: "Tool result", submitChoices: "Submit answers", otherChoice: "Or type a direct answer…", choiceNext: "Next", choiceBack: "Previous question", choiceProgress: "Question", choiceWaiting: "Answer the question above to continue", locationPermission: "Waiting for browser location permission…",
     account: "Account", users: "Users", signOut: "Sign out", changePassword: "Change password", currentPassword: "Current password", newPassword: "New password", passwordChanged: "Password changed. Please sign in again.",
     toolsSettings: "Harness settings", toolsSettingsTitle: "Tool and file limits", toolsSettingsDesc: "Control tool iterations, downloads, PDF processing, and temporary upload cleanup.", maxToolRounds: "Maximum tool rounds", maxAttachments: "Attachments per message", textDownloadLimit: "Text download limit (MB)", textCharacterLimit: "Text characters sent to model", imageDownloadLimit: "Image URL limit (MB)", imageUploadLimit: "Image upload limit (MB)", pdfSizeLimit: "PDF limit (MB)", pdfPageLimit: "PDF pages processed", pdfTextLimit: "PDF characters sent to model", pdfVisionPages: "Scanned PDF vision pages", pdfTimeout: "PDF processing timeout (seconds)", temporaryFileTtl: "Temporary file cleanup (minutes)", orphanTtl: "Unattached upload retention (hours)", toolLoopGroup: "Tool loop", attachmentGroup: "Attachments and downloads", pdfGroup: "PDF processing", cleanupGroup: "Temporary file cleanup", toolsSafetyHelp: "Values are validated against server safety boundaries when saved.",
     userManagement: "User management", userManagementDesc: "Administrators can create accounts, change display names and roles, and delete accounts.", username: "Username", password: "Password", role: "Role", standardUser: "User", administrator: "Administrator", addUser: "Add user", saveDisplayName: "Save user changes", deleteUser: "Delete user", confirmDeleteUser: "Permanently delete this user and all of their data?", userDeleted: "User deleted.", publicModel: "Public custom model", publicModelDesc: "Allow every user to use this custom model.",
@@ -116,7 +116,7 @@ const translations = {
     temporaryChat: "Temporary chat", saveChat: "Save this chat", savingChat: "Saving…", chatSaved: "Saved to your history.", chatSaveFailed: "This chat could not be saved.",
     returnToRegularChat: "Return to regular chat", temporaryGreeting: "Hello, traveler", temporaryChatHint: "Chats are not saved",
     reasoningNotesTitle: "Reasoning descriptions", reasoningNotesHelp: "Show a short line under each reasoning choice in the chat picker, and word it however you like.", reasoningNotesReset: "Leave a field empty to use the built-in wording.",
-    experimental: "Experimental", experimentalTitle: "Experimental features", experimentalDesc: "Unfinished capabilities. Switch one on to offer it in the chat tool menu.", experimentalBrowser: "Browser tool", experimentalBrowserDesc: "Let the model drive a headless browser: render JavaScript pages, interact with elements and take screenshots. Sessions are isolated and close at the end of each response.", experimentalHelp: "While a feature is off, the tool is hidden from the chat menu and refused by the server even if a client asks for it.",
+    experimental: "Experimental", experimentalTitle: "Experimental features", experimentalDesc: "Unfinished capabilities. Switch one on to offer it in the chat tool menu.", experimentalBrowser: "Browser tool", experimentalBrowserDesc: "Let the model and you share an isolated headed Chromium session. Open its live split view to click, scroll, type, or complete a human-only step.", experimentalHelp: "While a feature is off, the tool is hidden from the chat menu and refused by the server even if a client asks for it.",
     outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token",
   },
   ko: {
@@ -146,7 +146,7 @@ const translations = {
     attachImages: "이미지 또는 PDF 첨부", uploadingImages: "파일 준비 및 업로드 중…", removeImage: "첨부 제거", loadEarlier: "이전 메시지 불러오기",
     imagesAttached: "개 파일 첨부", imageChat: "파일 대화", imageUploadFailed: "파일 업로드에 실패했습니다.", maxImages: "설정된 첨부 개수 제한에 도달했습니다.",
     thinking: "생각 중…", compactingNow: "컨텍스트 압축 중…", compactionThought: "압축 모델의 사고", compactionSummary: "맥락으로 유지되는 요약", editResponse: "응답 편집", saveEdit: "저장", thoughtFor: "동안 생각함", useWrapping: "줄 바꿈 사용", copied: "복사됨",
-    addMenu: "추가", tools: "도구", internetSearch: "인터넷 검색", internetSearchDesc: "모델이 DuckDuckGo를 검색하도록 허용", pageVisit: "페이지 방문", pageVisitDesc: "모델이 공개 웹 페이지를 읽도록 허용", browserTool: "브라우저", browserToolDesc: "JS 페이지 렌더링, 인터랙션 및 스크린샷 허용", currentTime: "현재 시간", currentTimeDesc: "현지 시간과 시간대를 모델에 제공", locationTool: "현재 위치", locationToolDesc: "브라우저 위치와 상세 역지오코딩 사용", multipleChoice: "다중 선택", multipleChoiceDesc: "모델이 선택형 질문을 최대 3개까지 요청", usingTool: "도구 사용 중…", toolCall: "도구 호출", toolResult: "도구 결과", submitChoices: "답변 제출", otherChoice: "또는 직접 답변…", choiceNext: "다음", choiceBack: "이전 질문", choiceProgress: "질문", choiceWaiting: "위 질문에 답하면 모델이 계속 응답합니다", locationPermission: "브라우저 위치 권한을 기다리는 중…",
+    addMenu: "추가", tools: "도구", internetSearch: "인터넷 검색", internetSearchDesc: "모델이 DuckDuckGo를 검색하도록 허용", pageVisit: "페이지 방문", pageVisitDesc: "모델이 공개 웹 페이지를 읽도록 허용", browserTool: "브라우저", browserToolDesc: "JS 페이지 렌더링, 인터랙션 및 스크린샷 허용", browserView: "브라우저 화면 보기", browserViewTitle: "실시간 브라우저", browserWaiting: "아직 모델이 브라우저 페이지를 열지 않았습니다.", browserHeaded: "화면형 Chromium", browserFallback: "호환 모드", browserAddress: "주소", browserText: "선택한 입력란에 입력", browserSendText: "입력", browserBack: "뒤로", browserForward: "앞으로", browserReload: "새로고침", browserComplete: "조작 완료", browserCompleteHelp: "모델이 브라우저 조작 완료를 기다리고 있습니다.", currentTime: "현재 시간", currentTimeDesc: "현지 시간과 시간대를 모델에 제공", locationTool: "현재 위치", locationToolDesc: "브라우저 위치와 상세 역지오코딩 사용", multipleChoice: "다중 선택", multipleChoiceDesc: "모델이 선택형 질문을 최대 3개까지 요청", usingTool: "도구 사용 중…", toolCall: "도구 호출", toolResult: "도구 결과", submitChoices: "답변 제출", otherChoice: "또는 직접 답변…", choiceNext: "다음", choiceBack: "이전 질문", choiceProgress: "질문", choiceWaiting: "위 질문에 답하면 모델이 계속 응답합니다", locationPermission: "브라우저 위치 권한을 기다리는 중…",
     account: "계정", users: "사용자", signOut: "로그아웃", changePassword: "비밀번호 변경", currentPassword: "현재 비밀번호", newPassword: "새 비밀번호", passwordChanged: "비밀번호를 변경했습니다. 다시 로그인해 주세요.",
     toolsSettings: "하네스 설정", toolsSettingsTitle: "도구 및 파일 제한", toolsSettingsDesc: "도구 반복, 다운로드, PDF 처리 및 임시 업로드 정리 기준을 설정합니다.", maxToolRounds: "최대 도구 호출 라운드", maxAttachments: "메시지당 첨부 개수", textDownloadLimit: "텍스트 다운로드 제한 (MB)", textCharacterLimit: "모델에 전달할 텍스트 글자 수", imageDownloadLimit: "이미지 URL 제한 (MB)", imageUploadLimit: "이미지 업로드 제한 (MB)", pdfSizeLimit: "PDF 제한 (MB)", pdfPageLimit: "처리할 PDF 페이지 수", pdfTextLimit: "모델에 전달할 PDF 글자 수", pdfVisionPages: "스캔 PDF 비전 페이지 수", pdfTimeout: "PDF 처리 제한 시간 (초)", temporaryFileTtl: "임시 파일 정리 시간 (분)", orphanTtl: "미첨부 업로드 보관 시간", toolLoopGroup: "도구 반복", attachmentGroup: "첨부 및 다운로드", pdfGroup: "PDF 처리", cleanupGroup: "임시 파일 정리", toolsSafetyHelp: "저장 시 서버의 안전 범위 안에서 값이 검증됩니다.",
     userManagement: "사용자 관리", userManagementDesc: "관리자는 계정을 만들고, 다른 사용자의 표시 이름과 권한을 변경하거나 계정을 삭제할 수 있습니다.", username: "사용자 이름", password: "비밀번호", role: "역할", standardUser: "일반 사용자", administrator: "관리자", addUser: "사용자 추가", saveDisplayName: "사용자 변경 저장", deleteUser: "사용자 삭제", confirmDeleteUser: "이 사용자와 모든 데이터를 영구적으로 삭제할까요?", userDeleted: "사용자를 삭제했습니다.", publicModel: "커스텀 모델 공개", publicModelDesc: "모든 사용자가 이 커스텀 모델을 사용할 수 있습니다.",
@@ -162,7 +162,7 @@ const translations = {
     temporaryChat: "임시 채팅", saveChat: "이 채팅 저장", savingChat: "저장 중…", chatSaved: "채팅 기록에 저장했습니다.", chatSaveFailed: "채팅을 저장하지 못했습니다.",
     returnToRegularChat: "일반 채팅으로 돌아가기", temporaryGreeting: "안녕하세요, 여행자", temporaryChatHint: "채팅이 저장되지 않습니다",
     reasoningNotesTitle: "추론 강도 설명", reasoningNotesHelp: "채팅의 추론 선택 창에서 각 항목 아래에 짧은 설명을 표시하고, 문구를 직접 바꿉니다.", reasoningNotesReset: "비워 두면 기본 문구를 사용합니다.",
-    experimental: "실험적 기능", experimentalTitle: "실험적 기능", experimentalDesc: "아직 완성되지 않은 기능입니다. 켜면 채팅의 도구 메뉴에 나타납니다.", experimentalBrowser: "브라우저 도구", experimentalBrowserDesc: "모델이 헤드리스 브라우저를 직접 조작합니다. JavaScript 페이지 렌더링, 요소 상호작용, 스크린샷을 지원하며 세션은 격리되고 응답이 끝나면 닫힙니다.", experimentalHelp: "기능이 꺼져 있으면 채팅 메뉴에서 도구가 숨겨지고, 클라이언트가 요청해도 서버가 거부합니다.",
+    experimental: "실험적 기능", experimentalTitle: "실험적 기능", experimentalDesc: "아직 완성되지 않은 기능입니다. 켜면 채팅의 도구 메뉴에 나타납니다.", experimentalBrowser: "브라우저 도구", experimentalBrowserDesc: "모델과 사용자가 격리된 화면형 Chromium 세션을 공유합니다. 실시간 스플릿 뷰에서 클릭, 스크롤, 입력 및 사람만 가능한 단계를 처리할 수 있습니다.", experimentalHelp: "기능이 꺼져 있으면 채팅 메뉴에서 도구가 숨겨지고, 클라이언트가 요청해도 서버가 거부합니다.",
     outputTokens: "출력 토큰", reasoningTokens: "reasoning", tokensPerSecond: "토큰/초", timeToFirstToken: "첫 토큰 도착 시간",
   },
 } as const;
@@ -287,8 +287,9 @@ export default function Home() {
   const [internetSearchEnabled, setInternetSearchEnabled] = useState(false);
   const [pageVisitEnabled, setPageVisitEnabled] = useState(false);
   const [browserEnabled, setBrowserEnabled] = useState(false);
+  const [browserViewOpen, setBrowserViewOpen] = useState(false);
   const browserToolAvailable = config.experimental?.browserTool === true;
-  useEffect(() => { if (!browserToolAvailable) setBrowserEnabled(false); }, [browserToolAvailable]);
+  useEffect(() => { if (!browserToolAvailable) { setBrowserEnabled(false); setBrowserViewOpen(false); } }, [browserToolAvailable]);
   const [currentTimeEnabled, setCurrentTimeEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [multipleChoiceEnabled, setMultipleChoiceEnabled] = useState(true);
@@ -425,6 +426,19 @@ export default function Home() {
   const canManageInference = isAdmin;
   const activeBranch = conversation?.branches.find((branch) => branch.id === conversation.activeBranchId);
   const pendingChoice = pendingMultipleChoiceEvent(messages);
+  const pendingBrowserHandoff = useMemo(() => {
+    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+      const events = messages[messageIndex].toolEvents || [];
+      for (let eventIndex = events.length - 1; eventIndex >= 0; eventIndex -= 1) {
+        const event = events[eventIndex];
+        const args = event.arguments && typeof event.arguments === "object" ? event.arguments as Record<string, unknown> : {};
+        if (event.name === "browser" && event.status === "waiting" && String(args.action || "").toLowerCase() === "request_user") return event;
+      }
+    }
+    return undefined;
+  }, [messages]);
+  useEffect(() => { if (!browserEnabled) setBrowserViewOpen(false); }, [browserEnabled]);
+  useEffect(() => { if (pendingBrowserHandoff) setBrowserViewOpen(true); }, [pendingBrowserHandoff?.id]);
   const contextBreakdown = useMemo(() => contextUsage(messages, sendReasoning, draft, selectedModel?.systemPrompt || "", draftAttachments.length), [messages, sendReasoning, draft, selectedModel?.systemPrompt, draftAttachments.length]);
   const messageRevisions = useMemo(() => {
     const groups = new Map<string, Map<string, MessageRevision>>();
@@ -959,7 +973,7 @@ export default function Home() {
     requestAnimationFrame(() => { if (element) element.scrollTop += element.scrollHeight - previousHeight; });
   }
   return (
-    <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""}`}>
+    <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""} ${browserEnabled && browserViewOpen ? "browser-split-open" : ""}`}>
       <button className="mobile-menu" aria-label={locale === "ko" ? "메뉴 열기" : "Open menu"} onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
       <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-visible" : ""}`}>
         <section className="side-panel">
@@ -992,6 +1006,7 @@ export default function Home() {
               ? <button className="surface-action active icon-only" title={c.returnToRegularChat} aria-label={c.returnToRegularChat} onClick={() => setTemporaryMode(false)}><MessageSquareDashed size={16} /></button>
               : <button className="surface-action active" disabled={promoting || conversation?.temporary !== true} title={c.saveChat} aria-label={c.saveChat} onClick={() => void promoteTemporaryChat()}><Save size={16} /><span>{promoting ? c.savingChat : c.saveChat}</span></button>
             : <button className="surface-action icon-only" title={c.temporaryChat} aria-label={c.temporaryChat} onClick={() => newChat(false, true)}><MessageSquareDashed size={16} /></button>}
+          {browserEnabled && <button type="button" className={`surface-action icon-only ${browserViewOpen ? "active" : ""}`} title={c.browserView} aria-label={c.browserView} aria-pressed={browserViewOpen} onClick={() => setBrowserViewOpen((value) => !value)}><Monitor size={16} /></button>}
           {messages.length > 0 && conversation && <button type="button" className={`surface-action icon-only ${activityHidden ? "active" : ""}`} title={activityHidden ? c.showActivity : c.hideActivity} aria-label={activityHidden ? c.showActivity : c.hideActivity} aria-pressed={activityHidden} onClick={() => setHiddenActivityChats((current) => ({ ...current, [conversation.id]: !current[conversation.id] }))}>{activityHidden ? <EyeOff size={16} /> : <Eye size={16} />}</button>}
         </div>
 
@@ -1009,12 +1024,102 @@ export default function Home() {
         </div>
       </section>
 
+      {browserEnabled && browserViewOpen && <BrowserSplitView c={c} conversationId={conversation?.id} pendingHandoff={pendingBrowserHandoff} onComplete={async () => { if (!pendingBrowserHandoff) return false; return submitToolInput(pendingBrowserHandoff.id, { completed: true }); }} onClose={() => setBrowserViewOpen(false)} />}
+
       {searching && <HistorySearch ko={locale === "ko"} onClose={() => setSearching(false)} onSelect={(id, branchId) => { setSearching(false); void loadConversation(id, true, false, branchId); }} />}
       {renameTarget && <TextDialog title={locale === "ko" ? "채팅 제목 변경" : "Rename chat"} value={renameTarget.title} onClose={() => setRenameTarget(null)} onSave={title => { const target = renameTarget; void (async () => { try { const response = await fetch(`/api/conversations/${target.id}`, {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({title})}); if (!response.ok) throw new Error(locale === "ko" ? "제목 변경 실패" : "Rename failed"); setConversation(current => current?.id === target.id ? {...current,title} : current); await refreshHistories(); setRenameTarget(null); } catch (caught) { setError(caught instanceof Error ? caught.message : "Rename failed"); setRenameTarget(null); } })(); }} />}
       {settingsOpen && <SettingsPanel initial={config} onAccentPreview={setAccentPreview} onClose={() => { setSettingsOpen(false); setAccentPreview(""); }} onLogout={async () => { resetWorkspaceForAuthChange(); await fetch("/api/auth/logout", { method: "POST" }); setSettingsOpen(false); setAuth(await fetch("/api/auth/status").then((response) => response.json()).catch(() => ({ setupRequired: false, authenticated: false, user: null }))); }} onSaved={(next) => { setConfig(next); setSendReasoning(next.preferences.sendReasoningToModel); const visible = next.models.filter((item) => item.visible !== false); const model = visible.find((item) => item.id === selectedModelIdRef.current) || visible.find((item) => item.id === next.preferences.defaultModelId) || visible[0]; const preset = model?.reasoningPresets.find((item) => item.id === selectedPresetId) || model?.reasoningPresets.find((item) => item.id === next.preferences.defaultReasoningPresetId) || model?.reasoningPresets[0]; selectedModelIdRef.current = model?.id || ""; setSelectedModelId(model?.id || ""); setSelectedPresetId(preset?.id || ""); }} />}
       {exportOpen && conversation && <ExportDialog c={c} conversation={conversation} initialIncludeReasoning={config.preferences.exportReasoning} onClose={() => setExportOpen(false)} onPreference={(value) => { const next = { ...config, preferences: { ...config.preferences, exportReasoning: value } }; setConfig(next); fetch("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) }); }} />}
     </main>
   );
+}
+
+type BrowserSurfaceState = { available: boolean; sessionId?: string; url?: string; title?: string; width: number; height: number; headed: boolean };
+
+function BrowserSplitView({ c, conversationId, pendingHandoff, onComplete, onClose }: { c: CopySet; conversationId?: string; pendingHandoff?: ToolEvent; onComplete: () => Promise<boolean>; onClose: () => void }) {
+  const [surface, setSurface] = useState<BrowserSurfaceState>({ available: false, width: 1280, height: 800, headed: true });
+  const [address, setAddress] = useState("");
+  const [textInput, setTextInput] = useState("");
+  const [addressFocused, setAddressFocused] = useState(false);
+  const [frameNonce, setFrameNonce] = useState(0);
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
+  const pointerStart = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!conversationId) { setSurface((current) => ({ ...current, available: false, sessionId: undefined, url: undefined, title: undefined })); return; }
+    let cancelled = false; let timer = 0;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/browser-view?conversationId=${encodeURIComponent(conversationId)}`, { cache: "no-store" });
+        const next = await response.json() as BrowserSurfaceState & { error?: string };
+        if (!response.ok) throw new Error(next.error || "Browser view failed.");
+        if (!cancelled) {
+          setSurface(next);
+          if (next.available) setFrameNonce(Date.now());
+          setNotice("");
+        }
+      } catch (error) { if (!cancelled) setNotice(error instanceof Error ? error.message : "Browser view failed."); }
+      if (!cancelled) timer = window.setTimeout(poll, 700);
+    };
+    void poll();
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [conversationId]);
+
+  useEffect(() => { if (!addressFocused && surface.url) setAddress(surface.url); }, [addressFocused, surface.url]);
+
+  async function act(payload: Record<string, unknown>) {
+    if (!conversationId || !surface.sessionId) return false;
+    setBusy(true); setNotice("");
+    try {
+      const response = await fetch(`/api/browser-view?conversationId=${encodeURIComponent(conversationId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, sessionId: surface.sessionId }) });
+      const next = await response.json() as BrowserSurfaceState & { error?: string };
+      if (!response.ok) throw new Error(next.error || "Browser interaction failed.");
+      setSurface(next); setFrameNonce(Date.now());
+      return true;
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Browser interaction failed."); return false; }
+    finally { setBusy(false); }
+  }
+
+  function browserPoint(event: ReactPointerEvent<HTMLImageElement> | ReactWheelEvent<HTMLImageElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const scale = Math.min(bounds.width / surface.width, bounds.height / surface.height);
+    const renderedWidth = surface.width * scale; const renderedHeight = surface.height * scale;
+    const left = bounds.left + (bounds.width - renderedWidth) / 2; const top = bounds.top + (bounds.height - renderedHeight) / 2;
+    return {
+      x: Math.max(0, Math.min(surface.width, (event.clientX - left) / renderedWidth * surface.width)),
+      y: Math.max(0, Math.min(surface.height, (event.clientY - top) / renderedHeight * surface.height)),
+    };
+  }
+
+  function keyDown(event: KeyboardEvent<HTMLElement>) {
+    if (!surface.available || event.target instanceof HTMLInputElement || ["Shift", "Control", "Alt", "Meta"].includes(event.key)) return;
+    event.preventDefault();
+    const modifiers = [event.altKey && "Alt", event.ctrlKey && "Control", event.metaKey && "Meta", event.shiftKey && "Shift"].filter((item): item is string => Boolean(item));
+    if (event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) void act({ action: "insert_text", text: event.key });
+    else void act({ action: "key", key: event.key, modifiers });
+  }
+
+  const handoffArgs = pendingHandoff?.arguments && typeof pendingHandoff.arguments === "object" ? pendingHandoff.arguments as Record<string, unknown> : {};
+  return <aside className="browser-split" aria-label={c.browserViewTitle} tabIndex={0} ref={panelRef} onKeyDown={keyDown}>
+    <header className="browser-split-head"><span><Monitor size={16} /><strong>{c.browserViewTitle}</strong><small>{surface.headed ? c.browserHeaded : c.browserFallback}</small></span><button type="button" title={c.close} aria-label={c.close} onClick={onClose}><X size={17} /></button></header>
+    <form className="browser-nav" onSubmit={(event) => { event.preventDefault(); void act({ action: "navigate", url: address }); }}>
+      <button type="button" title={c.browserBack} aria-label={c.browserBack} disabled={!surface.available || busy} onClick={() => void act({ action: "back" })}><ChevronLeft size={17} /></button>
+      <button type="button" title={c.browserForward} aria-label={c.browserForward} disabled={!surface.available || busy} onClick={() => void act({ action: "forward" })}><ChevronRight size={17} /></button>
+      <button type="button" title={c.browserReload} aria-label={c.browserReload} disabled={!surface.available || busy} onClick={() => void act({ action: "reload" })}><RefreshCw size={15} /></button>
+      <input aria-label={c.browserAddress} value={address} onFocus={() => setAddressFocused(true)} onBlur={() => setAddressFocused(false)} onChange={(event) => setAddress(event.target.value)} placeholder="https://" disabled={!surface.available} />
+      <button type="submit" aria-label={c.browserAddress} disabled={!surface.available || busy || !address.trim()}><ArrowUp size={16} /></button>
+    </form>
+    <div className="browser-viewport">
+      {surface.available && surface.sessionId && conversationId
+        ? <img src={`/api/browser-view?conversationId=${encodeURIComponent(conversationId)}&frame=1&sessionId=${encodeURIComponent(surface.sessionId)}&v=${frameNonce}`} alt={surface.title || c.browserViewTitle} draggable={false} onPointerDown={(event) => { panelRef.current?.focus(); pointerStart.current = browserPoint(event); event.currentTarget.setPointerCapture?.(event.pointerId); }} onPointerUp={(event) => { const start = pointerStart.current; pointerStart.current = null; if (!start) return; const end = browserPoint(event); if (Math.hypot(end.x - start.x, end.y - start.y) > 6) void act({ action: "drag", ...start, endX: end.x, endY: end.y }); else void act({ action: "click", ...end }); }} onWheel={(event) => { event.preventDefault(); const point = browserPoint(event); void act({ action: "scroll", ...point, deltaX: event.deltaX, deltaY: event.deltaY }); }} />
+        : <div className="browser-empty"><Monitor size={28} /><p>{c.browserWaiting}</p></div>}
+    </div>
+    {notice && <p className="browser-notice" role="status">{notice}</p>}
+    <form className="browser-text-entry" onSubmit={(event) => { event.preventDefault(); const value = textInput; if (!value) return; void act({ action: "insert_text", text: value }).then((sent) => { if (sent) setTextInput(""); }); }}><Keyboard size={16} /><input aria-label={c.browserText} placeholder={c.browserText} value={textInput} onChange={(event) => setTextInput(event.target.value)} disabled={!surface.available} /><button disabled={!surface.available || busy || !textInput}>{c.browserSendText}</button></form>
+    {pendingHandoff && <div className="browser-handoff"><span><strong>{c.browserCompleteHelp}</strong>{typeof handoffArgs.message === "string" && handoffArgs.message.trim() ? <small>{handoffArgs.message}</small> : null}</span><button type="button" disabled={busy} onClick={() => { setBusy(true); void onComplete().finally(() => setBusy(false)); }}><Check size={15} />{c.browserComplete}</button></div>}
+  </aside>;
 }
 
 function AuthScreen({ setup, onAuthenticated }: { setup: boolean; onAuthenticated: () => Promise<void> }) {

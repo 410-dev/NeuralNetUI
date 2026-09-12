@@ -33,11 +33,11 @@ export function toolDefinitions(enabled: EnabledWebTools) {
     type: "function",
     function: {
       name: "browser",
-      description: "Control a real JavaScript-enabled browser for pages that visit_page cannot render. Open a public page, inspect its visible text and numbered element refs, then click, type, select, press keys, scroll, wait, or take a screenshot. Reuse the returned session_id for later actions. To capture a page n seconds after opening, use action=open with wait_seconds=n and screenshot=true. Close the session when finished.",
+      description: "Control a real JavaScript-enabled browser for pages that visit_page cannot render. Open a public page, inspect its visible text and numbered element refs, then click, type, select, press keys, scroll, wait, or take a screenshot. Reuse the returned session_id for later actions. If a CAPTCHA or another step needs the person, use request_user with that session; they can operate the same browser in split view and mark the handoff complete. To capture a page n seconds after opening, use action=open with wait_seconds=n and screenshot=true. Close the session when finished.",
       parameters: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["open", "inspect", "click", "type", "select", "press", "scroll", "wait", "screenshot", "close"] },
+          action: { type: "string", enum: ["open", "inspect", "click", "type", "select", "press", "scroll", "wait", "screenshot", "request_user", "close"] },
           url: { type: "string", description: "Public HTTP(S) URL; required for open" },
           session_id: { type: "string", description: "Session returned by open; required for every other action" },
           target: { type: "string", description: "Element ref such as e3 from the latest snapshot, or a CSS selector" },
@@ -48,6 +48,7 @@ export function toolDefinitions(enabled: EnabledWebTools) {
           wait_seconds: { type: "number", minimum: 0, maximum: 30, description: "Delay before returning or capturing" },
           screenshot: { type: "boolean", description: "Capture after open and wait_seconds" },
           full_page: { type: "boolean", description: "Capture the complete scrollable page" },
+          message: { type: "string", description: "Short instruction shown to the person for request_user" },
         },
         required: ["action"], additionalProperties: false,
       },

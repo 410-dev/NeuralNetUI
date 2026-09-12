@@ -1,13 +1,13 @@
 {
   "name": "neural-chat-ui",
-  "version": "2.1.8",
+  "version": "2.2.0-beta.1",
   "type": "module",
   "private": true,
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "browser:install": "playwright-core install chromium",
+    "browser:install": "playwright-core install chromium --no-shell",
     "dev": "node scripts/start-server.mjs dev",
     "test": "node --test --experimental-strip-types \"lib/*.test.ts\"",
     "build": "next build",

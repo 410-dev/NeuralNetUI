@@ -17,7 +17,7 @@ import { createResidencyAdapter } from "./residency-adapter";
 import { modelResidency } from "./residency-runtime";
 import { progressFetch, withSlowProgress } from "./chat-progress";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
-import { closeBrowserSessions, executeBrowserTool } from "./browser-tool";
+import { assertOwnedBrowserSession, closeBrowserSessions, executeBrowserTool } from "./browser-tool";
 import type { ChatWaitPhase, Conversation, MessageStep, StoredMessage, ToolEvent, ToolSettings } from "./types";
 import type { ModelContentPart } from "./document-processing";
 
@@ -340,7 +340,16 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
     const normalized = validateQuestions(args); updateToolEvent(job, call.id, { arguments: normalized });
     return { result: await waitForBrowser(job, call) };
   }
-  if (call.function.name === "browser" && enabled.browser) return executeBrowserTool(`${job.userId}:${job.input.conversationId}:${job.message.id}`, call.function.arguments);
+  if (call.function.name === "browser" && enabled.browser) {
+    const ownerKey = `${job.userId}:${job.input.conversationId}:${job.message.id}`;
+    if (String(args.action || "").toLowerCase() === "request_user") {
+      const sessionId = String(args.session_id || "");
+      assertOwnedBrowserSession(ownerKey, sessionId);
+      const response = await waitForBrowser(job, call);
+      return { result: { session_id: sessionId, ...(response && typeof response === "object" ? response as Record<string, unknown> : { completed: true }) } };
+    }
+    return executeBrowserTool(ownerKey, call.function.arguments);
+  }
   return executeWebTool(call.function.name, call.function.arguments, enabled, settings);
 }
 

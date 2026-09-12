@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeBrowserAction, privateBrowserAddress } from "./browser-tool.ts";
+import { normalizeBrowserAction, normalizeBrowserViewAction, privateBrowserAddress } from "./browser-tool.ts";
 
 test("browser address guard rejects local IPv4 and IPv6 ranges", () => {
   for (const address of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.8", "169.254.1.1", "::1", "fd00::1", "fe80::1"]) {
@@ -20,4 +20,15 @@ test("browser action parser clamps waits and normalizes safe defaults", () => {
   });
   assert.throws(() => normalizeBrowserAction({ action: "type", session_id: "abc", target: "e1" }), /text/i);
   assert.throws(() => normalizeBrowserAction({ action: "unknown" }), /action/i);
+});
+
+test("browser view controls clamp coordinates and keep only supported modifiers", () => {
+  assert.deepEqual(normalizeBrowserViewAction({ action: "click", sessionId: "abc", x: -12, y: 9000 }), {
+    action: "click", sessionId: "abc", x: 0, y: 800,
+  });
+  assert.deepEqual(normalizeBrowserViewAction({ action: "key", sessionId: "abc", key: "Enter", modifiers: ["Control", "bogus", "Shift"] }), {
+    action: "key", sessionId: "abc", key: "Enter", modifiers: ["Control", "Shift"],
+  });
+  assert.throws(() => normalizeBrowserViewAction({ action: "navigate", sessionId: "abc" }), /url/i);
+  assert.throws(() => normalizeBrowserViewAction({ action: "insert_text", sessionId: "abc", text: "" }), /1 to 4000/i);
 });
