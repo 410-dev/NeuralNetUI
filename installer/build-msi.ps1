@@ -47,11 +47,26 @@ try {
         throw "Refusing to clear a staging path outside installer/build."
     }
     if (Test-Path -LiteralPath $resolvedStageRoot) { Remove-Item -LiteralPath $resolvedStageRoot -Recurse -Force }
-    New-Item -ItemType Directory -Path (Join-Path $stageRoot "app\.next") -Force | Out-Null
+    $stagedNextRoot = Join-Path $stageRoot "app\.next"
+    $stagedStaticRoot = Join-Path $stagedNextRoot "static"
+    New-Item -ItemType Directory -Path $stagedStaticRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 
     Copy-Item -Path ".next\standalone\*" -Destination (Join-Path $stageRoot "app") -Recurse -Force
-    Copy-Item -Path ".next\static" -Destination (Join-Path $stageRoot "app\.next\static") -Recurse -Force
+    # Copy the contents, not the static directory itself. Copying the directory into an
+    # existing destination produces .next/static/static and makes every new CSS chunk 404.
+    Copy-Item -Path ".next\static\*" -Destination $stagedStaticRoot -Recurse -Force
+    if (Test-Path -LiteralPath (Join-Path $stagedStaticRoot "static")) {
+        throw "The staged Next.js assets contain an invalid .next/static/static directory."
+    }
+    $sourceStaticPrefix = (Resolve-Path -LiteralPath ".next\static").Path.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $stagedStaticPrefix = $stagedStaticRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $sourceStaticFiles = @(Get-ChildItem -LiteralPath ".next\static" -File -Recurse | ForEach-Object { $_.FullName.Substring($sourceStaticPrefix.Length) })
+    $stagedStaticFiles = @(Get-ChildItem -LiteralPath $stagedStaticRoot -File -Recurse | ForEach-Object { $_.FullName.Substring($stagedStaticPrefix.Length) })
+    $staticDifferences = @(Compare-Object -ReferenceObject $sourceStaticFiles -DifferenceObject $stagedStaticFiles)
+    if ($staticDifferences.Count -gt 0 -or -not ($stagedStaticFiles | Where-Object { $_ -like "*.css" })) {
+        throw "The staged Next.js static assets are incomplete."
+    }
     if (Test-Path -LiteralPath "public") { Copy-Item -Path "public" -Destination (Join-Path $stageRoot "app\public") -Recurse -Force }
     New-Item -ItemType Directory -Path (Join-Path $stageRoot "app\scripts") -Force | Out-Null
     Copy-Item -LiteralPath "scripts\ddgs-search.py" -Destination (Join-Path $stageRoot "app\scripts\ddgs-search.py") -Force

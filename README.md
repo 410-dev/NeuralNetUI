@@ -12,7 +12,7 @@
 - 도구 메뉴는 인터넷, 주변 인식, 에이전트, 상호 작용 그룹으로 나뉘며 각 그룹을 접을 수 있습니다. 메뉴가 화면 높이를 넘으면 내부에서 스크롤됩니다.
 - Windows 패키지 이름: `installer/output/NeuralNetUI-3.0.0-beta.6-x64.msi`.
 
-검증 내용은 `docs/audits/2026-09-13-release-3.0.0-beta.6.md`에 기록했습니다.
+검증 내용은 `docs/audits/2026-09-13-release-3.0.0-beta.6.md`에 기록했습니다. 패키징은 프로덕션 `.next/static` 자산을 깨끗한 스테이지에 복사한 뒤 전체 파일 목록을 대조하므로 CSS/JS 누락이나 `static/static` 중첩 시 MSI 생성 전에 실패합니다.
 
 ## 감사 권한·삭제 보존·저장소 검색 (3.0.0 beta 5)
 
