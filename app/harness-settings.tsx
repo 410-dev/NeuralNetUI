@@ -88,7 +88,7 @@ export function StorageSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
   const quotaValue=(bytes:number,unit:"MB"|"GB")=>bytes/(unit==="GB"?1024**3:1024**2);
   const quotaBytes=(value:number,unit:"MB"|"GB")=>Math.round(value*(unit==="GB"?1024**3:1024**2));
   return <div className="settings-section wide storage-settings-section">
-    <SectionTitle icon={<HardDrive size={19}/>} title={ko?"저장소 관리":"Storage management"} description={ko?"사용자 저장소·휴지통의 기본 할당량과 삭제 보존 기간을 관리합니다. 0으로 설정된 사용자 할당량은 이 기본값을 자동으로 따릅니다.":"Manage workspace defaults for user storage, trash, and deleted-item retention. User quotas set to zero automatically inherit these values."}/>
+    <SectionTitle icon={<HardDrive size={19}/>} title={ko?"저장소 관리":"Storage management"} description={ko?<><span>사용자 저장소·휴지통의 기본 할당량과 삭제 보존 기간을 관리합니다.</span><span>할당량이 0인 사용자는 이 기본값을 자동으로 따릅니다.</span></>:<><span>Manage workspace defaults for user storage, trash, and deleted-item retention.</span><span>Users whose quota is set to zero automatically inherit these values.</span></>}/>
     <div className="settings-group">
       <h4>{ko?"기본 할당량":"Default quotas"}</h4>
       <div className="storage-default-grid">
