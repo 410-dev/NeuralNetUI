@@ -12,6 +12,7 @@ export async function POST(request: Request) {
     const settings = (await readConfig()).toolSettings;
     const form = await request.formData();
     const files = form.getAll("files").filter((value): value is File => value instanceof File);
+    const retained = form.get("retained") === "true";
     if (!files.length) return NextResponse.json({ error: "No files were selected." }, { status: 400 });
     if (files.length > settings.maxAttachmentsPerMessage) return NextResponse.json({ error: `You can attach up to ${settings.maxAttachmentsPerMessage} files at once.` }, { status: 400 });
     await cleanupOrphanedUploads(settings);
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
         const thumbnail = thumbnailValue instanceof File && thumbnailValue.size ? thumbnailValue : undefined;
         let dimensions: { width?: number; height?: number } = {};
         try { dimensions = JSON.parse(String(form.get(`dimensions-${index}`) || "{}")); } catch { /* Use empty dimensions. */ }
-        attachments.push(await saveUpload(file, thumbnail, user.id, settings, dimensions));
+        attachments.push(await saveUpload(file, thumbnail, user.id, settings, dimensions, retained));
       }
     } catch (error) {
       await Promise.all(attachments.map((attachment) => deleteUpload(attachment.id, user.id).catch(() => undefined)));

@@ -1,9 +1,10 @@
 "use client";
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Pencil, Check, Layers, Type, RotateCw, Minimize2, Clock, Zap, ShieldCheck, ShieldQuestion, ShieldX } from "lucide-react";
+import { X, Pencil, Check, Layers, Type, RotateCw, Minimize2, Clock, Zap, ShieldCheck, ShieldQuestion, ShieldX, Grid3X3 } from "lucide-react";
 import type { HarnessSettings, PublicConfig } from "@/lib/types";
 import { DEFAULT_HARNESS_SETTINGS } from "@/lib/harness";
+import { HOST_PERMISSION_DEFINITIONS, type HostPermissionKey, type HostTrustedPermissions } from "@/lib/host-permissions";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { SectionTitle } from "./section-title";
 import { SelectMenu } from "./select-menu";
@@ -24,10 +25,64 @@ function OptionCards({ label, options, value, onSelect }: { label:string; option
   return <div className="option-cards" role="radiogroup" aria-label={label}>{options.map(option => <button key={option.id} type="button" role="radio" aria-checked={value===option.id} className={value===option.id ? "active" : ""} onClick={()=>onSelect(option.id)}><span className="option-card-icon">{option.icon}</span><div><strong>{option.title}</strong><small>{option.description}</small></div>{value===option.id && <Check size={16}/>}</button>)}</div>;
 }
 
+function PermissionMatrixDialog({ ko, initial, onSave, onClose }: { ko:boolean; initial:HostTrustedPermissions; onSave:(value:HostTrustedPermissions)=>void; onClose:()=>void }) {
+  const [permissions,setPermissions]=useState<HostTrustedPermissions>(()=>({...initial}));
+  const ref=useModalFocus(onClose);
+  const riskByKey=new Map(HOST_PERMISSION_DEFINITIONS.map(item=>[item.key,item.riskLevel]));
+  const groups:Array<{title:string;rows:Array<{key:HostPermissionKey;title:string;detail:string}>}>=[
+    {title:ko?"파일":"Files",rows:[
+      {key:"files.search",title:ko?"파일 검색":"Search files",detail:ko?"이름과 경로, 메타데이터만 검색":"Search names, paths, and metadata only"},
+      {key:"files.inspect",title:ko?"경로 정보 확인":"Inspect path",detail:ko?"종류, 크기, 수정 시각, 권한 확인":"Inspect type, size, modified time, and permissions"},
+      {key:"files.read",title:ko?"파일 내용 읽기":"Read file contents",detail:ko?"실제 파일 내용을 읽음":"Read the actual contents of a file"},
+      {key:"files.copy",title:ko?"파일·폴더 복사":"Copy files or folders",detail:ko?"기존 대상은 덮어쓰지 않음":"Do not replace an existing destination"},
+      {key:"files.copyOverwrite",title:ko?"복사하며 덮어쓰기":"Copy and overwrite",detail:ko?"기존 대상을 복사본으로 교체":"Replace an existing destination with the copy"},
+      {key:"files.write",title:ko?"새 파일 쓰기":"Write a new file",detail:ko?"새 파일을 생성하고 내용을 기록":"Create a file and write its contents"},
+      {key:"files.writeOverwrite",title:ko?"파일 내용 덮어쓰기":"Overwrite file contents",detail:ko?"기존 파일 내용을 원자적으로 교체":"Atomically replace existing file contents"},
+      {key:"files.rename",title:ko?"이름 바꾸기":"Rename",detail:ko?"같은 폴더 안에서 이름 변경":"Change a name within the same folder"},
+      {key:"files.move",title:ko?"파일·폴더 이동":"Move files or folders",detail:ko?"기존 대상은 덮어쓰지 않음":"Do not replace an existing destination"},
+      {key:"files.moveOverwrite",title:ko?"이동하며 덮어쓰기":"Move and overwrite",detail:ko?"기존 대상을 영구 교체":"Permanently replace an existing destination"},
+      {key:"files.delete",title:ko?"단일 경로 삭제":"Delete one path",detail:ko?"파일 또는 빈 폴더를 영구 삭제":"Permanently delete a file or empty folder"},
+      {key:"files.deleteRecursive",title:ko?"재귀 삭제":"Recursive delete",detail:ko?"폴더와 모든 하위 항목을 영구 삭제":"Permanently delete a folder and everything below it"},
+    ]},
+    {title:ko?"업로드":"Upload",rows:[
+      {key:"network.uploadTemp",title:ko?"임시 파일 업로드":"Temporary file upload",detail:ko?"파일을 temp.hysong.dev로 전송":"Send a file to temp.hysong.dev"},
+    ]},
+    {title:ko?"백그라운드 프로그램":"Background programs",rows:[
+      {key:"process.start",title:ko?"프로그램 시작":"Start program",detail:ko?"PID와 이름을 현재 채팅에 보관":"Retain its PID and name in this chat"},
+      {key:"process.list",title:ko?"프로그램 목록 확인":"List programs",detail:ko?"이 채팅에서 시작한 프로세스만 확인":"List only processes started in this chat"},
+      {key:"process.kill",title:ko?"프로그램 종료":"Stop program",detail:ko?"이 채팅에서 기록한 PID를 종료":"Terminate a PID retained by this chat"},
+    ]},
+    {title:"PowerShell",rows:([1,2,3,4,5] as const).map(level=>({key:`powershell.risk${level}` as HostPermissionKey,title:ko?`위험도 ${level} 명령`:`Risk level ${level} commands`,detail:ko?"독립 분석기가 이 단계로 분류한 PowerShell 실행":`PowerShell runs classified at this level by the isolated assessor`}))},
+    {title:"Bash",rows:([1,2,3,4,5] as const).map(level=>({key:`bash.risk${level}` as HostPermissionKey,title:ko?`위험도 ${level} 명령`:`Risk level ${level} commands`,detail:ko?"독립 분석기가 이 단계로 분류한 Bash 실행":`Bash runs classified at this level by the isolated assessor`}))},
+    {title:ko?"화면":"Screen",rows:[
+      {key:"screen.screenshot",title:ko?"현재 화면 캡처":"Capture current screen",detail:ko?"전체 화면을 모델의 시각 맥락으로 전달":"Provide the full screen as visual model context"},
+    ]},
+  ];
+  const setAll=(value:boolean)=>setPermissions(Object.fromEntries(HOST_PERMISSION_DEFINITIONS.map(({key})=>[key,value])) as HostTrustedPermissions);
+  const trusted=Object.values(permissions).filter(Boolean).length;
+  return createPortal(<div ref={ref} tabIndex={-1} className="harness-modal-layer permission-matrix-layer" role="dialog" aria-modal="true" aria-label={ko?"컴퓨터 제어 권한 행렬":"Computer-control permission matrix"}>
+    <button className="settings-backdrop" tabIndex={-1} onClick={onClose} aria-label={ko?"닫기":"Close"}/>
+    <div className="harness-dialog permission-matrix-dialog">
+      <header><div><h2>{ko?"컴퓨터 제어 권한 행렬":"Computer-control permission matrix"}</h2><p>{ko?"부분 신뢰에서 확인 없이 실행할 작업을 하위 기능별로 선택합니다.":"Choose which sub-tool operations may run without confirmation in partial trust mode."}</p></div><button type="button" onClick={onClose} aria-label={ko?"닫기":"Close"}><X size={20}/></button></header>
+      <div className="permission-matrix-toolbar"><span>{ko?`${trusted}/${HOST_PERMISSION_DEFINITIONS.length}개 작업 자동 허용`:`${trusted} of ${HOST_PERMISSION_DEFINITIONS.length} operations auto-allowed`}</span><div><button type="button" className="subtle-action" onClick={()=>setAll(true)}>{ko?"모두 자동 허용":"Auto-allow all"}</button><button type="button" className="subtle-action" onClick={()=>setAll(false)}>{ko?"모두 확인":"Ask for all"}</button></div></div>
+      <div className="permission-matrix" role="table" aria-label={ko?"작업별 권한":"Per-operation permissions"}>
+        <div className="permission-matrix-head" role="row"><span role="columnheader">{ko?"하위 도구 및 작업":"Sub-tool and operation"}</span><span role="columnheader">{ko?"자동 허용":"Auto-allow"}</span><span role="columnheader">{ko?"매번 확인":"Always ask"}</span></div>
+        {groups.map(group=><section key={group.title} className="permission-matrix-group"><h3>{group.title}</h3>{group.rows.map(row=>{const allowed=permissions[row.key]===true;return <div className="permission-matrix-row" role="row" key={row.key}>
+          <div role="cell"><strong>{row.title}</strong><small><span>{ko?`위험도 ${riskByKey.get(row.key)}`:`Risk ${riskByKey.get(row.key)}`}</span>{row.detail}</small></div>
+          <button type="button" role="radio" aria-checked={allowed} aria-label={`${row.title} · ${ko?"자동 허용":"Auto-allow"}`} className={allowed?"active":""} onClick={()=>setPermissions(current=>({...current,[row.key]:true}))}><i/></button>
+          <button type="button" role="radio" aria-checked={!allowed} aria-label={`${row.title} · ${ko?"매번 확인":"Always ask"}`} className={!allowed?"active":""} onClick={()=>setPermissions(current=>({...current,[row.key]:false}))}><i/></button>
+        </div>})}</section>)}
+      </div>
+      <footer><button type="button" className="secondary-button" onClick={onClose}>{ko?"취소":"Cancel"}</button><button type="button" className="save-button" onClick={()=>onSave(permissions)}>{ko?"행렬 적용":"Apply matrix"}</button></footer>
+    </div>
+  </div>,document.body);
+}
+
 export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDraft:React.Dispatch<React.SetStateAction<PublicConfig>>}) {
   const ko=draft.preferences.language==="ko";
   const h=draft.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const [prompt,setPrompt]=useState<"compactPrompt"|"resumePrompt"|"titlePrompt"|"hostCommandAnalysisPrompt"|null>(null);
+  const [permissionMatrix,setPermissionMatrix]=useState(false);
   const superadmin=draft.account?.role==="superadmin";
   const patch=(value:Partial<HarnessSettings>)=>setDraft(d=>({...d,harnessSettings:{...(d.harnessSettings || DEFAULT_HARNESS_SETTINGS),...value}}));
   const effortLabel=(value:string)=>{ const label=EFFORT_LABELS[value]; return label ? label[ko?1:0] : value; };
@@ -84,21 +139,16 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
       <SectionTitle icon={<ShieldCheck size={19}/>} title={ko?"호스트 컴퓨터 권한":"Host computer permissions"} description={ko?"Superadmin 전용 에이전트 작업의 확인 범위와 독립 셸 명령 분석기를 설정합니다.":"Set confirmation boundaries and the isolated shell-command assessor for the Superadmin-only agent tool."}/>
       <OptionCards label={ko?"신뢰 수준":"Trust mode"} value={h.hostTrustMode} onSelect={id=>patch({hostTrustMode:id as HarnessSettings["hostTrustMode"]})} options={[
         { id:"full", icon:<ShieldCheck size={17}/>, title:ko?"완전 신뢰":"Full trust", description:ko?"어떤 작업에도 확인을 요청하지 않습니다.":"Never ask before a host action." },
-        { id:"partial", icon:<ShieldQuestion size={17}/>, title:ko?"부분 신뢰":"Partial trust", description:ko?"아래에서 선택한 위험도만 자동 허용합니다.":"Auto-allow only the selected risk levels." },
+        { id:"partial", icon:<ShieldQuestion size={17}/>, title:ko?"부분 신뢰":"Partial trust", description:ko?"권한 행렬에서 선택한 하위 작업만 자동 허용합니다.":"Auto-allow only sub-tool operations selected in the matrix." },
         { id:"none", icon:<ShieldX size={17}/>, title:ko?"신뢰 안 함":"No trust", description:ko?"모든 호스트 작업을 매번 확인합니다.":"Confirm every host action." },
       ]}/>
-      {h.hostTrustMode==="partial" && <div className="harness-advanced host-risk-matrix"><h4>{ko?"자동 허용 위험도":"Automatically trusted risk levels"}</h4>{[
-        ko?"1단계 · 파일 내용을 읽지 않는 상태 및 메타데이터 확인":"Level 1 · Status and metadata inspection without file contents",
-        ko?"2단계 · 파일 내용 또는 현재 화면 읽기":"Level 2 · Read file contents or the current screen",
-        ko?"3단계 · 생성, 수정, 복사, 이름·위치 변경, 실행 또는 업로드":"Level 3 · Create, modify, copy, rename, move, run, or upload",
-        ko?"4단계 · 영구 삭제 또는 프로세스 종료":"Level 4 · Permanent deletion or process termination",
-        ko?"5단계 · 컴퓨터 설정 변경 또는 목적 밖 작업":"Level 5 · Computer configuration or out-of-scope work",
-      ].map((label,index)=><div className="general-setting-card general-toggle-card" key={label}><div><strong>{label}</strong></div><button type="button" role="switch" aria-label={label} aria-checked={h.hostTrustedRiskLevels[index]===true} className={`toggle ${h.hostTrustedRiskLevels[index]?"on":""}`} onClick={()=>{const levels=[...h.hostTrustedRiskLevels];levels[index]=!levels[index];patch({hostTrustedRiskLevels:levels});}}><i/></button></div>)}</div>}
+      {h.hostTrustMode==="partial" && <div className="harness-advanced host-permission-summary"><h4>{ko?"작업별 자동 허용":"Per-operation auto-approval"}</h4><div><span><strong>{Object.values(h.hostTrustedPermissions).filter(Boolean).length}</strong> / {HOST_PERMISSION_DEFINITIONS.length}</span><small>{ko?"개 하위 작업을 확인 없이 실행하도록 설정했습니다.":"sub-tool operations may run without confirmation."}</small></div><button type="button" className="subtle-action" onClick={()=>setPermissionMatrix(true)}><Grid3X3 size={16}/>{ko?"권한 행렬 열기":"Open permission matrix"}</button></div>}
       <div className="harness-advanced"><h4>{ko?"독립 셸 명령 분석":"Isolated shell-command analysis"}</h4><div className="form-grid">
         <label className="field"><span>{ko?"분석 모델":"Assessment model"}</span><SelectMenu label={ko?"분석 모델":"Assessment model"} value={h.hostCommandModelId} options={[{value:"",label:ko?"현재 채팅의 기반 모델":"Current chat's base model"},...draft.models.filter(m=>!m.isAlias&&m.visible!==false).map(m=>({value:m.id,label:m.name}))]} onChange={value=>patch({hostCommandModelId:value,hostCommandEffort:"off"})}/><small>{ko?"명령어만 포함하는 별도 요청이며 채팅 기록을 전달하지 않습니다.":"This separate request contains only the command, never chat history."}</small></label>
         <label className="field"><span>{ko?"추론 강도":"Reasoning effort"}</span><SelectMenu label={ko?"추론 강도":"Reasoning effort"} value={h.hostCommandEffort} options={[...new Set(["off",...(draft.models.find(m=>m.id===h.hostCommandModelId)?.reasoningEfforts||["on","minimal","low","medium","high","xhigh"])])].map(value=>({value,label:effortLabel(value)}))} onChange={value=>patch({hostCommandEffort:value})}/></label>
       </div><button type="button" className="subtle-action" onClick={()=>setPrompt("hostCommandAnalysisPrompt")}><Pencil size={16}/>{ko?"위험도 분석 프롬프트 편집":"Edit risk-analysis prompt"}</button></div>
     </section>}
     {prompt&&<TextDialog title={prompt==="compactPrompt"?(ko?"압축 프롬프트":"Compacting prompt"):prompt==="resumePrompt"?(ko?"재개 프롬프트":"Resume prompt"):prompt==="hostCommandAnalysisPrompt"?(ko?"셸 명령 위험도 분석 프롬프트":"Shell-command risk analysis prompt"):(ko?"제목 생성 프롬프트":"Title prompt")} help={prompt==="resumePrompt"?(ko?"출력을 재개할 때 사용합니다. %COMPRESSED%는 압축된 맥락으로, %USER_PROMPT%는 원래 사용자 메시지로 치환됩니다.":"Used when resuming an interrupted response. %COMPRESSED% is replaced with the compacted context and %USER_PROMPT% with the original user message."):prompt==="hostCommandAnalysisPrompt"?(ko?"채팅 맥락과 분리된 요청의 시스템 프롬프트입니다. JSON 위험도와 투명한 설명을 요구해야 합니다.":"System prompt for the context-isolated request. It must require JSON risk and a transparent explanation."):undefined} value={h[prompt]} multiline onClose={()=>setPrompt(null)} onSave={text=>{patch({[prompt]:text});setPrompt(null);}}/>}
+    {permissionMatrix&&<PermissionMatrixDialog ko={ko} initial={h.hostTrustedPermissions} onClose={()=>setPermissionMatrix(false)} onSave={value=>{patch({hostTrustedPermissions:value});setPermissionMatrix(false);}}/>}
   </div>;
 }

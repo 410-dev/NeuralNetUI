@@ -19,15 +19,18 @@ test("SDK auth uses only the selected connection token", () => {
   assert.equal(sdkCredentials("Bearer arbitrary"), undefined);
   assert.deepEqual(sdkCredentials("Bearer sk-lm-abcdefgh:12345678901234567890"), { clientIdentifier: "abcdefgh", clientPasskey: "12345678901234567890" });
 });
-test("native history preserves roles, tool IDs and image parts", async () => {
+test("native history preserves roles, tool IDs, stored files and image parts", async () => {
+  const sources: string[] = [];
   const history = await nativeHistory([
     { role: "system", content: "rules" },
-    { role: "user", content: [{ type: "text", text: "look" }, { type: "image_url", image_url: { url: "data:image/png;base64,aGVsbG8=" } }] },
+    { role: "user", content: [{ type: "text", text: "look" }, { type: "image_url", image_url: { url: "data:image/png;base64,aGVsbG8=" } }, { type:"image_file", file_path:"C:/stored/screen.png", mime_type:"image/png" }] },
     { role: "assistant", content: null, tool_calls: [{ id: "c1", type: "function", function: { name: "clock", arguments: "{}" } }] },
     { role: "tool", tool_call_id: "c1", content: "noon" },
-  ], async () => ({ type: "file", identifier: "image1", name: "image.png", sizeBytes: 5, fileType: "image" }));
+  ], async source => { sources.push(source.kind === "file" ? source.path : source.dataUrl); return { type: "file", identifier: "image1", name: "image.png", sizeBytes: 5, fileType: "image" }; });
   assert.equal(history[0].role, "system");
   assert.equal(history[1].content[1].type, "file");
+  assert.equal(history[1].content[2].type, "file");
+  assert.deepEqual(sources, ["data:image/png;base64,aGVsbG8=", "C:/stored/screen.png"]);
   assert.deepEqual(history[2].content[0], { type: "toolCallRequest", toolCallRequest: { id: "c1", type: "function", name: "clock", arguments: {} } });
   assert.deepEqual(history[3].content[0], { type: "toolCallResult", content: "noon", toolCallId: "c1" });
   const reasoningToolRound = await nativeHistory([

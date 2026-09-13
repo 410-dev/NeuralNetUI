@@ -361,8 +361,8 @@ export async function deleteConversation(id: string, userId: string) {
     const result = db.prepare("DELETE FROM conversations WHERE id = ? AND user_id = ?").run(id, userId);
     if (!result.changes) throw Object.assign(new Error("Conversation not found."), { code: "ENOENT" });
     const orphaned = candidates.filter(({ id: uploadId }) => {
-      const row = db.prepare("SELECT 1 FROM message_attachments WHERE upload_id = ? LIMIT 1").get(uploadId);
-      return !row;
+      const row = db.prepare("SELECT retained, EXISTS(SELECT 1 FROM message_attachments WHERE upload_id = ?) AS referenced FROM uploads WHERE id = ?").get(uploadId, uploadId) as { retained:number; referenced:number } | undefined;
+      return row?.retained !== 1 && row?.referenced !== 1;
     });
     for (const { id: uploadId } of orphaned) db.prepare("DELETE FROM uploads WHERE id = ?").run(uploadId);
     return orphaned.map(({ id: uploadId }) => uploadId);

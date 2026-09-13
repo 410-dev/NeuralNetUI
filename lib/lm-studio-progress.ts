@@ -62,9 +62,11 @@ export async function nativeChatResponse(options: {
     // Never load outside the server-wide residency lock, including after manual unload.
     const model = models.find(m => m.identifier === options.model || m.modelKey === options.model || m.path === options.model);
     if (!model) return;
-    const history = await abortable(nativeHistory(options.messages, async dataUrl => {
-      const [, mime, data] = /^data:(image\/(?:png|jpeg|webp|gif));base64,([\s\S]*)$/.exec(dataUrl)!;
-      const file = await client.files.prepareImageBase64(`image.${mime.split("/")[1]}`, data);
+    const history = await abortable(nativeHistory(options.messages, async source => {
+      const file = source.kind === "file" ? await client.files.prepareImage(source.path) : await (async()=>{
+        const [, mime, data] = /^data:(image\/(?:png|jpeg|webp|gif));base64,([\s\S]*)$/.exec(source.dataUrl)!;
+        return client.files.prepareImageBase64(`image.${mime.split("/")[1]}`, data);
+      })();
       return { type: "file", name: file.name, identifier: file.identifier, sizeBytes: file.sizeBytes, fileType: file.type };
     }), AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
     signal.throwIfAborted();

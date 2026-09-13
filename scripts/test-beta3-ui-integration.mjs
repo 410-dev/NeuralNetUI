@@ -67,6 +67,22 @@ async function seed(id, messages) {
 try {
   for (let i = 0; i < 120; i++) { try { if ((await fetch(`${root}/api/auth/status`)).ok) break; } catch {} await delay(100); }
   const setup = await api('/api/auth/setup', 'POST', { username: 'beta3qa', displayName: 'Beta 3 QA', password: 'LocalBeta3QA-220' }); assert.equal(setup.status, 201); cookie = setup.headers.get('set-cookie').split(';')[0];
+  await json('/api/users/defaults', 'PATCH', { defaultStorageQuotaBytes: 2 * 1024 * 1024 });
+  const created = await json('/api/users', 'POST', { username: 'storageqa', displayName: 'Storage QA', password: 'LocalBeta3QA-221', role: 'user' });
+  const managedUser = created.users.find(user => user.username === 'storageqa'); assert.ok(managedUser); assert.equal(managedUser.storageQuotaBytes, 2 * 1024 * 1024);
+  const login = await fetch(`${root}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'storageqa', password: 'LocalBeta3QA-221' }) });
+  assert.equal(login.status, 200); const userCookie = login.headers.get('set-cookie').split(';')[0];
+  const image = Buffer.alloc(1536 * 1024); Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]).copy(image);
+  const thumbnail = Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]);
+  const form = new FormData(); form.append('files', new File([image], 'large-screenshot.png', { type: 'image/png' })); form.append('thumbnail-0', new File([thumbnail], 'preview.png', { type: 'image/png' })); form.append('retained', 'true');
+  const upload = await fetch(`${root}/api/uploads`, { method: 'POST', headers: { cookie: userCookie }, body: form }); const uploaded = await upload.json(); assert.equal(upload.status, 201, JSON.stringify(uploaded));
+  const ownStorageResponse = await fetch(`${root}/api/storage`, { headers: { cookie: userCookie } }); const ownStorage = await ownStorageResponse.json(); assert.equal(ownStorageResponse.status, 200); assert.equal(ownStorage.usedBytes, image.length); assert.equal(ownStorage.files[0].id, uploaded.attachments[0].id);
+  const usersAfterUpload = await json('/api/users'); assert.equal(usersAfterUpload.users.find(user => user.id === managedUser.id).storageUsedBytes, image.length);
+  const audit = await json(`/api/users/${managedUser.id}/audit`); assert.equal(audit.storage.files[0].name, 'large-screenshot.png');
+  const forbiddenAudit = await fetch(`${root}/api/users/${managedUser.id}/audit`, { headers: { cookie: userCookie } }); assert.equal(forbiddenAudit.status, 403);
+  const mediaExport = await fetch(`${root}/api/users/${managedUser.id}/audit?download=media`, { headers: { cookie } }); assert.equal(mediaExport.status, 200); assert.equal(mediaExport.headers.get('content-type'), 'application/zip'); assert.equal(Buffer.from(await mediaExport.arrayBuffer()).readUInt32LE(0), 0x04034b50);
+  const tooSmall = await api(`/api/users/${managedUser.id}`, 'PATCH', { storageQuotaBytes: 1024 * 1024 }); assert.equal(tooSmall.status, 409);
+  console.log('PASS beta 3 storage ownership, quota totals, audit boundary, and ZIP export');
   let config = await json('/api/config');
   const model = { id: 'qa-model', sourceModel: 'qa-model', name: 'Beta 3 model', connectionId: 'qa', isAlias: false, visible: true, reasoningSupported: false, reasoningPresets: [], contextWindowTokens: 4096 };
   config.connections = [{ id: 'qa', name: 'QA', driver: 'openai', baseUrl: `http://127.0.0.1:${mock.address().port}/v1`, apiKey: '', clearApiKey: true, models: [model] }];

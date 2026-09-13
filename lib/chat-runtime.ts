@@ -22,6 +22,7 @@ import { deterministicHostAssessment, executeHostComputerTool, hostActionRequire
 import { canUseHostComputer } from "./host-environment";
 import type { ChatWaitPhase, Conversation, HarnessSettings, MessageStep, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
 import type { ModelContentPart } from "./document-processing";
+import { promises as fs } from "node:fs";
 
 type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
 type UpstreamMessage = { role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string };
@@ -228,14 +229,30 @@ async function upstreamMessages(input: StartChatJobInput, userId: string, system
   return [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...converted.flat()];
 }
 
+/** OpenAI-compatible HTTP has no local-file primitive; materialize only for that fallback path. */
+async function materializeImageFiles(body: Record<string, unknown>) {
+  const messages = Array.isArray(body.messages) ? body.messages as UpstreamMessage[] : [];
+  const converted = await Promise.all(messages.map(async message => {
+    if (!Array.isArray(message.content)) return message;
+    const content = await Promise.all(message.content.map(async (part: Record<string, unknown>) => {
+      if (part.type !== "image_file" || typeof part.file_path !== "string" || typeof part.mime_type !== "string") return part;
+      const data = await fs.readFile(part.file_path);
+      return { type:"image_url", image_url:{ url:`data:${part.mime_type};base64,${data.toString("base64")}` }, ...(part._neural_context_tokens ? { _neural_context_tokens:part._neural_context_tokens } : {}) };
+    }));
+    return { ...message, content };
+  }));
+  return { ...body, messages:converted };
+}
+
 async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false, threshold?: number, baseInput?: number) {
   const turnController = new AbortController();
   const signal = AbortSignal.any([job.controller.signal, turnController.signal]);
   setWaitPhase(job, "preparing-response");
   const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal }) : undefined;
+  const httpBody = nativeResponse ? body : await materializeImageFiles(body);
   const response = nativeResponse || await progressFetch(String(body._endpoint), {
     method: "POST", headers, signal,
-    body: JSON.stringify(Object.fromEntries(Object.entries(body).filter(([key]) => key !== "_endpoint")), (key, value) => key === "_neural_context_tokens" ? undefined : value),
+    body: JSON.stringify(Object.fromEntries(Object.entries(httpBody).filter(([key]) => key !== "_endpoint")), (key, value) => key === "_neural_context_tokens" ? undefined : value),
   }, phase => setWaitPhase(job, phase), "preparing-response");
   if (!response.ok) throw new Error((await response.text()) || `Model server responded with ${response.status}`);
   if (!response.body) throw new Error("The model server returned no response stream.");
@@ -361,7 +378,7 @@ async function authorizeHostAction(job: ChatJob, call: ToolCall, args: Record<st
   const assessment = isShellHostAction(args) ? await policy.assessShell(args) : deterministicHostAssessment(args, policy.locale);
   setWaitPhase(job, undefined);
   updateToolEvent(job, call.id, { arguments: { ...args, authorization: assessment } });
-  if (!hostActionRequiresApproval(policy.settings, assessment.riskLevel)) return { approved: true, assessment };
+  if (!hostActionRequiresApproval(policy.settings, args, assessment.riskLevel)) return { approved: true, assessment };
   const response = await waitForBrowser(job, call);
   const value = response && typeof response === "object" ? response as Record<string, unknown> : {};
   const decision = String(value.decision || "reject");
@@ -405,12 +422,12 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
       const response = await waitForBrowser(job, call);
       return { result: { session_id: sessionId, ...(response && typeof response === "object" ? response as Record<string, unknown> : { completed: true }) } };
     }
-    return executeBrowserTool(ownerKey, call.function.arguments, settings);
+    return executeBrowserTool(ownerKey, call.function.arguments, settings, job.userId);
   }
   if (call.function.name === "host_computer") {
     const authorization = await authorizeHostAction(job, call, args, hostPolicy);
     if (!authorization.approved) return { result: authorization.result };
-    return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args);
+    return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args, job.userId);
   }
   return executeWebTool(call.function.name, call.function.arguments, enabled, settings);
 }
@@ -621,7 +638,7 @@ async function run(job: ChatJob) {
         }
         const textContent = execution.content?.filter((part): part is Extract<ModelContentPart, { type: "text" }> => part.type === "text").map((part) => part.text).join("\n\n");
         messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: textContent || JSON.stringify(execution.result) });
-        const images = execution.content?.filter((part): part is Extract<ModelContentPart, { type: "image_url" }> => part.type === "image_url") || [];
+        const images = execution.content?.filter((part): part is Exclude<ModelContentPart, { type: "text" }> => part.type === "image_url" || part.type === "image_file") || [];
         if (images.length) visualToolContent.push({ type: "text", text: `Visual content returned by the ${call.function.name} tool:` }, ...images);
       }
       if (visualToolContent.length) messages.push({ role: "user", content: visualToolContent });

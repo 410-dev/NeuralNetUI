@@ -12,6 +12,7 @@ import { mergeModelPresets } from "./model-edits";
 import { inferReasoning, normalizeReasoning } from "./reasoning-capabilities";
 import { resolveConnectionModels } from "./connection-drivers";
 import { isHostComputerAvailable } from "./host-environment";
+import { HOST_PERMISSION_KEYS, hostPermissionsFromRiskLevels, type HostPermissionKey } from "./host-permissions";
 
 const presetSchema = z.object({ id: z.string().min(1), name: z.string().min(1), kind: z.enum(["builtin", "custom"]), effort: z.string().optional(), systemPrompt: z.string().optional(), systemPromptMode: z.enum(["replace", "prepend", "append"]).default("append"), ownerId: z.string().optional() });
 const modelSchema = z.object({ id: z.string().min(1), name: z.string().min(1), sourceModel: z.string().min(1), description: z.string().optional(), systemPrompt: z.string().optional(), isAlias: z.boolean(), visible: z.boolean().default(true), reasoningSupported: z.boolean(), reasoningEfforts: z.array(z.string()).optional(), reasoningPresets: z.array(presetSchema), contextWindowTokens: z.number().int().positive().optional(), apiContextWindowTokens: z.number().int().positive().optional(), ownerId: z.string().optional(), isPublic: z.boolean().optional(), connectionId: z.string().min(1).optional() });
@@ -35,7 +36,8 @@ const appearanceSchema = z.object({
   reasoningNotes: z.record(z.string(), z.string().max(200)).default({}),
 }).default(DEFAULT_APPEARANCE);
 const preferencesSchema = z.object({ sendReasoningToModel: z.boolean(), exportReasoning: z.boolean(), language: z.enum(["en", "ko"]).default("en"), onDemand: z.boolean().default(false), showModelIdentifiers: z.boolean().default(true), renderStrikethrough: z.boolean().default(true), defaultModelId: z.string().min(1).optional(), defaultReasoningPresetId: z.string().min(1).optional(), appearance: appearanceSchema }).default({ sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE });
-const harnessSettingsSchema = z.object({
+const hostTrustedPermissionsSchema = z.object(Object.fromEntries(HOST_PERMISSION_KEYS.map((key) => [key, z.boolean().default(false)])) as Record<HostPermissionKey, z.ZodDefault<z.ZodBoolean>>);
+const harnessSettingsValuesSchema = z.object({
   contextMode: z.enum(["rolling", "compacting"]), maxOutputTokens: z.number().int().min(0).max(1_000_000).default(0),
   resumePrompt: z.string().trim().min(1).max(32000).default(DEFAULT_HARNESS_SETTINGS.resumePrompt),
   maxCompactionResumes: z.number().int().min(0).max(100).default(DEFAULT_HARNESS_SETTINGS.maxCompactionResumes),
@@ -44,19 +46,27 @@ const harnessSettingsSchema = z.object({
   titleEnabled: z.boolean(), titleTiming: z.enum(["before", "after"]), titleModelId: z.string().max(500),
   titleEffort: z.string().max(40), titlePrompt: z.string().trim().min(1).max(32000),
   hostTrustMode: z.enum(["full", "partial", "none"]).default(DEFAULT_HARNESS_SETTINGS.hostTrustMode),
-  hostTrustedRiskLevels: z.array(z.boolean()).length(5).default(DEFAULT_HARNESS_SETTINGS.hostTrustedRiskLevels),
+  hostTrustedPermissions: hostTrustedPermissionsSchema.default(DEFAULT_HARNESS_SETTINGS.hostTrustedPermissions),
   hostCommandModelId: z.string().max(500).default(DEFAULT_HARNESS_SETTINGS.hostCommandModelId),
   hostCommandEffort: z.string().max(40).default(DEFAULT_HARNESS_SETTINGS.hostCommandEffort),
   hostCommandAnalysisPrompt: z.string().trim().min(1).max(32000).default(DEFAULT_HARNESS_SETTINGS.hostCommandAnalysisPrompt),
-}).default(DEFAULT_HARNESS_SETTINGS);
+});
+const harnessSettingsSchema = z.preprocess((value) => {
+  if (value === undefined || value === null) return DEFAULT_HARNESS_SETTINGS;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if (record.hostTrustedPermissions && typeof record.hostTrustedPermissions === "object") return record;
+  return { ...record, hostTrustedPermissions: hostPermissionsFromRiskLevels(record.hostTrustedRiskLevels) };
+}, harnessSettingsValuesSchema);
 const experimentalSchema = z.object({ browserTool: z.boolean().default(false), openAIProgress: z.boolean().default(false), hostComputerTool: z.boolean().default(false) }).default(DEFAULT_EXPERIMENTAL);
 const loginAppearanceSchema = z.object({
   accentPalette: z.enum(["blue", "violet", "teal", "amber", "rose", "graphite", "custom"]).default(DEFAULT_LOGIN_APPEARANCE.accentPalette),
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default(DEFAULT_LOGIN_APPEARANCE.accentColor),
 }).default(DEFAULT_LOGIN_APPEARANCE);
-export const configSchema = z.object({ connections: z.array(connectionSchema).min(1).max(32), profile: z.object({ name: z.string().min(1) }), preferences: preferencesSchema, loginAppearance: loginAppearanceSchema, toolSettings: toolSettingsSchema, harnessSettings: harnessSettingsSchema, experimental: experimentalSchema, models: z.array(modelSchema) });
+const userStorageSettingsSchema = z.object({ defaultQuotaBytes: z.number().int().min(1024 * 1024).max(10 * 1024 ** 4).default(512 * 1024 * 1024) }).default({ defaultQuotaBytes: 512 * 1024 * 1024 });
+export const configSchema = z.object({ connections: z.array(connectionSchema).min(1).max(32), profile: z.object({ name: z.string().min(1) }), preferences: preferencesSchema, loginAppearance: loginAppearanceSchema, userStorageSettings: userStorageSettingsSchema, toolSettings: toolSettingsSchema, harnessSettings: harnessSettingsSchema, experimental: experimentalSchema, models: z.array(modelSchema) });
 
-const defaults: AppConfig = { connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", models: [] }], profile: { name: "User" }, preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE }, loginAppearance: DEFAULT_LOGIN_APPEARANCE, toolSettings: DEFAULT_TOOL_SETTINGS, experimental: DEFAULT_EXPERIMENTAL, models: [] };
+const defaults: AppConfig = { connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", models: [] }], profile: { name: "User" }, preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE }, loginAppearance: DEFAULT_LOGIN_APPEARANCE, userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024 }, toolSettings: DEFAULT_TOOL_SETTINGS, experimental: DEFAULT_EXPERIMENTAL, models: [] };
 const configPath = path.join(dataDir, "config.json");
 
 function normalizeConfig(config: AppConfig): AppConfig {
@@ -71,7 +81,7 @@ function migrateConfig(input: unknown): AppConfig {
   if (!legacy.success) throw current.error;
   const connection: ConnectionConfig = { id: "openai-default", name: "OpenAI API", driver: "openai", ...legacy.data.server, models: legacy.data.models.filter((model) => !model.isAlias).map((model) => ({ ...model, connectionId: "openai-default" })) };
   const aliases = legacy.data.models.filter((model) => model.isAlias).map((model) => ({ ...model, connectionId: "openai-default" }));
-  return normalizeConfig({ connections: [connection], profile: legacy.data.profile, preferences: legacy.data.preferences, loginAppearance: DEFAULT_LOGIN_APPEARANCE, toolSettings: legacy.data.toolSettings, experimental: DEFAULT_EXPERIMENTAL, models: aliases });
+  return normalizeConfig({ connections: [connection], profile: legacy.data.profile, preferences: legacy.data.preferences, loginAppearance: DEFAULT_LOGIN_APPEARANCE, userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024 }, toolSettings: legacy.data.toolSettings, harnessSettings: legacy.data.harnessSettings, experimental: DEFAULT_EXPERIMENTAL, models: aliases });
 }
 
 function claimLegacyCustomizations(config: AppConfig) {
@@ -85,7 +95,7 @@ async function readLegacyConfig(filePath: string) { try { return migrateConfig(J
 
 export async function readConfig(): Promise<AppConfig> {
   const stored = db.prepare("SELECT value FROM app_config WHERE id = 1").get() as { value: string } | undefined;
-  if (stored) try { const raw = JSON.parse(stored.value); const claimed = claimLegacyCustomizations(migrateConfig(raw)); if (claimed.changed || !raw.connections) await writeConfig(claimed.config); return claimed.config; } catch (error) { console.error("Invalid SQLite config, recovering from configured defaults", error); }
+  if (stored) try { const raw = JSON.parse(stored.value); const claimed = claimLegacyCustomizations(migrateConfig(raw)); const migratedHostMatrix = !raw?.harnessSettings?.hostTrustedPermissions; if (claimed.changed || !raw.connections || migratedHostMatrix) await writeConfig(claimed.config); return claimed.config; } catch (error) { console.error("Invalid SQLite config, recovering from configured defaults", error); }
   return writeConfig(claimLegacyCustomizations((await readLegacyConfig(configPath)) || structuredClone(defaults)).config);
 }
 
@@ -99,7 +109,7 @@ export function publicConfig(config: AppConfig, user: AuthUser): PublicConfig {
   const superadmin = user.role === "superadmin";
   const harnessSettings = superadmin ? config.harnessSettings : { ...(config.harnessSettings || DEFAULT_HARNESS_SETTINGS), ...{
     hostTrustMode: DEFAULT_HARNESS_SETTINGS.hostTrustMode,
-    hostTrustedRiskLevels: DEFAULT_HARNESS_SETTINGS.hostTrustedRiskLevels,
+    hostTrustedPermissions: DEFAULT_HARNESS_SETTINGS.hostTrustedPermissions,
     hostCommandModelId: "", hostCommandEffort: "off", hostCommandAnalysisPrompt: DEFAULT_HARNESS_SETTINGS.hostCommandAnalysisPrompt,
   } };
   return { ...config, harnessSettings, experimental: { ...config.experimental, hostComputerTool: superadmin && config.experimental.hostComputerTool }, hostComputerAvailable: superadmin && isHostComputerAvailable(), loginAppearance: normalizeLoginAppearance(config.loginAppearance), profile: { name: user.displayName }, preferences, models: config.models.filter((model) => canUseModel(model, user)).map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), connections: config.connections.map((connection) => ({ ...connection, models: connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), apiKey: "", hasApiKey: Boolean(!connection.clearApiKey && (connection.apiKey || (connection.driver === "openai" && process.env.OPENAI_API_KEY))) })), account: { id: user.id, username: user.username, displayName: user.displayName, role: user.role } };
@@ -126,7 +136,7 @@ export async function writeConfigForUser(input: unknown, user: AuthUser): Promis
     experimental: { ...incoming.experimental, hostComputerTool: current.experimental.hostComputerTool },
     harnessSettings: { ...(incoming.harnessSettings || DEFAULT_HARNESS_SETTINGS),
       hostTrustMode: (current.harnessSettings || DEFAULT_HARNESS_SETTINGS).hostTrustMode,
-      hostTrustedRiskLevels: (current.harnessSettings || DEFAULT_HARNESS_SETTINGS).hostTrustedRiskLevels,
+      hostTrustedPermissions: (current.harnessSettings || DEFAULT_HARNESS_SETTINGS).hostTrustedPermissions,
       hostCommandModelId: (current.harnessSettings || DEFAULT_HARNESS_SETTINGS).hostCommandModelId,
       hostCommandEffort: (current.harnessSettings || DEFAULT_HARNESS_SETTINGS).hostCommandEffort,
       hostCommandAnalysisPrompt: (current.harnessSettings || DEFAULT_HARNESS_SETTINGS).hostCommandAnalysisPrompt,

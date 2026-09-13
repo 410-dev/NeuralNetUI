@@ -85,6 +85,15 @@
 - The rail carries no wordmark. Its header holds one icon control: collapse on desktop, close in the mobile drawer.
 - Collapsing animates the rail's width with the shared spring. Fade labels out and collapse their width together so nothing overflows the narrow rail mid-transition.
 
+## Storage and user administration
+
+- Put Storage manager immediately below Search in the expanded sidebar and retain it as an icon action in the collapsed rail. Storage is personal: every preview, download, list, and deletion request must enforce the signed-in owner on the server.
+- Display screenshots and large chat images through authenticated file URLs. Never persist base64 image strings in messages or tool results when an owned file can represent the same media.
+- Show used versus allocated capacity together, with a proportional meter and clear units. Files referenced by saved chats stay visibly protected from deletion.
+- Keep the overall user list compact: identity, role, used/allocated storage, and one Manage action. Detailed role, quota, chat-history export, media browsing, and deletion controls belong in a dedicated user modal.
+- The user-management overview shows aggregate used and aggregate allocated storage separately, plus the default quota for accounts created later. Quota inputs accept MB or GB without exposing raw byte counts.
+- Treat administrator chat/media access as an audit workflow: preserve every branch in exports, package multi-item downloads as ZIP files, and log inspection and export actions server-side without adding an in-product notice to the managed account.
+
 ## Composer
 
 - The composer is one pill row holding the add menu, the draft, the context meter, the reasoning picker and send.
@@ -147,7 +156,7 @@
 - While a feature is off, hide its control in the chat menus and refuse it on the server as well; a client must not be able to ask for it.
 - The host-computer experiment is visible and usable only to Superadmin accounts and only on a non-containerized server. One feature switch exposes one chat tool.
 - Host actions that are not trusted by the harness appear in a single approval card above the composer. Always show the numeric risk, concrete interpretation, full arguments, and Allow / Deny / Deny and redirect choices before execution.
-- Partial trust is a five-row risk matrix; full trust never interrupts, and no trust interrupts every action.
+- Partial trust opens a dedicated permission-matrix modal instead of reducing every action to five global risk switches. Give every file operation its own row, split overwrite and recursive-delete variants, separate process/upload/screen operations, and expose PowerShell and Bash risk levels independently. Each row chooses exactly one of automatic approval or confirmation; full trust never interrupts, and no trust interrupts every action.
 
 ## Host progress and command safety (3.0 beta 1)
 

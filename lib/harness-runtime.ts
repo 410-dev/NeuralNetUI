@@ -87,7 +87,7 @@ function summarySafe(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(summarySafe);
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
-    if (record.type === "image_url") return { type: "image", description: "Visual tool or attachment content omitted from text-only compaction." };
+    if (record.type === "image_url" || record.type === "image_file") return { type: "image", description: "Visual tool or attachment content omitted from text-only compaction." };
     return Object.fromEntries(Object.entries(record).filter(([key]) => key !== "_neural_context_tokens").map(([key, item]) => [key, summarySafe(item)]));
   }
   if (typeof value === "string" && /^data:image\/[a-z0-9.+-]+;base64,/i.test(value)) return "[Visual content omitted from text-only compaction.]";

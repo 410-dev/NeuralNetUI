@@ -26,7 +26,9 @@ export function progressEvent(payload: Record<string, unknown>): { phase: ChatWa
   return { phase, progress: value };
 }
 
-export async function nativeHistory(messages: InferenceMessage[], prepareImage: (dataUrl: string) => Promise<ChatMessagePartFileData>): Promise<ChatMessageData[]> {
+export type NativeImageSource = { kind:"data"; dataUrl:string } | { kind:"file"; path:string };
+
+export async function nativeHistory(messages: InferenceMessage[], prepareImage: (source: NativeImageSource) => Promise<ChatMessagePartFileData>): Promise<ChatMessageData[]> {
   const result: ChatMessageData[] = [];
   for (const message of messages) {
     const currentToolRound = message.role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
@@ -43,7 +45,8 @@ export async function nativeHistory(messages: InferenceMessage[], prepareImage: 
     if (typeof message.content === "string" && message.content) content.push({ type: "text", text: message.content });
     else if (Array.isArray(message.content)) for (const part of message.content) {
       if (part.type === "text" && typeof part.text === "string") content.push({ type: "text", text: part.text });
-      else if (part.type === "image_url" && typeof part.image_url?.url === "string" && /^data:image\/(png|jpeg|webp|gif);base64,/.test(part.image_url.url)) content.push(await prepareImage(part.image_url.url));
+      else if (part.type === "image_url" && typeof part.image_url?.url === "string" && /^data:image\/(png|jpeg|webp|gif);base64,/.test(part.image_url.url)) content.push(await prepareImage({ kind:"data", dataUrl:part.image_url.url }));
+      else if (part.type === "image_file" && typeof part.file_path === "string") content.push(await prepareImage({ kind:"file", path:part.file_path }));
       else throw new Error("Unsupported native message content.");
     }
     if (message.role === "assistant") {

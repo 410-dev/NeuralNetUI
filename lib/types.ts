@@ -1,4 +1,5 @@
 import type { GreetingOverrides } from "./greetings.ts";
+import type { HostTrustedPermissions } from "./host-permissions.ts";
 
 export type ReasoningKind = "builtin" | "custom";
 export type SystemPromptMode = "replace" | "prepend" | "append";
@@ -90,6 +91,13 @@ export interface AccountInfo {
 
 export interface UserSummary extends AccountInfo {
   createdAt: string;
+  storageQuotaBytes: number;
+  storageUsedBytes: number;
+}
+
+export interface UserStorageSettings {
+  /** Default quota assigned to newly created accounts. */
+  defaultQuotaBytes: number;
 }
 
 export interface AppConfig {
@@ -111,6 +119,7 @@ export interface AppConfig {
   };
   /** Workspace-wide, never overridden per account. */
   loginAppearance: LoginAppearance;
+  userStorageSettings: UserStorageSettings;
   harnessSettings?: HarnessSettings;
   toolSettings: ToolSettings;
   experimental: ExperimentalFeatures;
@@ -134,8 +143,8 @@ export interface HarnessSettings {
   titlePrompt: string;
   /** Confirmation policy for the Superadmin-only host computer tool. */
   hostTrustMode: "full" | "partial" | "none";
-  /** One entry for each risk level (1..5). Used only in partial trust mode. */
-  hostTrustedRiskLevels: boolean[];
+  /** Per-operation automatic approval choices. Used only in partial trust mode. */
+  hostTrustedPermissions: HostTrustedPermissions;
   /** Optional isolated model used to classify and explain shell commands. */
   hostCommandModelId: string;
   hostCommandEffort: string;
@@ -241,6 +250,12 @@ export interface StoredAttachment {
   height?: number;
   url: string;
   thumbnailUrl?: string;
+}
+
+export interface StorageFile extends StoredAttachment {
+  createdAt: string;
+  referenceCount: number;
+  retained: boolean;
 }
 
 export interface ChatBranch {

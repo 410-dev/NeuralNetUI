@@ -5,7 +5,10 @@ import path from "node:path";
 import type { ToolSettings } from "./types";
 
 export type DocumentKind = "text" | "pdf" | "image" | "archive" | "binary";
-export type ModelContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string }; _neural_context_tokens?: number };
+export type ModelContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string }; _neural_context_tokens?: number }
+  | { type: "image_file"; file_path: string; mime_type: string; _neural_context_tokens?: number };
 
 export type PdfExtraction = {
   pageLimit: number;

@@ -253,6 +253,25 @@ function openDatabase() {
     connection.exec(`ALTER TABLE messages ADD COLUMN steps TEXT CHECK (steps IS NULL OR json_valid(steps));`);
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(10, new Date().toISOString());
   })();
+  const userStorageVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (userStorageVersion.version < 11) connection.transaction(() => {
+    connection.exec(`
+      ALTER TABLE users ADD COLUMN storage_quota_bytes INTEGER NOT NULL DEFAULT 536870912
+        CHECK (storage_quota_bytes >= 1048576 AND storage_quota_bytes <= 10995116277760);
+      ALTER TABLE uploads ADD COLUMN retained INTEGER NOT NULL DEFAULT 0 CHECK (retained IN (0, 1));
+      CREATE TABLE admin_audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        target_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        action TEXT NOT NULL,
+        detail TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX admin_audit_created_idx ON admin_audit_log(created_at DESC);
+      CREATE INDEX admin_audit_target_idx ON admin_audit_log(target_user_id, created_at DESC);
+    `);
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(11, new Date().toISOString());
+  })();
   return connection;
 }
 

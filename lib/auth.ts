@@ -16,6 +16,7 @@ type UserRow = {
   password_hash: string;
   role: UserRole;
   preferences: string;
+  storage_quota_bytes: number;
   created_at: string;
 };
 
@@ -143,28 +144,33 @@ export async function authenticate(username: string, password: string) {
 }
 
 export function listUsers(): UserSummary[] {
-  return (db.prepare("SELECT id, username, display_name, role, created_at FROM users ORDER BY created_at").all() as Array<Omit<UserRow, "password_hash" | "preferences" | "updated_at">>)
-    .map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, role: row.role, createdAt: row.created_at }));
+  return (db.prepare(`
+    SELECT u.id, u.username, u.display_name, u.role, u.created_at, u.storage_quota_bytes,
+           COALESCE(SUM(up.size), 0) AS storage_used_bytes
+    FROM users u LEFT JOIN uploads up ON up.user_id = u.id
+    GROUP BY u.id ORDER BY u.created_at
+  `).all() as Array<Pick<UserRow, "id" | "username" | "display_name" | "role" | "created_at" | "storage_quota_bytes"> & { storage_used_bytes: number }>)
+    .map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, role: row.role, createdAt: row.created_at, storageQuotaBytes: row.storage_quota_bytes, storageUsedBytes: row.storage_used_bytes }));
 }
 
-export async function createUser(input: { username?: string; displayName?: string; password?: string; role?: string }) {
+export async function createUser(input: { username?: string; displayName?: string; password?: string; role?: string }, defaultStorageQuotaBytes = 512 * 1024 * 1024) {
   const username = String(input.username || "").trim(); const displayName = String(input.displayName || username).trim();
   if (!/^[a-zA-Z0-9._-]{3,40}$/.test(username)) throw new AuthError("사용자 이름은 영문, 숫자, ., _, -로 3~40자여야 합니다.", 400);
   if (!displayName || displayName.length > 80) throw new AuthError("표시 이름을 확인해 주세요.", 400);
   const role: UserRole = input.role === "admin" ? "admin" : "user";
   const passwordHash = await hashPassword(String(input.password || "")); const stamp = new Date().toISOString();
   try {
-    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '{}', ?, ?)")
-      .run(randomUUID(), username, displayName, passwordHash, role, stamp, stamp);
+    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, storage_quota_bytes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '{}', ?, ?, ?)")
+      .run(randomUUID(), username, displayName, passwordHash, role, defaultStorageQuotaBytes, stamp, stamp);
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new AuthError("이미 사용 중인 사용자 이름입니다.", 409);
     throw error;
   }
 }
 
-export function updateManagedUser(actor: AuthUser, userId: string, input: { displayName?: string; role?: string }) {
-  if (actor.id === userId) throw new AuthError("현재 로그인한 계정은 여기에서 변경할 수 없습니다.", 409);
-  const target = db.prepare("SELECT display_name, role FROM users WHERE id = ?").get(userId) as { display_name: string; role: UserRole } | undefined;
+export function updateManagedUser(actor: AuthUser, userId: string, input: { displayName?: string; role?: string; storageQuotaBytes?: number }) {
+  if (actor.id === userId && (input.displayName !== undefined || input.role !== undefined)) throw new AuthError("현재 로그인한 계정의 이름이나 권한은 여기에서 변경할 수 없습니다.", 409);
+  const target = db.prepare("SELECT display_name, role, storage_quota_bytes FROM users WHERE id = ?").get(userId) as { display_name: string; role: UserRole; storage_quota_bytes: number } | undefined;
   if (!target) throw new AuthError("사용자를 찾을 수 없습니다.", 404);
   const displayName = input.displayName === undefined ? target.display_name : String(input.displayName).trim();
   if (!displayName || displayName.length > 80) throw new AuthError("표시 이름을 확인해 주세요.", 400);
@@ -174,9 +180,23 @@ export function updateManagedUser(actor: AuthUser, userId: string, input: { disp
   const role = input.role === undefined ? target.role : input.role as UserRole;
   if (target.role === "superadmin" && role !== "superadmin") throw new AuthError("최고 관리자의 권한은 변경할 수 없습니다.", 409);
   if (target.role !== "superadmin" && role === "superadmin") throw new AuthError("최고 관리자 권한은 부여할 수 없습니다.", 409);
-  const result = db.prepare("UPDATE users SET display_name = ?, role = ?, updated_at = ? WHERE id = ?")
-    .run(displayName, role, new Date().toISOString(), userId);
-  if (!result.changes) throw new AuthError("사용자를 찾을 수 없습니다.", 404);
+  const quota = input.storageQuotaBytes === undefined ? target.storage_quota_bytes : Number(input.storageQuotaBytes);
+  if (!Number.isSafeInteger(quota) || quota < 1024 * 1024 || quota > 10 * 1024 ** 4) throw new AuthError("저장소 할당량은 1MB~10TB 사이여야 합니다.", 400);
+  db.transaction(() => {
+    // Serialize the usage check with upload quota reservations so an upload
+    // cannot commit between this check and a quota reduction.
+    const used = (db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ?").get(userId) as { bytes: number }).bytes;
+    if (quota < used) throw new AuthError("현재 사용 중인 용량보다 할당량을 작게 설정할 수 없습니다.", 409);
+    const result = db.prepare("UPDATE users SET display_name = ?, role = ?, storage_quota_bytes = ?, updated_at = ? WHERE id = ?")
+      .run(displayName, role, quota, new Date().toISOString(), userId);
+    if (!result.changes) throw new AuthError("사용자를 찾을 수 없습니다.", 404);
+  })();
+  logAdminAudit(actor.id, userId, "user.settings.update", JSON.stringify({ role, storageQuotaBytes: quota }));
+}
+
+export function logAdminAudit(actorUserId: string, targetUserId: string, action: string, detail?: string) {
+  db.prepare("INSERT INTO admin_audit_log(actor_user_id, target_user_id, action, detail, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(actorUserId, targetUserId, action.slice(0, 120), detail?.slice(0, 4000) || null, new Date().toISOString());
 }
 
 export async function deleteManagedUser(actor: AuthUser, userId: string) {

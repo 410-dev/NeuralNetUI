@@ -5,6 +5,7 @@ import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page, type Route } from "playwright-core";
 import type { ModelContentPart } from "./document-processing";
 import type { ToolSettings } from "./types";
+import { saveGeneratedImage } from "./uploads.ts";
 
 const ACTION_TIMEOUT_MS = 20_000;
 const MAX_SESSIONS = 8;
@@ -443,17 +444,19 @@ export function boundedBrowserScreenshot(width: number, pageHeight: number, full
   return { width: boundedWidth, height, pageHeight: Math.max(1, Math.floor(pageHeight)), truncated: fullPage && pageHeight > height };
 }
 
-async function capture(session: BrowserSession, fullPage: boolean) {
+async function capture(session: BrowserSession, fullPage: boolean, userId?: string) {
+  if (!userId) throw new Error("A storage owner is required for browser screenshots.");
   const tab = activeTab(session); const page = tab.page;
   const pageDimensions = await page.evaluate(() => ({ width: Math.max(document.documentElement.clientWidth, document.body?.scrollWidth || 0), height: Math.max(document.documentElement.clientHeight, document.body?.scrollHeight || 0) }));
   const dimensions = boundedBrowserScreenshot(fullPage ? pageDimensions.width : page.viewportSize()?.width || VIEWPORT.width, pageDimensions.height, fullPage);
   const buffer = await page.screenshot({ type: "jpeg", quality: 78, animations: "disabled", ...(fullPage ? { clip: { x: 0, y: 0, width: dimensions.width, height: dimensions.height } } : {}) });
   const contextTokens = browserImageTokenEstimate(dimensions.width, dimensions.height);
+  const stored = await saveGeneratedImage(buffer, userId, `browser-screenshot-${new Date().toISOString().replace(/[:.]/g,"-")}.jpg`, { width: dimensions.width, height: dimensions.height }, "image/jpeg");
   return {
-    result: { sessionId: session.id, tabId: tab.id, url: page.url(), screenshot: true, fullPage, bounded: true, capturedWidth: dimensions.width, capturedHeight: dimensions.height, pageHeight: dimensions.pageHeight, truncated: dimensions.truncated, contextTokens, size: buffer.length },
+    result: { sessionId: session.id, tabId: tab.id, url: page.url(), screenshot: true, fullPage, bounded: true, capturedWidth: dimensions.width, capturedHeight: dimensions.height, pageHeight: dimensions.pageHeight, truncated: dimensions.truncated, contextTokens, size: buffer.length, attachment: stored.metadata, storage: "user" },
     content: [
       { type: "text", text: JSON.stringify({ sessionId: session.id, tabId: tab.id, url: page.url(), screenshot: true, fullPage, capturedWidth: dimensions.width, capturedHeight: dimensions.height, pageHeight: dimensions.pageHeight, truncated: dimensions.truncated }) },
-      { type: "image_url", image_url: { url: `data:image/jpeg;base64,${buffer.toString("base64")}` }, _neural_context_tokens: contextTokens },
+      { type: "image_file", file_path: stored.path, mime_type: "image/jpeg", _neural_context_tokens: contextTokens },
     ] satisfies ModelContentPart[],
   };
 }
@@ -462,7 +465,7 @@ async function pause(seconds: number) {
   if (seconds > 0) await new Promise((resolve) => setTimeout(resolve, seconds * 1_000));
 }
 
-export async function executeBrowserTool(ownerKey: string, rawArguments: string, settings: ToolSettings): Promise<BrowserToolExecution> {
+export async function executeBrowserTool(ownerKey: string, rawArguments: string, settings: ToolSettings, userId?: string): Promise<BrowserToolExecution> {
   let raw: unknown;
   try { raw = JSON.parse(rawArguments || "{}"); } catch { throw new Error("Browser tool arguments were not valid JSON."); }
   const action = normalizeBrowserAction(raw);
@@ -472,7 +475,7 @@ export async function executeBrowserTool(ownerKey: string, rawArguments: string,
     try {
       const tab = activeTab(session); await tab.page.goto(url.toString(), { waitUntil: "domcontentloaded" });
       await pause(action.waitSeconds);
-      if (action.screenshot) return capture(session, action.fullPage);
+      if (action.screenshot) return capture(session, action.fullPage, userId);
       const state = await snapshot(tab.page, settings.textCharacterLimit);
       const result = { sessionId: session.id, tabId: tab.id, maxTabs: session.maxTabs, ...state };
       return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
@@ -519,7 +522,7 @@ export async function executeBrowserTool(ownerKey: string, rawArguments: string,
     else await page.keyboard.press(action.key);
   }
   if (action.action === "scroll") await page.mouse.wheel(0, action.deltaY);
-  if (action.action === "screenshot") { await pause(action.waitSeconds); return capture(session, action.fullPage); }
+  if (action.action === "screenshot") { await pause(action.waitSeconds); return capture(session, action.fullPage, userId); }
   await page.waitForTimeout(250);
   const state = await snapshot(page, settings.textCharacterLimit); const tab = activeTab(session); const result = { sessionId: session.id, tabId: tab.id, ...state };
   return { result, content: [{ type: "text", text: JSON.stringify(result) }] };

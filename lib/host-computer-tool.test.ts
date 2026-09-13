@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { closeHostComputerSession, deterministicHostAssessment, executeHostComputerTool, hostActionRequiresApproval, hostComputerToolDefinition, isShellHostAction } from "./host-computer-tool.ts";
 import { canUseHostComputer, isHostComputerAvailable } from "./host-environment.ts";
+import { createHostTrustedPermissions, hostPermissionForAction, hostPermissionsFromRiskLevels } from "./host-permissions.ts";
 
 test("host tool exposes one bounded action surface", () => {
   const definition = hostComputerToolDefinition() as { function: { name: string; parameters: { properties: { action: { enum: string[] } } } } };
@@ -32,12 +33,34 @@ test("dedicated host actions receive their documented risk and transparent paths
   assert.equal(isShellHostAction({ action: "run_shell" }), true);
 });
 
-test("full, partial, and no-trust policies map risk levels exactly", () => {
-  const levels = [true, false, false, false, false];
-  assert.equal(hostActionRequiresApproval({ hostTrustMode: "full", hostTrustedRiskLevels: levels }, 5), false);
-  assert.equal(hostActionRequiresApproval({ hostTrustMode: "partial", hostTrustedRiskLevels: levels }, 1), false);
-  assert.equal(hostActionRequiresApproval({ hostTrustMode: "partial", hostTrustedRiskLevels: levels }, 2), true);
-  assert.equal(hostActionRequiresApproval({ hostTrustMode: "none", hostTrustedRiskLevels: levels }, 1), true);
+test("partial trust maps exact sub-tool operations instead of broad risk levels", () => {
+  const permissions = createHostTrustedPermissions();
+  permissions["files.search"] = true;
+  permissions["files.copy"] = true;
+  permissions["powershell.risk2"] = true;
+  const partial = { hostTrustMode: "partial" as const, hostTrustedPermissions: permissions };
+  assert.equal(hostActionRequiresApproval({ ...partial, hostTrustMode: "full" }, { action: "delete" }, 4), false);
+  assert.equal(hostActionRequiresApproval(partial, { action: "search_files" }, 1), false);
+  assert.equal(hostActionRequiresApproval(partial, { action: "read_file" }, 2), true);
+  assert.equal(hostActionRequiresApproval(partial, { action: "copy" }, 3), false);
+  assert.equal(hostActionRequiresApproval(partial, { action: "copy", overwrite: true }, 3), true);
+  assert.equal(hostActionRequiresApproval(partial, { action: "run_shell", shell: "powershell" }, 2), false);
+  assert.equal(hostActionRequiresApproval(partial, { action: "run_shell", shell: "bash" }, 2), true);
+  assert.equal(hostActionRequiresApproval({ ...partial, hostTrustMode: "none" }, { action: "search_files" }, 1), true);
+});
+
+test("conditional permission keys and legacy migration remain conservative", () => {
+  assert.equal(hostPermissionForAction({ action: "write_file" }, 3), "files.write");
+  assert.equal(hostPermissionForAction({ action: "write_file", overwrite: true }, 3), "files.writeOverwrite");
+  assert.equal(hostPermissionForAction({ action: "delete", recursive: true }, 4), "files.deleteRecursive");
+  assert.equal(hostPermissionForAction({ action: "run_shell", shell: "powershell" }, 5), "powershell.risk5");
+  assert.equal(hostPermissionForAction({ action: "run_shell", shell: "cmd" }, 5), undefined);
+  const migrated = hostPermissionsFromRiskLevels([true, false, true, false, false]);
+  assert.equal(migrated["files.search"], true);
+  assert.equal(migrated["files.read"], false);
+  assert.equal(migrated["files.copyOverwrite"], true);
+  assert.equal(migrated["files.moveOverwrite"], false);
+  assert.equal(migrated["bash.risk3"], true);
 });
 
 test("host file actions and conversation process tracking work end to end", { skip: !isHostComputerAvailable() }, async () => {

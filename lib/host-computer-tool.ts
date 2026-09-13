@@ -6,6 +6,8 @@ import { createConnection } from "node:net";
 import type { ModelContentPart } from "./document-processing";
 import { isHostComputerAvailable } from "./host-environment.ts";
 import type { HarnessSettings } from "./types";
+import { hostPermissionForAction } from "./host-permissions.ts";
+import { saveGeneratedImage } from "./uploads.ts";
 
 export type HostRiskAssessment = { riskLevel: 1 | 2 | 3 | 4 | 5; explanation: string };
 export type HostToolExecution = { result: unknown; content?: ModelContentPart[] };
@@ -74,10 +76,11 @@ export function hostComputerToolDefinition() {
 
 export function isShellHostAction(args: HostArgs) { return String(args.action || "") === "run_shell"; }
 
-export function hostActionRequiresApproval(settings: Pick<HarnessSettings, "hostTrustMode" | "hostTrustedRiskLevels">, riskLevel: HostRiskAssessment["riskLevel"]) {
+export function hostActionRequiresApproval(settings: Pick<HarnessSettings, "hostTrustMode" | "hostTrustedPermissions">, args: HostArgs, riskLevel: HostRiskAssessment["riskLevel"]) {
   if (settings.hostTrustMode === "full") return false;
   if (settings.hostTrustMode === "none") return true;
-  return settings.hostTrustedRiskLevels[riskLevel - 1] !== true;
+  const permission = hostPermissionForAction(args, riskLevel);
+  return !permission || settings.hostTrustedPermissions[permission] !== true;
 }
 
 export function deterministicHostAssessment(args: HostArgs, locale = "en"): HostRiskAssessment {
@@ -219,7 +222,7 @@ async function screenshot() {
   try {
     if (process.platform === "win32" && process.env.NEURAL_CHAT_WINDOWS_SERVICE === "1") {
       const buffer = await trayScreenshot();
-      return { result: { screenshot: true, mimeType: "image/png", size: buffer.length, source: "interactive-tray" }, content: [{ type: "text", text: "Current host-computer screenshot." }, { type: "image_url", image_url: { url: `data:image/png;base64,${buffer.toString("base64")}` } }] satisfies ModelContentPart[] };
+      return { buffer, source: "interactive-tray" };
     }
     if (process.platform === "win32") {
       const escaped = target.replace(/'/g, "''");
@@ -234,7 +237,7 @@ async function screenshot() {
       const result = await captureCommand(tool, argv, 30_000); if (result.exitCode !== 0) throw new Error(result.stderr.toString("utf8") || "Screenshot command failed.");
     }
     const buffer = await fs.readFile(target);
-    return { result: { screenshot: true, mimeType: "image/png", size: buffer.length }, content: [{ type: "text", text: "Current host-computer screenshot." }, { type: "image_url", image_url: { url: `data:image/png;base64,${buffer.toString("base64")}` } }] satisfies ModelContentPart[] };
+    return { buffer, source: "host" };
   } finally { await fs.rm(work, { recursive: true, force: true }).catch(() => undefined); }
 }
 
@@ -249,7 +252,7 @@ async function trayScreenshot() {
   });
 }
 
-export async function executeHostComputerTool(sessionKey: string, args: HostArgs): Promise<HostToolExecution> {
+export async function executeHostComputerTool(sessionKey: string, args: HostArgs, userId?: string): Promise<HostToolExecution> {
   if (!isHostComputerAvailable()) throw new Error("The host computer tool is unavailable in a containerized environment.");
   const action = stringArg(args, "action");
   if (action === "search_files") { const root = resolvedPath(args); return { result: await searchFiles(root, stringArg(args, "query", false) || "*", Math.max(1, Math.min(500, Number(args.max_results || 100)))) }; }
@@ -274,7 +277,15 @@ export async function executeHostComputerTool(sessionKey: string, args: HostArgs
   }
   if (action === "kill_process") { const pid = Math.floor(Number(args.pid)); const session = processSessions.get(sessionKey); const managed = session?.get(pid); if (!managed) throw new Error("That PID was not started by the host tool in this conversation."); const signalled = managed.child.kill(); return { result: { pid, name: managed.name, signalled } }; }
   if (action === "run_shell") { const shell = shellExecutable(stringArg(args, "shell")); const command = stringArg(args, "command"); const timeout = Math.max(1, Math.min(300, Number(args.timeout_seconds || 60))) * 1000; const result = await captureCommand(shell.program, [...shell.args, command], timeout, args.cwd ? path.resolve(String(args.cwd)) : undefined); return { result: { shell: args.shell, exitCode: result.exitCode, stdout: result.stdout.toString("utf8"), stderr: result.stderr.toString("utf8"), truncated: result.stdout.length >= MAX_OUTPUT_BYTES || result.stderr.length >= MAX_OUTPUT_BYTES } }; }
-  if (action === "screenshot") return screenshot();
+  if (action === "screenshot") {
+    if (!userId) throw new Error("A storage owner is required for screenshots.");
+    const captured = await screenshot();
+    const stored = await saveGeneratedImage(captured.buffer, userId);
+    return {
+      result: { screenshot:true, mimeType:"image/png", size:captured.buffer.length, source:captured.source, attachment:stored.metadata, storage:"user" },
+      content: [{ type:"text", text:`Current host-computer screenshot stored as ${stored.metadata.name}.` }, { type:"image_file", file_path:stored.path, mime_type:"image/png" }] satisfies ModelContentPart[],
+    };
+  }
   throw new Error(`Unknown host computer action: ${action}`);
 }
 
