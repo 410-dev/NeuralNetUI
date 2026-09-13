@@ -93,6 +93,9 @@
 - Keep the overall user list compact: identity, role, used/allocated storage, and one Manage action. Detailed role, quota, chat-history export, media browsing, and deletion controls belong in a dedicated user modal.
 - The user-management overview shows aggregate used and aggregate allocated storage separately, plus the default quota for accounts created later. Quota inputs accept MB or GB without exposing raw byte counts.
 - Treat administrator chat/media access as an audit workflow: preserve every branch in exports, package multi-item downloads as ZIP files, and log inspection and export actions server-side without adding an in-product notice to the managed account.
+- Keep account/role/quota editing short. Open chat records and stored files in separate full-size audit dialogs rather than nesting growing lists inside the user-management modal.
+- Paginate audit conversations and expose an in-place review that can switch among every branch. Rewrite owned attachment URLs through the administrator audit endpoint so review never weakens the normal owner-only URL.
+- Offer thumbnail and list layouts for audit files. Both layouts retain filename, size, MIME type, and creation time; sorting is server-backed by filename, size, or creation time in both directions.
 
 ## Composer
 

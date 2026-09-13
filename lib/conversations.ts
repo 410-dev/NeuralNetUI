@@ -209,6 +209,19 @@ export async function listConversations(userId: string): Promise<ConversationSum
   `).all(userId) as ConversationSummary[];
 }
 
+export async function listConversationsPage(userId:string,input:{page?:number;pageSize?:number}={}){
+  await ensureLegacyConversationsMigrated(userId);
+  const total=(db.prepare("SELECT COUNT(*) AS total FROM conversations WHERE user_id = ? AND temporary = 0").get(userId) as {total:number}).total;
+  const pageSize=Math.max(1,Math.min(100,Math.floor(input.pageSize||20)));const pageCount=Math.max(1,Math.ceil(total/pageSize));const page=Math.max(1,Math.min(pageCount,Math.floor(input.page||1)));
+  const items=db.prepare(`
+    SELECT c.id,c.title,c.active_branch_id AS activeBranchId,COUNT(b.id) AS branchCount,c.updated_at AS updatedAt
+    FROM conversations c LEFT JOIN branches b ON b.conversation_id=c.id
+    WHERE c.user_id=? AND c.temporary=0 GROUP BY c.id
+    ORDER BY c.updated_at DESC,c.id LIMIT ? OFFSET ?
+  `).all(userId,pageSize,(page-1)*pageSize) as ConversationSummary[];
+  return{items,total,page,pageSize,pageCount};
+}
+
 type ConversationRow = {
   id: string;
   title: string;

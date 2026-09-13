@@ -13,6 +13,7 @@ test("host tool exposes one bounded action surface", () => {
   assert.ok(definition.function.parameters.properties.action.enum.includes("run_shell"));
   assert.ok(definition.function.parameters.properties.action.enum.includes("screenshot"));
   assert.ok(definition.function.parameters.properties.action.enum.includes("upload_temp"));
+  assert.ok(definition.function.parameters.properties.action.enum.includes("store_file"));
 });
 
 test("host access requires the feature, a real host, and Superadmin", () => {
@@ -30,6 +31,7 @@ test("dedicated host actions receive their documented risk and transparent paths
   assert.equal(move.riskLevel, 3); assert.match(move.explanation, /from.*a\.txt/i); assert.match(move.explanation, /to.*a\.txt/i);
   assert.equal(deterministicHostAssessment({ action: "delete", path: "C:/work", recursive: true }, "en").riskLevel, 4);
   assert.equal(deterministicHostAssessment({ action: "move", path: "C:/from", destination: "D:/to", overwrite: true }, "en").riskLevel, 4);
+  const stored = deterministicHostAssessment({ action: "store_file", path: "C:/work/photo.png" }, "ko"); assert.equal(stored.riskLevel, 3); assert.match(stored.explanation, /개인 저장소/);
   assert.equal(isShellHostAction({ action: "run_shell" }), true);
 });
 
@@ -53,12 +55,14 @@ test("conditional permission keys and legacy migration remain conservative", () 
   assert.equal(hostPermissionForAction({ action: "write_file" }, 3), "files.write");
   assert.equal(hostPermissionForAction({ action: "write_file", overwrite: true }, 3), "files.writeOverwrite");
   assert.equal(hostPermissionForAction({ action: "delete", recursive: true }, 4), "files.deleteRecursive");
+  assert.equal(hostPermissionForAction({ action: "store_file" }, 3), "storage.importFile");
   assert.equal(hostPermissionForAction({ action: "run_shell", shell: "powershell" }, 5), "powershell.risk5");
   assert.equal(hostPermissionForAction({ action: "run_shell", shell: "cmd" }, 5), undefined);
   const migrated = hostPermissionsFromRiskLevels([true, false, true, false, false]);
   assert.equal(migrated["files.search"], true);
   assert.equal(migrated["files.read"], false);
   assert.equal(migrated["files.copyOverwrite"], true);
+  assert.equal(migrated["storage.importFile"], true);
   assert.equal(migrated["files.moveOverwrite"], false);
   assert.equal(migrated["bash.risk3"], true);
 });

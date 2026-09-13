@@ -1,6 +1,6 @@
 {
   "name": "neural-chat-ui",
-  "version": "3.0.0-beta.3",
+  "version": "3.0.0-beta.4",
   "type": "module",
   "private": true,
   "engines": {
@@ -30,6 +30,7 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "sharp": "^0.35.4",
     "typescript": "^5.9.2",
     "zod": "^4.1.3"
   }

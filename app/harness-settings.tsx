@@ -44,7 +44,8 @@ function PermissionMatrixDialog({ ko, initial, onSave, onClose }: { ko:boolean; 
       {key:"files.delete",title:ko?"단일 경로 삭제":"Delete one path",detail:ko?"파일 또는 빈 폴더를 영구 삭제":"Permanently delete a file or empty folder"},
       {key:"files.deleteRecursive",title:ko?"재귀 삭제":"Recursive delete",detail:ko?"폴더와 모든 하위 항목을 영구 삭제":"Permanently delete a folder and everything below it"},
     ]},
-    {title:ko?"업로드":"Upload",rows:[
+    {title:ko?"저장소와 업로드":"Storage and upload",rows:[
+      {key:"storage.importFile",title:ko?"개인 저장소로 가져오기":"Import to private storage",detail:ko?"호스트 파일을 현재 사용자의 저장소로 복사":"Copy a host file into the current user's storage"},
       {key:"network.uploadTemp",title:ko?"임시 파일 업로드":"Temporary file upload",detail:ko?"파일을 temp.hysong.dev로 전송":"Send a file to temp.hysong.dev"},
     ]},
     {title:ko?"백그라운드 프로그램":"Background programs",rows:[

@@ -272,6 +272,35 @@ function openDatabase() {
     `);
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(11, new Date().toISOString());
   })();
+  const generalFileStorageVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (generalFileStorageVersion.version < 12) {
+    connection.pragma("foreign_keys = OFF");
+    try {
+      connection.transaction(() => {
+        connection.exec(`
+          CREATE TABLE uploads_v12 (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            mime_type TEXT NOT NULL CHECK (length(mime_type) BETWEEN 1 AND 255),
+            size INTEGER NOT NULL CHECK (size >= 0),
+            width INTEGER CHECK (width IS NULL OR width > 0),
+            height INTEGER CHECK (height IS NULL OR height > 0),
+            created_at TEXT NOT NULL,
+            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            retained INTEGER NOT NULL DEFAULT 0 CHECK (retained IN (0, 1))
+          );
+          INSERT INTO uploads_v12(id,name,mime_type,size,width,height,created_at,user_id,retained)
+            SELECT id,name,mime_type,size,width,height,created_at,user_id,retained FROM uploads;
+          DROP TABLE uploads;
+          ALTER TABLE uploads_v12 RENAME TO uploads;
+          CREATE INDEX uploads_user_idx ON uploads(user_id);
+        `);
+        connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(12, new Date().toISOString());
+      })();
+    } finally { connection.pragma("foreign_keys = ON"); }
+    const violations = connection.pragma("foreign_key_check") as unknown[];
+    if (violations.length) throw new Error("Database migration 12 left invalid attachment references.");
+  }
   return connection;
 }
 

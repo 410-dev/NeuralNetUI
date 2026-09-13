@@ -7,7 +7,7 @@ import type { ModelContentPart } from "./document-processing";
 import { isHostComputerAvailable } from "./host-environment.ts";
 import type { HarnessSettings } from "./types";
 import { hostPermissionForAction } from "./host-permissions.ts";
-import { saveGeneratedImage } from "./uploads.ts";
+import { saveGeneratedImage, saveHostFile } from "./uploads.ts";
 
 export type HostRiskAssessment = { riskLevel: 1 | 2 | 3 | 4 | 5; explanation: string };
 export type HostToolExecution = { result: unknown; content?: ModelContentPart[] };
@@ -44,11 +44,11 @@ export function hostComputerToolDefinition() {
     type: "function",
     function: {
       name: "host_computer",
-      description: "Control the non-containerized computer hosting NeuralNetUI. Search, inspect, read, copy, write, rename, move or delete files; upload a file to temp.hysong.dev; start, list or stop background programs retained for this conversation; run PowerShell or Bash; or capture the current desktop. Every action is checked against the Superadmin trust policy. Use explicit absolute paths and prefer dedicated file actions over shell commands.",
+      description: "Control the non-containerized computer hosting NeuralNetUI. Search, inspect, read, copy, write, rename, move or delete files; store any regular file in the current Superadmin's private NeuralNetUI storage; explicitly upload a file to temp.hysong.dev only when the user requests temporary external sharing; start, list or stop background programs retained for this conversation; run PowerShell or Bash; or capture the current desktop. Every action is checked against the Superadmin trust policy. Use explicit absolute paths and prefer dedicated file actions over shell commands. For requests to attach, upload, show, or share a host file, default to store_file and include its returned Markdown in the user-facing answer unless the user explicitly names temp.hysong.dev or asks for an external temporary link.",
       parameters: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["search_files", "inspect_path", "read_file", "copy", "write_file", "rename", "move", "delete", "upload_temp", "start_process", "list_processes", "kill_process", "run_shell", "screenshot"] },
+          action: { type: "string", enum: ["search_files", "inspect_path", "read_file", "copy", "write_file", "rename", "move", "delete", "store_file", "upload_temp", "start_process", "list_processes", "kill_process", "run_shell", "screenshot"] },
           path: { type: "string", description: "Absolute source path for file actions, or search root" },
           destination: { type: "string", description: "Absolute destination for copy or move" },
           new_name: { type: "string", description: "Filename only for rename" },
@@ -96,6 +96,7 @@ export function deterministicHostAssessment(args: HostArgs, locale = "en"): Host
     rename: [3, `${source}의 이름을 같은 폴더 안의 “${String(args.new_name || "")}”(으)로 바꿉니다.`, `Rename ${source} to “${String(args.new_name || "")}” in the same folder.`],
     move: [args.overwrite ? 4 : 3, `${source}을(를) ${destination}(으)로 이동${args.overwrite ? "하고 기존 대상을 영구적으로 교체합니다" : "합니다"}.`, `Move ${source} to ${destination}${args.overwrite ? ", permanently replacing an existing destination" : ""}.`],
     delete: [4, `${source}${args.recursive ? " 및 그 안의 모든 항목" : ""}을(를) 영구 삭제합니다. 휴지통으로 이동하지 않습니다.`, `Permanently delete ${source}${args.recursive ? " and everything below it" : ""}; it will not be moved to trash.`],
+    store_file: [3, `${source}의 전체 내용을 현재 사용자의 개인 저장소로 복사하고, 이 사용자만 접근할 수 있는 채팅용 링크를 만듭니다. 원본 파일은 변경하지 않습니다.`, `Copy the complete contents of ${source} into the current user's private storage and create a chat link accessible only to that user. The source file is not changed.`],
     upload_temp: [3, `${source}의 내용을 temp.hysong.dev에 업로드하고 최대 ${Number(args.max_downloads || 1)}회 다운로드 가능한 링크를 만듭니다.`, `Upload the contents of ${source} to temp.hysong.dev and create a link allowing up to ${Number(args.max_downloads || 1)} downloads.`],
     start_process: [3, `프로그램 “${String(args.program || "")}”을(를) 인수 ${JSON.stringify(args.arguments || [])}와 함께 백그라운드에서 시작하고 PID와 이름을 이 대화에 보관합니다.`, `Start “${String(args.program || "")}” in the background with arguments ${JSON.stringify(args.arguments || [])}, retaining its PID and name for this conversation.`],
     list_processes: [1, "이 대화에서 시작한 백그라운드 프로그램의 PID, 이름, 실행 파일과 시작 시각을 확인합니다.", "List the PID, name, executable, and start time of background programs started in this conversation."],
@@ -263,6 +264,11 @@ export async function executeHostComputerTool(sessionKey: string, args: HostArgs
   if (action === "rename") { const source = resolvedPath(args); const name = stringArg(args, "new_name"); if (name !== path.basename(name) || name === "." || name === "..") throw new Error("new_name must be a filename without a path."); const destination = path.join(path.dirname(source), name); await fs.access(destination).then(() => { throw new Error("The renamed destination already exists."); }, () => undefined); await fs.rename(source, destination); return { result: { source, destination, renamed: true } }; }
   if (action === "move") { const source = resolvedPath(args); const destination = resolvedPath(args, "destination"); await movePath(source, destination, args.overwrite === true); return { result: { source, destination, moved: true } }; }
   if (action === "delete") { const target = resolvedPath(args); assertNotFilesystemRoot(target); const stats = await fs.lstat(target); if (stats.isDirectory() && args.recursive !== true) await fs.rmdir(target); else await fs.rm(target, { recursive: args.recursive === true, force: false }); return { result: { path: target, deleted: true, recoverable: false } }; }
+  if (action === "store_file") {
+    if (!userId) throw new Error("A storage owner is required for private file storage.");
+    const stored=await saveHostFile(resolvedPath(args),userId);const image=stored.metadata.mimeType.startsWith("image/");
+    return{result:{stored:true,storage:"user",attachment:stored.metadata,markdown:stored.markdown,downloadUrl:`${stored.metadata.url}?download=1`,visibility:"owner-only"},content:[{type:"text",text:`The host file is stored privately. Use this exact Markdown in the user-facing answer: ${stored.markdown}`},...(image?[{type:"image_file" as const,file_path:stored.path,mime_type:stored.metadata.mimeType}]:[])]};
+  }
   if (action === "upload_temp") return { result: await uploadTemporary(resolvedPath(args), Math.max(1, Math.min(100, Number(args.max_downloads || 1)))) };
   if (action === "list_processes") { const session = processSessions.get(sessionKey); return { result: { processes: [...(session?.values() || [])].map(item => ({ pid: item.pid, name: item.name, program: item.program, startedAt: item.startedAt })) } }; }
   if (action === "start_process") {

@@ -11,6 +11,7 @@ export const HOST_PERMISSION_DEFINITIONS = [
   { key: "files.moveOverwrite", riskLevel: 4 },
   { key: "files.delete", riskLevel: 4 },
   { key: "files.deleteRecursive", riskLevel: 4 },
+  { key: "storage.importFile", riskLevel: 3 },
   { key: "network.uploadTemp", riskLevel: 3 },
   { key: "process.start", riskLevel: 3 },
   { key: "process.list", riskLevel: 1 },
@@ -55,6 +56,7 @@ export function hostPermissionForAction(args: Record<string, unknown>, riskLevel
     case "rename": return "files.rename";
     case "move": return args.overwrite === true ? "files.moveOverwrite" : "files.move";
     case "delete": return args.recursive === true ? "files.deleteRecursive" : "files.delete";
+    case "store_file": return "storage.importFile";
     case "upload_temp": return "network.uploadTemp";
     case "start_process": return "process.start";
     case "list_processes": return "process.list";

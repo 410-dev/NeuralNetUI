@@ -1,13 +1,22 @@
-import { promises as fs } from "node:fs";
+import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { assertUploadSignature, extractPdf, isSupportedUploadMimeType, pdfModelContent, type ModelContentPart, type PdfExtraction } from "./document-processing.ts";
+import sharp from "sharp";
+import { assertUploadSignature, extractPdf, isSupportedUploadMimeType, pdfModelContent, sniffRasterMimeType, type ModelContentPart, type PdfExtraction } from "./document-processing.ts";
 import type { StorageFile, StoredAttachment, ToolSettings } from "./types.ts";
 import { completeStorageMigration, dataDir, db, storageMigrationCompleted } from "./database.ts";
 
 const uploadsDir = path.join(dataDir, "uploads");
 const legacyMigrationName = "legacy-uploads-v1";
 let legacyMigration: Promise<void> | undefined;
+const FILE_MIME_TYPES:Record<string,string>={
+  ".txt":"text/plain", ".md":"text/markdown", ".csv":"text/csv", ".tsv":"text/tab-separated-values",
+  ".json":"application/json", ".xml":"application/xml", ".yaml":"application/yaml", ".yml":"application/yaml",
+  ".zip":"application/zip", ".gz":"application/gzip", ".tar":"application/x-tar", ".7z":"application/x-7z-compressed",
+  ".docx":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".pptx":"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
 
 function assertId(id: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("Invalid upload id");
@@ -89,6 +98,52 @@ function insertWithinQuota(row: { id:string; name:string; mimeType:string; size:
   })();
 }
 
+function assertQuotaPreflight(userId:string,size:number){
+  const quota=db.prepare("SELECT storage_quota_bytes AS quota FROM users WHERE id = ?").get(userId) as {quota:number}|undefined;
+  if(!quota)throw new Error("Storage owner not found.");
+  const used=(db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ?").get(userId) as {bytes:number}).bytes;
+  if(used+size>quota.quota)throw new Error(`Storage quota exceeded (${used+size} / ${quota.quota} bytes).`);
+}
+
+function storedFileMimeType(header:Buffer,name:string){
+  const raster=sniffRasterMimeType(header);if(raster)return raster;
+  if(header.subarray(0,5).toString("ascii")==="%PDF-")return "application/pdf";
+  return FILE_MIME_TYPES[path.extname(name).toLowerCase()]||"application/octet-stream";
+}
+
+async function createStoredThumbnail(source:string,destination:string){
+  const temporary=`${destination}.${randomUUID()}.tmp`;
+  try{
+    const image=sharp(source,{limitInputPixels:200_000_000});const metadata=await image.metadata();
+    await image.rotate().resize({width:512,height:512,fit:"inside",withoutEnlargement:true}).jpeg({quality:78,mozjpeg:true}).toFile(temporary);
+    await fs.rename(temporary,destination);
+    return{width:metadata.width,height:metadata.height};
+  }catch{await fs.unlink(temporary).catch(()=>undefined);return undefined;}
+}
+
+/** Copy a regular host file into private retained storage without loading it into memory. */
+export async function saveHostFile(sourcePath:string,userId:string){
+  await ensureLegacyUploadsMigrated();
+  const source=path.resolve(sourcePath);const sourceStats=await fs.stat(source);
+  if(!sourceStats.isFile())throw new Error("Only regular files can be stored.");
+  if(!Number.isSafeInteger(sourceStats.size)||sourceStats.size<0)throw new Error("The file size is not supported.");
+  assertQuotaPreflight(userId,sourceStats.size);
+  const id=randomUUID();const paths=pathsFor(id);const temporary=`${paths.original}.${randomUUID()}.tmp`;
+  await fs.mkdir(uploadsDir,{recursive:true});
+  try{
+    await fs.copyFile(source,temporary,constants.COPYFILE_EXCL);
+    await fs.chmod(temporary,0o600).catch(()=>undefined);
+    const copied=await fs.stat(temporary);if(!copied.isFile()||copied.size!==sourceStats.size)throw new Error("The source file changed while it was being copied.");
+    const handle=await fs.open(temporary,"r");const header=Buffer.alloc(Math.min(32,copied.size));try{if(header.length)await handle.read(header,0,header.length,0);}finally{await handle.close();}
+    const name=path.basename(source).slice(0,240)||"file";let mimeType=storedFileMimeType(header,name);const dimensions=mimeType.startsWith("image/")?await createStoredThumbnail(temporary,paths.thumbnail):undefined;
+    if(mimeType.startsWith("image/")&&!dimensions)mimeType="application/octet-stream";
+    const metadata:StoredAttachment={id,name,mimeType,size:copied.size,width:dimensions?.width,height:dimensions?.height,url:`/api/uploads/${id}`,...(mimeType.startsWith("image/")?{thumbnailUrl:`/api/uploads/${id}?variant=thumbnail`}:{})};
+    await fs.rename(temporary,paths.original);insertWithinQuota({...metadata,userId,retained:true});
+    const escapedName=name.replace(/([\\\]])/g,"\\$1");
+    return{metadata,path:paths.original,markdown:mimeType.startsWith("image/")?`![${escapedName}](${metadata.url})`:`[${escapedName}](${metadata.url}?download=1)`};
+  }catch(error){await Promise.all([temporary,paths.original,paths.thumbnail].map(target=>fs.unlink(target).catch(()=>undefined)));throw error;}
+}
+
 export async function saveUpload(file: File, thumbnail: File | undefined, userId: string, settings: ToolSettings, dimensions?: { width?: number; height?: number }, retained = false): Promise<StoredAttachment> {
   await ensureLegacyUploadsMigrated();
   const pdf = file.type.toLowerCase() === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
@@ -117,7 +172,8 @@ export async function saveUpload(file: File, thumbnail: File | undefined, userId
       await fs.writeFile(extractionTemp, JSON.stringify(extraction), { encoding: "utf8", mode: 0o600 });
     } else if (thumbnail) {
       const thumbnailData = Buffer.from(await thumbnail.arrayBuffer()); assertUploadSignature(thumbnailData, thumbnail.type);
-      await fs.writeFile(thumbnailTemp, thumbnailData, { mode: 0o600 });
+      await sharp(thumbnailData,{limitInputPixels:40_000_000}).rotate().resize({width:512,height:512,fit:"inside",withoutEnlargement:true}).jpeg({quality:78,mozjpeg:true}).toFile(thumbnailTemp);
+      await fs.chmod(thumbnailTemp,0o600).catch(()=>undefined);
     }
     await fs.rename(originalTemp, paths.original);
     if (pdf) await fs.rename(extractionTemp, paths.extraction);
@@ -140,10 +196,11 @@ export async function saveGeneratedImage(buffer: Buffer, userId: string, name = 
   try {
     await fs.writeFile(temporary, buffer, { mode: 0o600 });
     await fs.rename(temporary, paths.original);
+    await createStoredThumbnail(paths.original,paths.thumbnail);
     insertWithinQuota({ ...metadata, userId, retained: true });
     return { metadata, path: paths.original };
   } catch (error) {
-    await Promise.all([temporary, paths.original].map(target=>fs.unlink(target).catch(()=>undefined)));
+    await Promise.all([temporary, paths.original, paths.thumbnail].map(target=>fs.unlink(target).catch(()=>undefined)));
     throw error;
   }
 }
@@ -159,6 +216,19 @@ export async function storageSummary(userId: string) {
   `).all(userId) as UploadRow[];
   const mapped: StorageFile[] = files.map(row=>({ ...toAttachment(row), createdAt: row.created_at!, referenceCount: row.reference_count || 0, retained: row.retained === 1 }));
   return { quotaBytes: account.quotaBytes, usedBytes: mapped.reduce((sum,file)=>sum+file.size,0), files: mapped };
+}
+
+export type StorageSort="created_desc"|"created_asc"|"name_asc"|"name_desc"|"size_asc"|"size_desc";
+export async function storagePage(userId:string,input:{page?:number;pageSize?:number;sort?:StorageSort}={}){
+  await ensureLegacyUploadsMigrated();
+  const account=db.prepare(`SELECT u.storage_quota_bytes AS quotaBytes,COALESCE(SUM(up.size),0) AS usedBytes,COUNT(up.id) AS total FROM users u LEFT JOIN uploads up ON up.user_id=u.id WHERE u.id=? GROUP BY u.id`).get(userId) as {quotaBytes:number;usedBytes:number;total:number}|undefined;
+  if(!account)throw Object.assign(new Error("Storage owner not found."),{code:"ENOENT"});
+  const pageSize=Math.max(1,Math.min(100,Math.floor(input.pageSize||24)));const pageCount=Math.max(1,Math.ceil(account.total/pageSize));const page=Math.max(1,Math.min(pageCount,Math.floor(input.page||1)));
+  const sort:StorageSort=(["created_desc","created_asc","name_asc","name_desc","size_asc","size_desc"] as StorageSort[]).includes(input.sort as StorageSort)?input.sort as StorageSort:"created_desc";
+  const order:{[key in StorageSort]:string}={created_desc:"u.created_at DESC,u.id",created_asc:"u.created_at ASC,u.id",name_asc:"LOWER(u.name) ASC,u.id",name_desc:"LOWER(u.name) DESC,u.id",size_asc:"u.size ASC,u.id",size_desc:"u.size DESC,u.id"};
+  const rows=db.prepare(`SELECT u.id,u.name,u.mime_type,u.size,u.width,u.height,u.created_at,u.retained,(SELECT COUNT(*) FROM message_attachments ma WHERE ma.upload_id=u.id) AS reference_count FROM uploads u WHERE u.user_id=? ORDER BY ${order[sort]} LIMIT ? OFFSET ?`).all(userId,pageSize,(page-1)*pageSize) as UploadRow[];
+  const files:StorageFile[]=rows.map(row=>({...toAttachment(row),createdAt:row.created_at!,referenceCount:row.reference_count||0,retained:row.retained===1}));
+  return{quotaBytes:account.quotaBytes,usedBytes:account.usedBytes,total:account.total,page,pageSize,pageCount,sort,files};
 }
 
 export async function readUpload(id: string, userId: string) {
