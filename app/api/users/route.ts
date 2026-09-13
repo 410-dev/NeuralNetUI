@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  try { const actor = requireAdmin(request); const config = await readConfig(); return Response.json({ users: listUsers(), currentUserId: actor.id, defaultStorageQuotaBytes: config.userStorageSettings.defaultQuotaBytes }); }
+  try { const actor = requireAdmin(request); const config = await readConfig(); return Response.json({ users: listUsers(), currentUserId: actor.id, currentUserCanAudit: actor.canAudit, currentUserRole:actor.role, defaultStorageQuotaBytes: config.userStorageSettings.defaultQuotaBytes, trashRetentionDays:config.userStorageSettings.trashRetentionDays }); }
   catch (error) { return authErrorResponse(error); }
 }
 

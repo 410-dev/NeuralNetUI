@@ -5,6 +5,8 @@ import {
   requireAdmin,
   updateManagedUser,
 } from "@/lib/auth";
+import { readConfig } from "@/lib/config";
+import { purgeDeletedUploads } from "@/lib/uploads";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +18,7 @@ export async function PATCH(request: Request, context: Context) {
     const actor = requireAdmin(request);
     const { id } = await context.params;
     updateManagedUser(actor, id, await request.json());
+    const config=await readConfig();await purgeDeletedUploads(id,config.userStorageSettings.trashRetentionDays);
     return Response.json({ users: listUsers() });
   } catch (error) {
     return authErrorResponse(error);

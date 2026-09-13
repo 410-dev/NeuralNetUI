@@ -108,9 +108,10 @@ const insertAttachment = db.prepare("INSERT OR IGNORE INTO message_attachments(m
 
 function storeConversation(record: Conversation, userId: string, guard?: () => boolean) {
   db.transaction(() => {
-    const owner = db.prepare("SELECT user_id, title, title_managed, temporary FROM conversations WHERE id = ?").get(record.id) as { user_id: string | null; title: string; title_managed: number; temporary: number } | undefined;
+    const owner = db.prepare("SELECT user_id, title, title_managed, temporary, deleted_at FROM conversations WHERE id = ?").get(record.id) as { user_id: string | null; title: string; title_managed: number; temporary: number; deleted_at:string|null } | undefined;
     if (guard && (!guard() || !owner)) throw new Error("Conversation was deleted or its task was replaced.");
     if (owner && owner.user_id !== userId) throw new Error("Conversation not found.");
+    if (owner?.deleted_at) throw new Error("Conversation was deleted.");
     const summaries = db.prepare("SELECT cs.* FROM context_summaries cs JOIN branches b ON b.id = cs.branch_id WHERE b.conversation_id = ?").all(record.id) as Array<{branch_id: string; fingerprint: string; covered_count: number; summary: string}>;
     if (owner?.title_managed) record.title = owner.title;
     db.prepare("DELETE FROM conversations WHERE id = ? AND user_id = ?").run(record.id, userId);
@@ -180,20 +181,20 @@ async function ensureLegacyConversationsMigrated(userId: string) {
  * somewhere to write while it runs; leaving one, or abandoning the tab, discards it.
  */
 export async function discardTemporaryConversations(userId: string, keepId?: string) {
-  const rows = db.prepare("SELECT id FROM conversations WHERE user_id = ? AND temporary = 1").all(userId) as Array<{ id: string }>;
+  const rows = db.prepare("SELECT id FROM conversations WHERE user_id = ? AND temporary = 1 AND deleted_at IS NULL").all(userId) as Array<{ id: string }>;
   // A chat still streaming in another tab is not abandoned, so leave it for the next sweep.
   const doomed = rows.filter((row) => row.id !== keepId && !hasChatDisposal(row.id, userId));
-  for (const { id } of doomed) await deleteConversation(id, userId).catch(() => undefined);
+  for (const { id } of doomed) await permanentlyDeleteConversation(id, userId, true).catch(() => undefined);
   return doomed.length;
 }
 
 /** Turns a temporary chat into an ordinary saved one. */
 export function promoteConversation(id: string, userId: string) {
-  return db.prepare("UPDATE conversations SET temporary = 0 WHERE id = ? AND user_id = ? AND temporary = 1").run(id, userId).changes > 0;
+  return db.prepare("UPDATE conversations SET temporary = 0 WHERE id = ? AND user_id = ? AND temporary = 1 AND deleted_at IS NULL").run(id, userId).changes > 0;
 }
 
 export function isTemporaryConversation(id: string, userId: string) {
-  const row = db.prepare("SELECT temporary FROM conversations WHERE id = ? AND user_id = ?").get(id, userId) as { temporary: number } | undefined;
+  const row = db.prepare("SELECT temporary FROM conversations WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(id, userId) as { temporary: number } | undefined;
   return row?.temporary === 1;
 }
 
@@ -203,23 +204,28 @@ export async function listConversations(userId: string): Promise<ConversationSum
     SELECT c.id, c.title, c.active_branch_id AS activeBranchId, COUNT(b.id) AS branchCount, c.updated_at AS updatedAt
     FROM conversations c
     LEFT JOIN branches b ON b.conversation_id = c.id
-    WHERE c.user_id = ? AND c.temporary = 0
+    WHERE c.user_id = ? AND c.temporary = 0 AND c.deleted_at IS NULL
     GROUP BY c.id
     ORDER BY c.updated_at DESC
   `).all(userId) as ConversationSummary[];
 }
 
-export async function listConversationsPage(userId:string,input:{page?:number;pageSize?:number}={}){
+export async function listManagedConversationIds(userId:string){await ensureLegacyConversationsMigrated(userId);return(db.prepare("SELECT id FROM conversations WHERE user_id=? AND temporary=0 ORDER BY updated_at DESC").all(userId) as Array<{id:string}>).map(row=>row.id);}
+
+export async function listConversationsPage(userId:string,input:{page?:number;pageSize?:number;query?:string;state?:"all"|"active"|"deleted"}={}){
   await ensureLegacyConversationsMigrated(userId);
-  const total=(db.prepare("SELECT COUNT(*) AS total FROM conversations WHERE user_id = ? AND temporary = 0").get(userId) as {total:number}).total;
-  const pageSize=Math.max(1,Math.min(100,Math.floor(input.pageSize||20)));const pageCount=Math.max(1,Math.ceil(total/pageSize));const page=Math.max(1,Math.min(pageCount,Math.floor(input.page||1)));
+  const query=String(input.query||"").trim().slice(0,200);const state=input.state==="active"||input.state==="deleted"?input.state:"all";
+  const stateSql=state==="active"?"AND c.deleted_at IS NULL":state==="deleted"?"AND c.deleted_at IS NOT NULL":"";
+  const searchSql=query?"AND (instr(lower(c.id),lower(?))>0 OR instr(lower(c.title),lower(?))>0 OR EXISTS(SELECT 1 FROM branches sb JOIN branch_messages sbm ON sbm.branch_id=sb.id JOIN messages sm ON sm.id=sbm.message_id WHERE sb.conversation_id=c.id AND instr(lower(sm.content),lower(?))>0))":"";
+  const searchArgs=query?[query,query,query]:[];const total=(db.prepare(`SELECT COUNT(*) AS total FROM conversations c WHERE c.user_id = ? AND c.temporary = 0 ${stateSql} ${searchSql}`).get(userId,...searchArgs) as {total:number}).total;
+  const pageSize=Math.max(1,Math.min(10,Math.floor(input.pageSize||10)));const pageCount=Math.max(1,Math.ceil(total/pageSize));const page=Math.max(1,Math.min(pageCount,Math.floor(input.page||1)));
   const items=db.prepare(`
-    SELECT c.id,c.title,c.active_branch_id AS activeBranchId,COUNT(b.id) AS branchCount,c.updated_at AS updatedAt
+    SELECT c.id,c.title,c.active_branch_id AS activeBranchId,COUNT(b.id) AS branchCount,c.updated_at AS updatedAt,c.deleted_at AS deletedAt
     FROM conversations c LEFT JOIN branches b ON b.conversation_id=c.id
-    WHERE c.user_id=? AND c.temporary=0 GROUP BY c.id
+    WHERE c.user_id=? AND c.temporary=0 ${stateSql} ${searchSql} GROUP BY c.id
     ORDER BY c.updated_at DESC,c.id LIMIT ? OFFSET ?
-  `).all(userId,pageSize,(page-1)*pageSize) as ConversationSummary[];
-  return{items,total,page,pageSize,pageCount};
+  `).all(userId,...searchArgs,pageSize,(page-1)*pageSize) as Array<ConversationSummary&{deletedAt:string|null}>;
+  return{items:items.map(item=>({...item,deletedAt:item.deletedAt||undefined})),total,page,pageSize,pageCount,query,state};
 }
 
 type ConversationRow = {
@@ -231,6 +237,7 @@ type ConversationRow = {
   created_at: string;
   updated_at: string;
   temporary: number;
+  deleted_at: string | null;
 };
 type BranchRow = {
   id: string;
@@ -269,10 +276,10 @@ type AttachmentRow = {
   height: number | null;
 };
 
-export async function readConversation(id: string, userId: string): Promise<Conversation | null> {
+async function readConversationRecord(id: string, userId: string, includeDeleted=false): Promise<(Conversation&{deletedAt?:string}) | null> {
   await ensureLegacyConversationsMigrated(userId);
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("Invalid conversation id");
-  const conversation = db.prepare("SELECT * FROM conversations WHERE id = ? AND user_id = ?").get(id, userId) as ConversationRow | undefined;
+  const conversation = db.prepare(`SELECT * FROM conversations WHERE id = ? AND user_id = ? ${includeDeleted?"":"AND deleted_at IS NULL"}`).get(id, userId) as ConversationRow | undefined;
   if (!conversation) return null;
 
   const branchRows = db.prepare("SELECT id, name, parent_branch_id, forked_from_message_id, created_at, updated_at FROM branches WHERE conversation_id = ? ORDER BY position").all(id) as BranchRow[];
@@ -337,7 +344,7 @@ export async function readConversation(id: string, userId: string): Promise<Conv
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
-  return conversationSchema.parse({
+  const parsed=conversationSchema.parse({
     id: conversation.id,
     title: conversation.title,
     modelId: conversation.model_id,
@@ -348,14 +355,18 @@ export async function readConversation(id: string, userId: string): Promise<Conv
     createdAt: conversation.created_at,
     updatedAt: conversation.updated_at,
   });
+  return{...parsed,...(conversation.deleted_at?{deletedAt:conversation.deleted_at}:{})};
 }
+
+export async function readConversation(id:string,userId:string):Promise<Conversation|null>{return readConversationRecord(id,userId,false);}
+export async function readManagedConversation(id:string,userId:string){return readConversationRecord(id,userId,true);}
 
 export async function writeConversation(input: unknown, userId: string, guard?: () => boolean): Promise<Conversation> {
   await Promise.all([ensureLegacyConversationsMigrated(userId), ensureLegacyUploadsMigrated()]);
   const parsed = conversationSchema.parse(input);
   const attachmentIds = parsed.branches.flatMap((branch) => branch.messages.flatMap((message) => message.attachments?.map((attachment) => attachment.id) || []));
   for (const uploadId of new Set(attachmentIds)) {
-    if (!db.prepare("SELECT 1 FROM uploads WHERE id = ? AND user_id = ?").get(uploadId, userId)) throw new Error("Conversation contains an inaccessible attachment.");
+    if (!db.prepare("SELECT 1 FROM uploads WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(uploadId, userId)) throw new Error("Conversation contains an inaccessible attachment.");
   }
   storeConversation(parsed, userId, guard);
   return parsed;
@@ -364,6 +375,16 @@ export async function writeConversation(input: unknown, userId: string, guard?: 
 export async function deleteConversation(id: string, userId: string) {
   await ensureLegacyConversationsMigrated(userId);
   if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("Invalid conversation id");
+  const result=db.prepare("UPDATE conversations SET deleted_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL").run(new Date().toISOString(),id,userId);
+  if(!result.changes)throw Object.assign(new Error("Conversation not found."),{code:"ENOENT"});
+  discardChatJobs(userId, id);
+  closeHostComputerSession(`${userId}:${id}`);
+}
+
+export async function permanentlyDeleteConversation(id:string,userId:string,allowActive=false){
+  await ensureLegacyConversationsMigrated(userId);
+  if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new Error("Invalid conversation id");
+  const target=db.prepare("SELECT deleted_at FROM conversations WHERE id=? AND user_id=?").get(id,userId) as {deleted_at:string|null}|undefined;if(!target||!allowActive&&!target.deleted_at)throw Object.assign(new Error("Deleted conversation not found."),{code:"ENOENT"});
   const orphanedIds = db.transaction(() => {
     const candidates = db.prepare(`
       SELECT DISTINCT ma.upload_id AS id
@@ -385,6 +406,19 @@ export async function deleteConversation(id: string, userId: string) {
   await Promise.all(orphanedIds.map((uploadId) => deleteUploadFiles(uploadId)));
 }
 
+export async function restoreConversation(id:string,userId:string){
+  await ensureLegacyConversationsMigrated(userId);if(!/^[a-zA-Z0-9_-]+$/.test(id))throw new Error("Invalid conversation id");
+  const result=db.prepare("UPDATE conversations SET deleted_at = NULL, updated_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL").run(new Date().toISOString(),id,userId);
+  if(!result.changes)throw Object.assign(new Error("Deleted conversation not found."),{code:"ENOENT"});
+}
+
+export async function purgeExpiredConversations(userId:string,retentionDays:number){
+  const cutoff=new Date(Date.now()-Math.max(1,Math.min(60,Math.floor(retentionDays)))*86400_000).toISOString();
+  const ids=(db.prepare("SELECT id FROM conversations WHERE user_id=? AND deleted_at IS NOT NULL AND deleted_at<=? ORDER BY deleted_at").all(userId,cutoff) as Array<{id:string}>).map(row=>row.id);
+  for(const id of ids)await permanentlyDeleteConversation(id,userId);
+  return ids.length;
+}
+
 export async function deleteAllConversations(userId: string) {
   const conversations = await listConversations(userId);
   for (const conversation of conversations) await deleteConversation(conversation.id, userId);
@@ -394,7 +428,7 @@ export async function deleteAllConversations(userId: string) {
 
 export function renameConversation(id: string, userId: string, title: string, automatic = false) {
   const clean = z.string().trim().min(1).max(200).parse(title);
-  return db.prepare(`UPDATE conversations SET title = ?, title_managed = 1 WHERE id = ? AND user_id = ? ${automatic ? "AND title_managed = 0" : ""}`).run(clean, id, userId).changes > 0;
+  return db.prepare(`UPDATE conversations SET title = ?, title_managed = 1 WHERE id = ? AND user_id = ? AND deleted_at IS NULL ${automatic ? "AND title_managed = 0" : ""}`).run(clean, id, userId).changes > 0;
 }
 
 export async function searchConversations(userId: string, query: string) {
@@ -403,7 +437,7 @@ export async function searchConversations(userId: string, query: string) {
   if (!needle) return [];
   const rows = db.prepare(`SELECT c.id, c.title, c.active_branch_id AS activeBranchId, b.id AS branchId, b.name AS branchName, m.content
     FROM conversations c JOIN branches b ON b.conversation_id = c.id JOIN branch_messages bm ON bm.branch_id = b.id JOIN messages m ON m.id = bm.message_id
-    WHERE c.user_id = ? AND c.temporary = 0 ORDER BY c.updated_at DESC, b.position, bm.position`).all(userId) as Array<{id:string;title:string;activeBranchId:string;branchId:string;branchName:string;content:string}>;
+    WHERE c.user_id = ? AND c.temporary = 0 AND c.deleted_at IS NULL ORDER BY c.updated_at DESC, b.position, bm.position`).all(userId) as Array<{id:string;title:string;activeBranchId:string;branchId:string;branchName:string;content:string}>;
   const seen = new Set<string>();
   return rows.filter(row => { const key = row.id + ":" + row.branchId; if (seen.has(key) || !(row.content.toLocaleLowerCase().includes(needle) || row.title.toLocaleLowerCase().includes(needle))) return false; seen.add(key); return true; }).slice(0, 100).map(row => { const at = row.content.toLocaleLowerCase().indexOf(needle); return {...row, content: row.content.slice(Math.max(0, at - 60), Math.max(0, at - 60) + 240), otherBranch: row.branchId !== row.activeBranchId}; });
 }

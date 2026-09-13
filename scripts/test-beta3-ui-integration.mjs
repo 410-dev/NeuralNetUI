@@ -6,6 +6,7 @@ import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
+import Database from 'better-sqlite3';
 
 const keep = process.env.BETA3_QA_KEEP === '1';
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -71,8 +72,14 @@ try {
   await json('/api/users/defaults', 'PATCH', { defaultStorageQuotaBytes: 2 * 1024 * 1024 });
   const created = await json('/api/users', 'POST', { username: 'storageqa', displayName: 'Storage QA', password: 'LocalBeta3QA-221', role: 'user' });
   const managedUser = created.users.find(user => user.username === 'storageqa'); assert.ok(managedUser); assert.equal(managedUser.storageQuotaBytes, 2 * 1024 * 1024);
+  const auditCreated = await json('/api/users', 'POST', { username: 'auditqa', displayName: 'Audit QA', password: 'LocalBeta3QA-222', role: 'admin' }); const auditUser = auditCreated.users.find(user => user.username === 'auditqa'); assert.ok(auditUser); assert.equal(auditUser.canAudit, false); assert.equal(auditUser.trashQuotaBytes, 4 * 1024 * 1024);
   const login = await fetch(`${root}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'storageqa', password: 'LocalBeta3QA-221' }) });
   assert.equal(login.status, 200); const userCookie = login.headers.get('set-cookie').split(';')[0];
+  const auditLogin = await fetch(`${root}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'auditqa', password: 'LocalBeta3QA-222' }) }); assert.equal(auditLogin.status, 200); const auditCookie = auditLogin.headers.get('set-cookie').split(';')[0];
+  const unprivilegedAudit = await fetch(`${root}/api/users/${managedUser.id}/audit?view=files`, { headers: { cookie: auditCookie } }); assert.equal(unprivilegedAudit.status, 403);
+  const selfGrant = await fetch(`${root}/api/users/${auditUser.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', cookie: auditCookie }, body: JSON.stringify({ auditEnabled: true }) }); assert.equal(selfGrant.status, 403);
+  await json(`/api/users/${auditUser.id}`, 'PATCH', { auditEnabled: true });
+  const privilegedAudit = await fetch(`${root}/api/users/${managedUser.id}/audit?view=files`, { headers: { cookie: auditCookie } }); assert.equal(privilegedAudit.status, 200);
   const image = Buffer.alloc(1536 * 1024); Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]).copy(image);
   const thumbnail = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
   const form = new FormData(); form.append('files', new File([image], 'large-screenshot.png', { type: 'image/png' })); form.append('thumbnail-0', new File([thumbnail], 'preview.png', { type: 'image/png' })); form.append('retained', 'true');
@@ -84,16 +91,30 @@ try {
   const crossUserImage = await fetch(`${root}/api/uploads/${uploaded.attachments[0].id}`, { headers: { cookie } }); assert.equal(crossUserImage.status, 404);
   const audit = await json(`/api/users/${managedUser.id}/audit?view=files&page=1&pageSize=24&sort=name_asc`); assert.equal(audit.files[0].name, 'large-screenshot.png'); assert.equal(audit.total, 1); assert.equal(audit.sort, 'name_asc');
   const auditThumbnail = await fetch(`${root}/api/users/${managedUser.id}/audit?download=media-file&uploadId=${uploaded.attachments[0].id}&inline=1&variant=thumbnail`, { headers: { cookie } }); assert.equal(auditThumbnail.status, 200); assert.equal(auditThumbnail.headers.get('content-type'), 'image/jpeg');
+  const searchedStorage = await jsonAs('/api/storage?q=large-screenshot&page=1&pageSize=24&sort=name_asc', userCookie); assert.equal(searchedStorage.total, 1); assert.equal(searchedStorage.files[0].name, 'large-screenshot.png');
+  const softDelete = await fetch(`${root}/api/storage`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', cookie: userCookie }, body: JSON.stringify({ ids: [uploaded.attachments[0].id] }) }); assert.equal(softDelete.status, 200); assert.equal((await softDelete.json()).total, 0);
+  const hiddenDeletedFile = await fetch(`${root}/api/uploads/${uploaded.attachments[0].id}`, { headers: { cookie: userCookie } }); assert.equal(hiddenDeletedFile.status, 404);
+  const deletedFiles = await jsonAs(`/api/users/${managedUser.id}/audit?view=files&state=deleted&q=large-screenshot`, auditCookie); assert.equal(deletedFiles.total, 1); assert.ok(deletedFiles.files[0].deletedAt); assert.equal(deletedFiles.trashUsedBytes, image.length);
+  await jsonAs(`/api/users/${managedUser.id}/audit`, auditCookie, 'PATCH', { resource: 'file', id: uploaded.attachments[0].id, action: 'restore' });
+  const restoredFile = await fetch(`${root}/api/uploads/${uploaded.attachments[0].id}`, { headers: { cookie: userCookie } }); assert.equal(restoredFile.status, 200);
   const forbiddenAudit = await fetch(`${root}/api/users/${managedUser.id}/audit`, { headers: { cookie: userCookie } }); assert.equal(forbiddenAudit.status, 403);
   const mediaExport = await fetch(`${root}/api/users/${managedUser.id}/audit?download=media`, { headers: { cookie } }); assert.equal(mediaExport.status, 200); assert.equal(mediaExport.headers.get('content-type'), 'application/zip'); assert.equal(Buffer.from(await mediaExport.arrayBuffer()).readUInt32LE(0), 0x04034b50);
   const tooSmall = await api(`/api/users/${managedUser.id}`, 'PATCH', { storageQuotaBytes: 1024 * 1024 }); assert.equal(tooSmall.status, 409);
+  await json(`/api/users/${managedUser.id}`, 'PATCH', { trashQuotaBytes: 1024 * 1024 }); const overTrash = await fetch(`${root}/api/storage`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', cookie: userCookie }, body: JSON.stringify({ ids: [uploaded.attachments[0].id] }) }); assert.equal(overTrash.status, 200); const purgedByQuota = await jsonAs(`/api/users/${managedUser.id}/audit?view=files&state=deleted&q=large-screenshot`, auditCookie); assert.equal(purgedByQuota.total, 0); assert.equal(purgedByQuota.trashUsedBytes, 0);
   for (let index = 1; index <= 21; index++) {
     const conversationId = `storage-audit-${index}`; const branchId = `${conversationId}-main`; const forkId = `${conversationId}-fork`; const createdAt = new Date(Date.now() + index).toISOString();
     await jsonAs('/api/conversations', userCookie, 'POST', { id: conversationId, title: `Audit conversation ${String(index).padStart(2, '0')}`, modelId: 'qa-model', activeBranchId: branchId, createdAt, updatedAt: createdAt, branches: [{ id: branchId, name: 'Main', createdAt, updatedAt: createdAt, messages: [{ id: `${conversationId}-user`, role: 'user', content: `message ${index}`, createdAt }] }, { id: forkId, name: 'Fork', parentBranchId: branchId, createdAt, updatedAt: createdAt, messages: [{ id: `${conversationId}-fork-user`, role: 'user', content: `fork ${index}`, createdAt }] }] });
   }
-  const conversationPage = await json(`/api/users/${managedUser.id}/audit?view=conversations&page=2&pageSize=20`); assert.equal(conversationPage.total, 21); assert.equal(conversationPage.page, 2); assert.equal(conversationPage.items.length, 1); assert.equal(conversationPage.items[0].branchCount, 2);
+  const conversationPage = await json(`/api/users/${managedUser.id}/audit?view=conversations&page=2&pageSize=99`); assert.equal(conversationPage.total, 21); assert.equal(conversationPage.page, 2); assert.equal(conversationPage.pageSize, 10); assert.equal(conversationPage.items.length, 10); assert.equal(conversationPage.items[0].branchCount, 2);
+  const conversationLastPage = await json(`/api/users/${managedUser.id}/audit?view=conversations&page=3`); assert.equal(conversationLastPage.items.length, 1);
+  const branchSearch = await json(`/api/users/${managedUser.id}/audit?view=conversations&q=${encodeURIComponent('fork 7')}`); assert.equal(branchSearch.total, 1); assert.equal(branchSearch.items[0].id, 'storage-audit-7');
+  const idSearch = await json(`/api/users/${managedUser.id}/audit?view=conversations&q=storage-audit-12`); assert.equal(idSearch.total, 1);
   const preview = await json(`/api/users/${managedUser.id}/audit?view=conversation&conversationId=${conversationPage.items[0].id}`); assert.equal(preview.conversation.branches.length, 2); assert.equal(preview.conversation.branches[1].messages[0].content.startsWith('fork '), true);
-  console.log('PASS beta 4 ownership, quota totals, paginated audit views, branch preview, and ZIP export');
+  const deletedId = 'storage-audit-7'; const deletedResponse = await fetch(`${root}/api/conversations/${deletedId}`, { method: 'DELETE', headers: { cookie: userCookie } }); assert.equal(deletedResponse.status, 204); const ownerDeletedRead = await fetch(`${root}/api/conversations/${deletedId}`, { headers: { cookie: userCookie } }); assert.equal(ownerDeletedRead.status, 404);
+  const deletedChats = await jsonAs(`/api/users/${managedUser.id}/audit?view=conversations&state=deleted&q=${deletedId}`, auditCookie); assert.equal(deletedChats.total, 1); assert.ok(deletedChats.items[0].deletedAt); const deletedPreview = await jsonAs(`/api/users/${managedUser.id}/audit?view=conversation&conversationId=${deletedId}`, auditCookie); assert.ok(deletedPreview.conversation.deletedAt);
+  await jsonAs(`/api/users/${managedUser.id}/audit`, auditCookie, 'PATCH', { resource: 'conversation', id: deletedId, action: 'restore' }); const ownerRestoredRead = await fetch(`${root}/api/conversations/${deletedId}`, { headers: { cookie: userCookie } }); assert.equal(ownerRestoredRead.status, 200);
+  const expiredId = 'storage-audit-8'; const expiredDelete = await fetch(`${root}/api/conversations/${expiredId}`, { method: 'DELETE', headers: { cookie: userCookie } }); assert.equal(expiredDelete.status, 204); const maintenanceDb = new Database(path.join(data, 'qa.sqlite3')); maintenanceDb.prepare('UPDATE conversations SET deleted_at=? WHERE id=?').run(new Date(Date.now() - 61 * 86400_000).toISOString(), expiredId); maintenanceDb.close(); const expiredAudit = await fetch(`${root}/api/users/${managedUser.id}/audit?view=conversation&conversationId=${expiredId}`, { headers: { cookie: auditCookie } }); assert.equal(expiredAudit.status, 404);
+  console.log('PASS beta 5 audit grants, soft-delete restore, live search, quota totals, pagination, branch preview, and ZIP export');
   let config = await json('/api/config');
   const model = { id: 'qa-model', sourceModel: 'qa-model', name: 'Beta 3 model', connectionId: 'qa', isAlias: false, visible: true, reasoningSupported: false, reasoningPresets: [], contextWindowTokens: 4096 };
   config.connections = [{ id: 'qa', name: 'QA', driver: 'openai', baseUrl: `http://127.0.0.1:${mock.address().port}/v1`, apiKey: '', clearApiKey: true, models: [model] }];
@@ -106,7 +127,7 @@ try {
   const coveredTool = { id: 'covered-assistant', role: 'assistant', content: 'old answer', createdAt: stamp, toolEvents: [{ id: 'covered-tool', name: 'visit_page', status: 'completed', startedAt: stamp, result: { text: 'covered tool output '.repeat(300) } }], steps: [{ kind: 'tools', ids: ['covered-tool'] }, { kind: 'content', text: 'old answer' }] };
   await seed('live-compaction', [{ id: 'old-user', role: 'user', content: 'old context '.repeat(1200), createdAt: stamp }, coveredTool, { id: 'compact-user', role: 'user', content: 'QA_COMPACTION', createdAt: stamp }]);
   await waitSnapshot('live-compaction', value => value.waitPhase === 'compacting-context' && value.message.steps?.some(step => step.kind === 'compaction' && !step.seconds && step.reasoning && step.summary));
-  console.log(`PASS beta 4 held states: post-tool prompt progress and live compaction output`);
+  console.log(`PASS beta 5 held states: post-tool prompt progress and live compaction output`);
   if (keep) { console.log(`QA_READY ${root} beta3qa LocalBeta3QA-220 tool-progress live-compaction`); await new Promise(() => {}); }
   releaseHold();
   await waitSnapshot('tool-progress', value => value.status === 'completed');

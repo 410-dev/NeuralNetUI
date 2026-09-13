@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
-import { searchConversations, deleteAllConversations, discardTemporaryConversations, listConversations, writeConversation } from "@/lib/conversations";
+import { searchConversations, deleteAllConversations, discardTemporaryConversations, listConversations, purgeExpiredConversations, writeConversation } from "@/lib/conversations";
 import { authErrorResponse, requireUser } from "@/lib/auth";
+import { readConfig } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
     const user = requireUser(request);
+    const config=await readConfig();await purgeExpiredConversations(user.id,config.userStorageSettings.trashRetentionDays);
     const params = new URL(request.url).searchParams;
     const query = params.get("q");
     if (query !== null) return NextResponse.json({ results: await searchConversations(user.id, query) });

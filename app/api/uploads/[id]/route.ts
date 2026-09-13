@@ -1,7 +1,8 @@
 import { createReadStream, existsSync } from "node:fs";
 import { Readable } from "node:stream";
-import { deleteUpload, readUpload } from "@/lib/uploads";
+import { deleteUpload, purgeDeletedUploads, readUpload } from "@/lib/uploads";
 import { requireUser } from "@/lib/auth";
+import { readConfig } from "@/lib/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
-  try { const { id } = await context.params; const user = requireUser(request); await deleteUpload(id, user.id); return new Response(null, { status: 204 }); }
+  try { const { id } = await context.params; const user = requireUser(request); await deleteUpload(id, user.id);const config=await readConfig();await purgeDeletedUploads(user.id,config.userStorageSettings.trashRetentionDays);return new Response(null, { status: 204 }); }
   catch { return Response.json({ error: "Attachment deletion failed." }, { status: 400 }); }
 }

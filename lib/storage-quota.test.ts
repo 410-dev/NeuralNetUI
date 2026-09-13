@@ -8,7 +8,7 @@ import sharp from "sharp";
 const root=await mkdtemp(path.join(os.tmpdir(),"neural-storage-test-"));
 process.env.NEURAL_CHAT_DATA_DIR=root;
 const {db}=await import("./database.ts");
-const {saveGeneratedImage,saveHostFile,storagePage,storageSummary}=await import("./uploads.ts");
+const {deleteUpload,purgeDeletedUploads,restoreUpload,saveGeneratedImage,saveHostFile,storagePage,storageSummary}=await import("./uploads.ts");
 const {executeHostComputerTool}=await import("./host-computer-tool.ts");
 
 test("user storage quota is enforced atomically and generated images are retained",async()=>{
@@ -22,6 +22,8 @@ test("user storage quota is enforced atomically and generated images are retaine
   const throughTool=await executeHostComputerTool(`storage:${id}`,{action:"store_file",path:source},id) as {result:{visibility:string;markdown:string;attachment:{id:string}}};assert.equal(throughTool.result.visibility,"owner-only");assert.match(throughTool.result.markdown,/download=1/);
   const summary=await storageSummary(id);assert.equal(summary.files.find(file=>file.id===saved.metadata.id)?.retained,true);
   const page=await storagePage(id,{page:1,pageSize:1,sort:"name_asc"});assert.equal(page.total,4);assert.equal(page.files.length,1);assert.equal(page.files[0].name,"host image.png");
+  const found=await storagePage(id,{query:"host notes",state:"active"});assert.equal(found.total,2);await deleteUpload(imported.metadata.id,id);assert.equal((await storagePage(id,{query:"host notes",state:"active"})).total,1);const trashed=await storagePage(id,{query:"host notes",state:"deleted"});assert.equal(trashed.total,1);assert.equal(trashed.trashUsedBytes,imported.metadata.size);await restoreUpload(imported.metadata.id,id);assert.equal((await storagePage(id,{query:"host notes",state:"active"})).total,2);
+  await deleteUpload(imported.metadata.id,id);db.prepare("UPDATE uploads SET deleted_at=? WHERE id=?").run(new Date(Date.now()-61*86400_000).toISOString(),imported.metadata.id);assert.equal(await purgeDeletedUploads(id,60),1);assert.equal((await storagePage(id,{state:"deleted"})).files.some(file=>file.id===imported.metadata.id),false);
   await assert.rejects(saveGeneratedImage(Buffer.concat([pngHeader,Buffer.alloc(1024*1024)]),id),/quota exceeded/i);
 });
 

@@ -301,6 +301,20 @@ function openDatabase() {
     const violations = connection.pragma("foreign_key_check") as unknown[];
     if (violations.length) throw new Error("Database migration 12 left invalid attachment references.");
   }
+  const retentionVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (retentionVersion.version < 13) connection.transaction(() => {
+    connection.exec(`
+      ALTER TABLE users ADD COLUMN audit_enabled INTEGER NOT NULL DEFAULT 0 CHECK (audit_enabled IN (0, 1));
+      ALTER TABLE users ADD COLUMN trash_quota_bytes INTEGER NOT NULL DEFAULT 1073741824
+        CHECK (trash_quota_bytes >= 1048576 AND trash_quota_bytes <= 21990232555520);
+      UPDATE users SET trash_quota_bytes = storage_quota_bytes * 2;
+      ALTER TABLE conversations ADD COLUMN deleted_at TEXT;
+      ALTER TABLE uploads ADD COLUMN deleted_at TEXT;
+      CREATE INDEX conversations_user_deleted_idx ON conversations(user_id, deleted_at, updated_at DESC);
+      CREATE INDEX uploads_user_deleted_idx ON uploads(user_id, deleted_at, created_at DESC);
+    `);
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(13, new Date().toISOString());
+  })();
   return connection;
 }
 

@@ -96,6 +96,11 @@
 - Keep account/role/quota editing short. Open chat records and stored files in separate full-size audit dialogs rather than nesting growing lists inside the user-management modal.
 - Paginate audit conversations and expose an in-place review that can switch among every branch. Rewrite owned attachment URLs through the administrator audit endpoint so review never weakens the normal owner-only URL.
 - Offer thumbnail and list layouts for audit files. Both layouts retain filename, size, MIME type, and creation time; sorting is server-backed by filename, size, or creation time in both directions.
+- Personal and audit file browsers use live, debounced filename search and server pagination. Audit conversation search covers the title, exact/partial chat ID, and message content in every branch, with at most 10 rows per page.
+- Audit is a separate administrator capability, not an implication of the admin role. Only Superadmin may grant it; users without it never see or reach another person's records or files.
+- Deleted records remain visually distinct only in audit surfaces, with explicit restore and permanent-delete controls. Ordinary user surfaces omit trash navigation and retention explanations.
+- Storage capacity uses a compact percentage label to the left of a thin pill meter. The fill is white below 75%, yellow from 75%, and red from 90%; hovering or focusing the percentage reveals used, remaining, and total capacity. Aggregate administration shows separate active and trash meters.
+- Clicking a chat image opens a near-viewport lightbox with a fixed top-right close control; Escape and backdrop click also close it.
 
 ## Composer
 

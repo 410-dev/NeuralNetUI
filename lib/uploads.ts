@@ -42,6 +42,7 @@ type UploadRow = {
   created_at?: string;
   retained?: number;
   reference_count?: number;
+  deleted_at?: string | null;
 };
 
 function toAttachment(row: UploadRow): StoredAttachment {
@@ -91,7 +92,7 @@ function insertWithinQuota(row: { id:string; name:string; mimeType:string; size:
   db.transaction(() => {
     const quota = db.prepare("SELECT storage_quota_bytes AS quota FROM users WHERE id = ?").get(row.userId) as { quota: number } | undefined;
     if (!quota) throw new Error("Storage owner not found.");
-    const used = (db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ?").get(row.userId) as { bytes: number }).bytes;
+    const used = (db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ? AND deleted_at IS NULL").get(row.userId) as { bytes: number }).bytes;
     if (used + row.size > quota.quota) throw new Error(`Storage quota exceeded (${used + row.size} / ${quota.quota} bytes).`);
     db.prepare(`INSERT INTO uploads(id, name, mime_type, size, width, height, created_at, user_id, retained) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(row.id, row.name, row.mimeType, row.size, row.width ?? null, row.height ?? null, new Date().toISOString(), row.userId, Number(row.retained));
@@ -101,7 +102,7 @@ function insertWithinQuota(row: { id:string; name:string; mimeType:string; size:
 function assertQuotaPreflight(userId:string,size:number){
   const quota=db.prepare("SELECT storage_quota_bytes AS quota FROM users WHERE id = ?").get(userId) as {quota:number}|undefined;
   if(!quota)throw new Error("Storage owner not found.");
-  const used=(db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ?").get(userId) as {bytes:number}).bytes;
+  const used=(db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ? AND deleted_at IS NULL").get(userId) as {bytes:number}).bytes;
   if(used+size>quota.quota)throw new Error(`Storage quota exceeded (${used+size} / ${quota.quota} bytes).`);
 }
 
@@ -212,34 +213,41 @@ export async function storageSummary(userId: string) {
   const files = db.prepare(`
     SELECT u.id, u.name, u.mime_type, u.size, u.width, u.height, u.created_at, u.retained,
       (SELECT COUNT(*) FROM message_attachments ma WHERE ma.upload_id = u.id) AS reference_count
-    FROM uploads u WHERE u.user_id = ? ORDER BY u.created_at DESC
+    FROM uploads u WHERE u.user_id = ? AND u.deleted_at IS NULL ORDER BY u.created_at DESC
   `).all(userId) as UploadRow[];
   const mapped: StorageFile[] = files.map(row=>({ ...toAttachment(row), createdAt: row.created_at!, referenceCount: row.reference_count || 0, retained: row.retained === 1 }));
   return { quotaBytes: account.quotaBytes, usedBytes: mapped.reduce((sum,file)=>sum+file.size,0), files: mapped };
 }
 
+export async function managedStorageFiles(userId:string){await ensureLegacyUploadsMigrated();const rows=db.prepare("SELECT id,name,mime_type,size,width,height,created_at,deleted_at,retained,(SELECT COUNT(*) FROM message_attachments ma WHERE ma.upload_id=uploads.id) AS reference_count FROM uploads WHERE user_id=? ORDER BY created_at DESC").all(userId) as UploadRow[];return rows.map(row=>({...toAttachment(row),createdAt:row.created_at!,referenceCount:row.reference_count||0,retained:row.retained===1,...(row.deleted_at?{deletedAt:row.deleted_at}:{})})) as StorageFile[];}
+
 export type StorageSort="created_desc"|"created_asc"|"name_asc"|"name_desc"|"size_asc"|"size_desc";
-export async function storagePage(userId:string,input:{page?:number;pageSize?:number;sort?:StorageSort}={}){
+export async function storagePage(userId:string,input:{page?:number;pageSize?:number;sort?:StorageSort;query?:string;state?:"all"|"active"|"deleted"}={}){
   await ensureLegacyUploadsMigrated();
-  const account=db.prepare(`SELECT u.storage_quota_bytes AS quotaBytes,COALESCE(SUM(up.size),0) AS usedBytes,COUNT(up.id) AS total FROM users u LEFT JOIN uploads up ON up.user_id=u.id WHERE u.id=? GROUP BY u.id`).get(userId) as {quotaBytes:number;usedBytes:number;total:number}|undefined;
+  const account=db.prepare(`SELECT u.storage_quota_bytes AS quotaBytes,u.trash_quota_bytes AS trashQuotaBytes,COALESCE(SUM(CASE WHEN up.deleted_at IS NULL THEN up.size ELSE 0 END),0) AS usedBytes,COALESCE(SUM(CASE WHEN up.deleted_at IS NOT NULL THEN up.size ELSE 0 END),0) AS trashUsedBytes FROM users u LEFT JOIN uploads up ON up.user_id=u.id WHERE u.id=? GROUP BY u.id`).get(userId) as {quotaBytes:number;trashQuotaBytes:number;usedBytes:number;trashUsedBytes:number}|undefined;
   if(!account)throw Object.assign(new Error("Storage owner not found."),{code:"ENOENT"});
-  const pageSize=Math.max(1,Math.min(100,Math.floor(input.pageSize||24)));const pageCount=Math.max(1,Math.ceil(account.total/pageSize));const page=Math.max(1,Math.min(pageCount,Math.floor(input.page||1)));
+  const state=input.state==="all"||input.state==="deleted"?input.state:"active";const stateSql=state==="all"?"":state==="deleted"?"AND u.deleted_at IS NOT NULL":"AND u.deleted_at IS NULL";const query=String(input.query||"").trim().slice(0,200);const searchSql=query?"AND instr(lower(u.name),lower(?))>0":"";const filterArgs=query?[query]:[];
+  const total=(db.prepare(`SELECT COUNT(*) AS total FROM uploads u WHERE u.user_id=? ${stateSql} ${searchSql}`).get(userId,...filterArgs) as {total:number}).total;
+  const pageSize=Math.max(1,Math.min(100,Math.floor(input.pageSize||24)));const pageCount=Math.max(1,Math.ceil(total/pageSize));const page=Math.max(1,Math.min(pageCount,Math.floor(input.page||1)));
   const sort:StorageSort=(["created_desc","created_asc","name_asc","name_desc","size_asc","size_desc"] as StorageSort[]).includes(input.sort as StorageSort)?input.sort as StorageSort:"created_desc";
   const order:{[key in StorageSort]:string}={created_desc:"u.created_at DESC,u.id",created_asc:"u.created_at ASC,u.id",name_asc:"LOWER(u.name) ASC,u.id",name_desc:"LOWER(u.name) DESC,u.id",size_asc:"u.size ASC,u.id",size_desc:"u.size DESC,u.id"};
-  const rows=db.prepare(`SELECT u.id,u.name,u.mime_type,u.size,u.width,u.height,u.created_at,u.retained,(SELECT COUNT(*) FROM message_attachments ma WHERE ma.upload_id=u.id) AS reference_count FROM uploads u WHERE u.user_id=? ORDER BY ${order[sort]} LIMIT ? OFFSET ?`).all(userId,pageSize,(page-1)*pageSize) as UploadRow[];
-  const files:StorageFile[]=rows.map(row=>({...toAttachment(row),createdAt:row.created_at!,referenceCount:row.reference_count||0,retained:row.retained===1}));
-  return{quotaBytes:account.quotaBytes,usedBytes:account.usedBytes,total:account.total,page,pageSize,pageCount,sort,files};
+  const rows=db.prepare(`SELECT u.id,u.name,u.mime_type,u.size,u.width,u.height,u.created_at,u.deleted_at,u.retained,(SELECT COUNT(*) FROM message_attachments ma WHERE ma.upload_id=u.id) AS reference_count FROM uploads u WHERE u.user_id=? ${stateSql} ${searchSql} ORDER BY ${order[sort]} LIMIT ? OFFSET ?`).all(userId,...filterArgs,pageSize,(page-1)*pageSize) as UploadRow[];
+  const files:StorageFile[]=rows.map(row=>({...toAttachment(row),createdAt:row.created_at!,referenceCount:row.reference_count||0,retained:row.retained===1,...(row.deleted_at?{deletedAt:row.deleted_at}:{})}));
+  return{quotaBytes:account.quotaBytes,usedBytes:account.usedBytes,trashQuotaBytes:account.trashQuotaBytes,trashUsedBytes:account.trashUsedBytes,total,page,pageSize,pageCount,sort,query,state,files};
 }
 
 export async function readUpload(id: string, userId: string) {
   await ensureLegacyUploadsMigrated();
   assertId(id);
-  const row = db.prepare("SELECT id, name, mime_type, size, width, height FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) as UploadRow | undefined;
+  const row = db.prepare("SELECT id, name, mime_type, size, width, height FROM uploads WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(id, userId) as UploadRow | undefined;
   if (!row) throw Object.assign(new Error("Attachment not found."), { code: "ENOENT" });
   return { metadata: toAttachment(row), paths: pathsFor(id) };
 }
 
-export async function readManagedUpload(id: string, userId: string) { return readUpload(id, userId); }
+export async function readManagedUpload(id: string, userId: string) {
+  await ensureLegacyUploadsMigrated();assertId(id);const row=db.prepare("SELECT id,name,mime_type,size,width,height,deleted_at FROM uploads WHERE id=? AND user_id=?").get(id,userId) as UploadRow|undefined;
+  if(!row)throw Object.assign(new Error("Attachment not found."),{code:"ENOENT"});return{metadata:{...toAttachment(row),...(row.deleted_at?{deletedAt:row.deleted_at}:{})},paths:pathsFor(id)};
+}
 
 export async function readUploadDataUrl(id: string, userId: string) {
   const { metadata, paths } = await readUpload(id, userId);
@@ -272,12 +280,21 @@ export async function readUploadModelContent(id: string, userId: string, setting
 export async function deleteUpload(id: string, userId: string) {
   await ensureLegacyUploadsMigrated();
   assertId(id);
-  const owned = db.prepare("SELECT 1 FROM uploads WHERE id = ? AND user_id = ?").get(id, userId);
+  const owned = db.prepare("SELECT 1 FROM uploads WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(id, userId);
   if (!owned) throw Object.assign(new Error("Attachment not found."), { code: "ENOENT" });
   const references = db.prepare("SELECT COUNT(*) AS count FROM message_attachments WHERE upload_id = ?").get(id) as { count: number };
   if (references.count) throw new Error("This file is attached to a saved conversation.");
-  db.prepare("DELETE FROM uploads WHERE id = ? AND user_id = ?").run(id, userId);
-  await deleteUploadFiles(id);
+  db.prepare("UPDATE uploads SET deleted_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL").run(new Date().toISOString(),id,userId);
+}
+
+export async function restoreUpload(id:string,userId:string){await ensureLegacyUploadsMigrated();assertId(id);db.transaction(()=>{const row=db.prepare("SELECT size FROM uploads WHERE id=? AND user_id=? AND deleted_at IS NOT NULL").get(id,userId) as {size:number}|undefined;if(!row)throw Object.assign(new Error("Deleted file not found."),{code:"ENOENT"});const account=db.prepare("SELECT storage_quota_bytes AS quota FROM users WHERE id=?").get(userId) as {quota:number};const used=(db.prepare("SELECT COALESCE(SUM(size),0) AS bytes FROM uploads WHERE user_id=? AND deleted_at IS NULL").get(userId) as {bytes:number}).bytes;if(used+row.size>account.quota)throw new Error("Storage quota exceeded; increase the active quota before restoring this file.");db.prepare("UPDATE uploads SET deleted_at=NULL WHERE id=? AND user_id=? AND deleted_at IS NOT NULL").run(id,userId);})();}
+
+export async function permanentlyDeleteUpload(id:string,userId:string){await ensureLegacyUploadsMigrated();assertId(id);const row=db.prepare("SELECT 1 FROM uploads WHERE id=? AND user_id=? AND deleted_at IS NOT NULL").get(id,userId);if(!row)throw Object.assign(new Error("Deleted file not found."),{code:"ENOENT"});const references=(db.prepare("SELECT COUNT(*) AS count FROM message_attachments WHERE upload_id=?").get(id) as {count:number}).count;if(references)throw new Error("Delete or permanently remove the referenced conversation first.");db.prepare("DELETE FROM uploads WHERE id=? AND user_id=? AND deleted_at IS NOT NULL").run(id,userId);await deleteUploadFiles(id);}
+
+export async function purgeDeletedUploads(userId:string,retentionDays:number){
+  await ensureLegacyUploadsMigrated();const cutoff=new Date(Date.now()-Math.max(1,Math.min(60,Math.floor(retentionDays)))*86400_000).toISOString();
+  const selected=db.transaction(()=>{const account=db.prepare("SELECT trash_quota_bytes AS quota FROM users WHERE id=?").get(userId) as {quota:number}|undefined;if(!account)return[] as string[];const rows=db.prepare("SELECT id,size,deleted_at,EXISTS(SELECT 1 FROM message_attachments WHERE upload_id=uploads.id) AS referenced FROM uploads WHERE user_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at,id").all(userId) as Array<{id:string;size:number;deleted_at:string;referenced:number}>;let used=rows.reduce((sum,row)=>sum+row.size,0);const ids:string[]=[];for(const row of rows)if(!row.referenced&&(row.deleted_at<=cutoff||used>account.quota)){ids.push(row.id);used-=row.size;}for(const id of ids)db.prepare("DELETE FROM uploads WHERE id=? AND user_id=? AND deleted_at IS NOT NULL").run(id,userId);return ids;})();
+  await Promise.all(selected.map(id=>deleteUploadFiles(id)));return selected.length;
 }
 
 export async function deleteUploadFiles(id: string) {
@@ -293,7 +310,7 @@ export async function cleanupOrphanedUploads(settings: ToolSettings) {
   const ids = db.transaction(() => {
     const rows = db.prepare(`
       SELECT u.id FROM uploads u
-      WHERE u.created_at < ? AND u.retained = 0 AND NOT EXISTS (SELECT 1 FROM message_attachments ma WHERE ma.upload_id = u.id)
+      WHERE u.created_at < ? AND u.deleted_at IS NULL AND u.retained = 0 AND NOT EXISTS (SELECT 1 FROM message_attachments ma WHERE ma.upload_id = u.id)
     `).all(cutoff) as Array<{ id: string }>;
     for (const row of rows) db.prepare("DELETE FROM uploads WHERE id = ?").run(row.id);
     return rows.map((row) => row.id);

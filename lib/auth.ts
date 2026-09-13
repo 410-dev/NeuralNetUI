@@ -17,6 +17,8 @@ type UserRow = {
   role: UserRole;
   preferences: string;
   storage_quota_bytes: number;
+  trash_quota_bytes: number;
+  audit_enabled: number;
   created_at: string;
 };
 
@@ -29,7 +31,7 @@ export class AuthError extends Error {
 function accountFrom(row: UserRow): AuthUser {
   let preferences: Record<string, unknown> = {};
   try { preferences = JSON.parse(row.preferences || "{}"); } catch { /* use defaults */ }
-  return { id: row.id, username: row.username, displayName: row.display_name, role: row.role, preferences };
+  return { id: row.id, username: row.username, displayName: row.display_name, role: row.role, canAudit: row.role === "superadmin" || row.role === "admin" && row.audit_enabled === 1, preferences };
 }
 
 function cookieValue(request: Request, name: string) {
@@ -82,6 +84,12 @@ export function requireUser(request: Request) {
 export function requireAdmin(request: Request) {
   const user = requireUser(request);
   if (user.role !== "admin" && user.role !== "superadmin") throw new AuthError("Administrator access required.", 403);
+  return user;
+}
+
+export function requireAuditor(request: Request) {
+  const user = requireAdmin(request);
+  if (!user.canAudit) throw new AuthError("Audit permission required.", 403);
   return user;
 }
 
@@ -145,12 +153,13 @@ export async function authenticate(username: string, password: string) {
 
 export function listUsers(): UserSummary[] {
   return (db.prepare(`
-    SELECT u.id, u.username, u.display_name, u.role, u.created_at, u.storage_quota_bytes,
-           COALESCE(SUM(up.size), 0) AS storage_used_bytes
+    SELECT u.id, u.username, u.display_name, u.role, u.created_at, u.storage_quota_bytes, u.trash_quota_bytes, u.audit_enabled,
+           COALESCE(SUM(CASE WHEN up.deleted_at IS NULL THEN up.size ELSE 0 END), 0) AS storage_used_bytes,
+           COALESCE(SUM(CASE WHEN up.deleted_at IS NOT NULL THEN up.size ELSE 0 END), 0) AS trash_used_bytes
     FROM users u LEFT JOIN uploads up ON up.user_id = u.id
     GROUP BY u.id ORDER BY u.created_at
-  `).all() as Array<Pick<UserRow, "id" | "username" | "display_name" | "role" | "created_at" | "storage_quota_bytes"> & { storage_used_bytes: number }>)
-    .map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, role: row.role, createdAt: row.created_at, storageQuotaBytes: row.storage_quota_bytes, storageUsedBytes: row.storage_used_bytes }));
+  `).all() as Array<Pick<UserRow, "id" | "username" | "display_name" | "role" | "created_at" | "storage_quota_bytes" | "trash_quota_bytes" | "audit_enabled"> & { storage_used_bytes: number; trash_used_bytes: number }>)
+    .map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, role: row.role, canAudit: row.role === "superadmin" || row.role === "admin" && row.audit_enabled === 1, auditEnabled: row.audit_enabled === 1, createdAt: row.created_at, storageQuotaBytes: row.storage_quota_bytes, storageUsedBytes: row.storage_used_bytes, trashQuotaBytes: row.trash_quota_bytes, trashUsedBytes: row.trash_used_bytes }));
 }
 
 export async function createUser(input: { username?: string; displayName?: string; password?: string; role?: string }, defaultStorageQuotaBytes = 512 * 1024 * 1024) {
@@ -160,17 +169,17 @@ export async function createUser(input: { username?: string; displayName?: strin
   const role: UserRole = input.role === "admin" ? "admin" : "user";
   const passwordHash = await hashPassword(String(input.password || "")); const stamp = new Date().toISOString();
   try {
-    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, storage_quota_bytes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '{}', ?, ?, ?)")
-      .run(randomUUID(), username, displayName, passwordHash, role, defaultStorageQuotaBytes, stamp, stamp);
+    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, storage_quota_bytes, trash_quota_bytes, audit_enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '{}', ?, ?, 0, ?, ?)")
+      .run(randomUUID(), username, displayName, passwordHash, role, defaultStorageQuotaBytes, defaultStorageQuotaBytes * 2, stamp, stamp);
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new AuthError("이미 사용 중인 사용자 이름입니다.", 409);
     throw error;
   }
 }
 
-export function updateManagedUser(actor: AuthUser, userId: string, input: { displayName?: string; role?: string; storageQuotaBytes?: number }) {
+export function updateManagedUser(actor: AuthUser, userId: string, input: { displayName?: string; role?: string; storageQuotaBytes?: number; trashQuotaBytes?: number; auditEnabled?: boolean }) {
   if (actor.id === userId && (input.displayName !== undefined || input.role !== undefined)) throw new AuthError("현재 로그인한 계정의 이름이나 권한은 여기에서 변경할 수 없습니다.", 409);
-  const target = db.prepare("SELECT display_name, role, storage_quota_bytes FROM users WHERE id = ?").get(userId) as { display_name: string; role: UserRole; storage_quota_bytes: number } | undefined;
+  const target = db.prepare("SELECT display_name, role, storage_quota_bytes, trash_quota_bytes, audit_enabled FROM users WHERE id = ?").get(userId) as { display_name: string; role: UserRole; storage_quota_bytes: number; trash_quota_bytes:number; audit_enabled:number } | undefined;
   if (!target) throw new AuthError("사용자를 찾을 수 없습니다.", 404);
   const displayName = input.displayName === undefined ? target.display_name : String(input.displayName).trim();
   if (!displayName || displayName.length > 80) throw new AuthError("표시 이름을 확인해 주세요.", 400);
@@ -182,16 +191,21 @@ export function updateManagedUser(actor: AuthUser, userId: string, input: { disp
   if (target.role !== "superadmin" && role === "superadmin") throw new AuthError("최고 관리자 권한은 부여할 수 없습니다.", 409);
   const quota = input.storageQuotaBytes === undefined ? target.storage_quota_bytes : Number(input.storageQuotaBytes);
   if (!Number.isSafeInteger(quota) || quota < 1024 * 1024 || quota > 10 * 1024 ** 4) throw new AuthError("저장소 할당량은 1MB~10TB 사이여야 합니다.", 400);
+  const trashQuota = input.trashQuotaBytes === undefined ? target.trash_quota_bytes : Number(input.trashQuotaBytes);
+  if (!Number.isSafeInteger(trashQuota) || trashQuota < 1024 * 1024 || trashQuota > 20 * 1024 ** 4) throw new AuthError("휴지통 할당량은 1MB~20TB 사이여야 합니다.", 400);
+  if (input.auditEnabled !== undefined && actor.role !== "superadmin") throw new AuthError("최고 관리자만 감사 권한을 변경할 수 있습니다.", 403);
+  if (actor.role !== "superadmin" && target.audit_enabled === 1 && (input.role !== undefined || input.displayName !== undefined)) throw new AuthError("감사 권한이 있는 관리자는 최고 관리자만 변경할 수 있습니다.", 403);
+  const auditEnabled = role === "admin" && (input.auditEnabled === undefined ? target.audit_enabled === 1 : input.auditEnabled === true);
   db.transaction(() => {
     // Serialize the usage check with upload quota reservations so an upload
     // cannot commit between this check and a quota reduction.
-    const used = (db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ?").get(userId) as { bytes: number }).bytes;
+    const used = (db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ? AND deleted_at IS NULL").get(userId) as { bytes: number }).bytes;
     if (quota < used) throw new AuthError("현재 사용 중인 용량보다 할당량을 작게 설정할 수 없습니다.", 409);
-    const result = db.prepare("UPDATE users SET display_name = ?, role = ?, storage_quota_bytes = ?, updated_at = ? WHERE id = ?")
-      .run(displayName, role, quota, new Date().toISOString(), userId);
+    const result = db.prepare("UPDATE users SET display_name = ?, role = ?, storage_quota_bytes = ?, trash_quota_bytes = ?, audit_enabled = ?, updated_at = ? WHERE id = ?")
+      .run(displayName, role, quota, trashQuota, Number(auditEnabled), new Date().toISOString(), userId);
     if (!result.changes) throw new AuthError("사용자를 찾을 수 없습니다.", 404);
   })();
-  logAdminAudit(actor.id, userId, "user.settings.update", JSON.stringify({ role, storageQuotaBytes: quota }));
+  logAdminAudit(actor.id, userId, "user.settings.update", JSON.stringify({ role, storageQuotaBytes: quota, trashQuotaBytes: trashQuota, auditEnabled }));
 }
 
 export function logAdminAudit(actorUserId: string, targetUserId: string, action: string, detail?: string) {

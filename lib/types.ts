@@ -87,17 +87,23 @@ export interface AccountInfo {
   username: string;
   displayName: string;
   role: UserRole;
+  canAudit: boolean;
 }
 
 export interface UserSummary extends AccountInfo {
   createdAt: string;
   storageQuotaBytes: number;
   storageUsedBytes: number;
+  trashQuotaBytes: number;
+  trashUsedBytes: number;
+  auditEnabled: boolean;
 }
 
 export interface UserStorageSettings {
   /** Default quota assigned to newly created accounts. */
   defaultQuotaBytes: number;
+  /** Deleted chats and files are retained for this many days, up to 60. */
+  trashRetentionDays: number;
 }
 
 export interface AppConfig {
@@ -256,6 +262,7 @@ export interface StorageFile extends StoredAttachment {
   createdAt: string;
   referenceCount: number;
   retained: boolean;
+  deletedAt?: string;
 }
 
 export interface ChatBranch {
@@ -287,6 +294,7 @@ export interface ConversationSummary {
   activeBranchId: string;
   branchCount: number;
   updatedAt: string;
+  deletedAt?: string;
 }
 
 export type PublicConnectionConfig = Omit<ConnectionConfig, "apiKey"> & { apiKey: string; hasApiKey: boolean };
