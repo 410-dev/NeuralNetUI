@@ -5,9 +5,9 @@ import path from "node:path";
 import { createConnection } from "node:net";
 import type { ModelContentPart } from "./document-processing";
 import { isHostComputerAvailable } from "./host-environment.ts";
-import type { HarnessSettings } from "./types";
+import type { HarnessSettings, ToolSettings } from "./types";
 import { hostPermissionForAction } from "./host-permissions.ts";
-import { saveGeneratedImage, saveHostFile } from "./uploads.ts";
+import { readUploadModelContent, saveGeneratedImage, saveHostFile } from "./uploads.ts";
 
 export type HostRiskAssessment = { riskLevel: 1 | 2 | 3 | 4 | 5; explanation: string };
 export type HostToolExecution = { result: unknown; content?: ModelContentPart[] };
@@ -253,7 +253,7 @@ async function trayScreenshot() {
   });
 }
 
-export async function executeHostComputerTool(sessionKey: string, args: HostArgs, userId?: string): Promise<HostToolExecution> {
+export async function executeHostComputerTool(sessionKey: string, args: HostArgs, userId?: string, settings?: ToolSettings): Promise<HostToolExecution> {
   if (!isHostComputerAvailable()) throw new Error("The host computer tool is unavailable in a containerized environment.");
   const action = stringArg(args, "action");
   if (action === "search_files") { const root = resolvedPath(args); return { result: await searchFiles(root, stringArg(args, "query", false) || "*", Math.max(1, Math.min(500, Number(args.max_results || 100)))) }; }
@@ -267,7 +267,8 @@ export async function executeHostComputerTool(sessionKey: string, args: HostArgs
   if (action === "store_file") {
     if (!userId) throw new Error("A storage owner is required for private file storage.");
     const stored=await saveHostFile(resolvedPath(args),userId);const image=stored.metadata.mimeType.startsWith("image/");
-    return{result:{stored:true,storage:"user",attachment:stored.metadata,markdown:stored.markdown,downloadUrl:`${stored.metadata.url}?download=1`,visibility:"owner-only"},content:[{type:"text",text:`The host file is stored privately. Use this exact Markdown in the user-facing answer: ${stored.markdown}`},...(image?[{type:"image_file" as const,file_path:stored.path,mime_type:stored.metadata.mimeType}]:[])]};
+    const modelContent=settings&&(image||stored.metadata.mimeType==="application/pdf")?await readUploadModelContent(stored.metadata.id,userId,settings):image?[{type:"image_file" as const,file_path:stored.path,mime_type:stored.metadata.mimeType}]:[];
+    return{result:{stored:true,storage:"user",attachment:stored.metadata,markdown:stored.markdown,downloadUrl:`${stored.metadata.url}?download=1`,visibility:"owner-only",loadedIntoModelContext:Boolean(modelContent.length)},content:[{type:"text",text:`The host file is stored privately and available in model context. Use this exact Markdown in the user-facing answer: ${stored.markdown}`},...modelContent]};
   }
   if (action === "upload_temp") return { result: await uploadTemporary(resolvedPath(args), Math.max(1, Math.min(100, Number(args.max_downloads || 1)))) };
   if (action === "list_processes") { const session = processSessions.get(sessionKey); return { result: { processes: [...(session?.values() || [])].map(item => ({ pid: item.pid, name: item.name, program: item.program, startedAt: item.startedAt })) } }; }

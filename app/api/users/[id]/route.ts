@@ -1,7 +1,6 @@
 import {
   authErrorResponse,
   deleteManagedUser,
-  listUsers,
   requireAdmin,
   updateManagedUser,
 } from "@/lib/auth";
@@ -17,9 +16,9 @@ export async function PATCH(request: Request, context: Context) {
   try {
     const actor = requireAdmin(request);
     const { id } = await context.params;
-    updateManagedUser(actor, id, await request.json());
-    const config=await readConfig();await purgeDeletedUploads(id,config.userStorageSettings.trashRetentionDays);
-    return Response.json({ users: listUsers() });
+    const config=await readConfig();updateManagedUser(actor,id,await request.json(),{storage:config.userStorageSettings.defaultQuotaBytes,trash:config.userStorageSettings.defaultTrashQuotaBytes});
+    await purgeDeletedUploads(id,config.userStorageSettings.trashRetentionDays);
+    return Response.json({ updated:true });
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -30,7 +29,7 @@ export async function DELETE(request: Request, context: Context) {
     const actor = requireAdmin(request);
     const { id } = await context.params;
     await deleteManagedUser(actor, id);
-    return Response.json({ users: listUsers() });
+    return Response.json({ deleted:true });
   } catch (error) {
     return authErrorResponse(error);
   }

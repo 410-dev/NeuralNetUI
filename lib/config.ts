@@ -20,7 +20,7 @@ const connectionSchema = z.object({ id: z.string().min(1), name: z.string().min(
 
 export const DEFAULT_EXPERIMENTAL: Required<ExperimentalFeatures> = { browserTool: false, openAIProgress: false, hostComputerTool: false };
 export const DEFAULT_TOOL_SETTINGS: ToolSettings = { maxToolRounds: 8, maxBrowserTabs: 8, maxMultipleChoiceQuestions: 3, maxAttachmentsPerMessage: 12, textDownloadLimitMb: 1, textCharacterLimit: 24_000, imageDownloadLimitMb: 10, imageUploadLimitMb: 20, pdfSizeLimitMb: 25, pdfPageLimit: 100, pdfTextCharacterLimit: 100_000, pdfVisionPageLimit: 6, pdfProcessingTimeoutSeconds: 30, temporaryFileTtlMinutes: 60, orphanUploadTtlHours: 24 };
-const toolSettingsSchema = z.object({ maxToolRounds: z.number().int().min(1).max(32), maxBrowserTabs: z.number().int().min(1).max(20).default(DEFAULT_TOOL_SETTINGS.maxBrowserTabs), maxMultipleChoiceQuestions: z.number().int().min(1).max(10).default(DEFAULT_TOOL_SETTINGS.maxMultipleChoiceQuestions), maxAttachmentsPerMessage: z.number().int().min(1).max(50), textDownloadLimitMb: z.number().min(0.0625).max(10), textCharacterLimit: z.number().int().min(1_000).max(1_000_000), imageDownloadLimitMb: z.number().min(1).max(50), imageUploadLimitMb: z.number().min(1).max(50), pdfSizeLimitMb: z.number().min(1).max(100), pdfPageLimit: z.number().int().min(1).max(500), pdfTextCharacterLimit: z.number().int().min(1_000).max(1_000_000), pdfVisionPageLimit: z.number().int().min(0).max(20), pdfProcessingTimeoutSeconds: z.number().int().min(5).max(120), temporaryFileTtlMinutes: z.number().int().min(5).max(1_440), orphanUploadTtlHours: z.number().min(1).max(168) }).default(DEFAULT_TOOL_SETTINGS);
+const toolSettingsSchema = z.object({ maxToolRounds: z.number().int().min(1).max(10_000), maxBrowserTabs: z.number().int().min(1).max(20).default(DEFAULT_TOOL_SETTINGS.maxBrowserTabs), maxMultipleChoiceQuestions: z.number().int().min(1).max(10).default(DEFAULT_TOOL_SETTINGS.maxMultipleChoiceQuestions), maxAttachmentsPerMessage: z.number().int().min(1).max(50), textDownloadLimitMb: z.number().min(0.0625).max(10), textCharacterLimit: z.number().int().min(1_000).max(1_000_000), imageDownloadLimitMb: z.number().min(1).max(50), imageUploadLimitMb: z.number().min(1).max(50), pdfSizeLimitMb: z.number().min(1).max(100), pdfPageLimit: z.number().int().min(1).max(500), pdfTextCharacterLimit: z.number().int().min(1_000).max(1_000_000), pdfVisionPageLimit: z.number().int().min(0).max(20), pdfProcessingTimeoutSeconds: z.number().int().min(5).max(120), temporaryFileTtlMinutes: z.number().int().min(5).max(1_440), orphanUploadTtlHours: z.number().min(1).max(168) }).default(DEFAULT_TOOL_SETTINGS);
 const appearanceSchema = z.object({
   lmStudioProgress: z.enum(["text", "percent", "donut", "both"]).default("both"),
   accentPalette: z.enum(["blue", "violet", "teal", "amber", "rose", "graphite", "custom"]).default("blue"),
@@ -63,10 +63,10 @@ const loginAppearanceSchema = z.object({
   accentPalette: z.enum(["blue", "violet", "teal", "amber", "rose", "graphite", "custom"]).default(DEFAULT_LOGIN_APPEARANCE.accentPalette),
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default(DEFAULT_LOGIN_APPEARANCE.accentColor),
 }).default(DEFAULT_LOGIN_APPEARANCE);
-const userStorageSettingsSchema = z.object({ defaultQuotaBytes: z.number().int().min(1024 * 1024).max(10 * 1024 ** 4).default(512 * 1024 * 1024), trashRetentionDays: z.number().int().min(1).max(60).default(60) }).default({ defaultQuotaBytes: 512 * 1024 * 1024, trashRetentionDays: 60 });
+const userStorageSettingsSchema = z.object({ defaultQuotaBytes: z.number().int().min(1024 * 1024).max(10 * 1024 ** 4).default(512 * 1024 * 1024), defaultTrashQuotaBytes: z.number().int().min(1024 * 1024).max(20 * 1024 ** 4).default(1024 * 1024 * 1024), trashRetentionDays: z.number().int().min(1).max(60).default(60) }).default({ defaultQuotaBytes: 512 * 1024 * 1024, defaultTrashQuotaBytes: 1024 * 1024 * 1024, trashRetentionDays: 60 });
 export const configSchema = z.object({ connections: z.array(connectionSchema).min(1).max(32), profile: z.object({ name: z.string().min(1) }), preferences: preferencesSchema, loginAppearance: loginAppearanceSchema, userStorageSettings: userStorageSettingsSchema, toolSettings: toolSettingsSchema, harnessSettings: harnessSettingsSchema, experimental: experimentalSchema, models: z.array(modelSchema) });
 
-const defaults: AppConfig = { connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", models: [] }], profile: { name: "User" }, preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE }, loginAppearance: DEFAULT_LOGIN_APPEARANCE, userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024, trashRetentionDays: 60 }, toolSettings: DEFAULT_TOOL_SETTINGS, experimental: DEFAULT_EXPERIMENTAL, models: [] };
+const defaults: AppConfig = { connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", models: [] }], profile: { name: "User" }, preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE }, loginAppearance: DEFAULT_LOGIN_APPEARANCE, userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024, defaultTrashQuotaBytes: 1024 * 1024 * 1024, trashRetentionDays: 60 }, toolSettings: DEFAULT_TOOL_SETTINGS, experimental: DEFAULT_EXPERIMENTAL, models: [] };
 const configPath = path.join(dataDir, "config.json");
 
 function normalizeConfig(config: AppConfig): AppConfig {
@@ -81,7 +81,7 @@ function migrateConfig(input: unknown): AppConfig {
   if (!legacy.success) throw current.error;
   const connection: ConnectionConfig = { id: "openai-default", name: "OpenAI API", driver: "openai", ...legacy.data.server, models: legacy.data.models.filter((model) => !model.isAlias).map((model) => ({ ...model, connectionId: "openai-default" })) };
   const aliases = legacy.data.models.filter((model) => model.isAlias).map((model) => ({ ...model, connectionId: "openai-default" }));
-  return normalizeConfig({ connections: [connection], profile: legacy.data.profile, preferences: legacy.data.preferences, loginAppearance: DEFAULT_LOGIN_APPEARANCE, userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024, trashRetentionDays: 60 }, toolSettings: legacy.data.toolSettings, harnessSettings: legacy.data.harnessSettings, experimental: DEFAULT_EXPERIMENTAL, models: aliases });
+  return normalizeConfig({ connections: [connection], profile: legacy.data.profile, preferences: legacy.data.preferences, loginAppearance: DEFAULT_LOGIN_APPEARANCE, userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024, defaultTrashQuotaBytes: 1024 * 1024 * 1024, trashRetentionDays: 60 }, toolSettings: legacy.data.toolSettings, harnessSettings: legacy.data.harnessSettings, experimental: DEFAULT_EXPERIMENTAL, models: aliases });
 }
 
 function claimLegacyCustomizations(config: AppConfig) {
@@ -99,7 +99,19 @@ export async function readConfig(): Promise<AppConfig> {
   return writeConfig(claimLegacyCustomizations((await readLegacyConfig(configPath)) || structuredClone(defaults)).config);
 }
 
-export async function writeConfig(input: unknown): Promise<AppConfig> { const parsed = normalizeConfig(configSchema.parse(input)); db.prepare(`INSERT INTO app_config(id, value, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(JSON.stringify(parsed), new Date().toISOString()); return parsed; }
+export async function writeConfig(input: unknown): Promise<AppConfig> {
+  const parsed = normalizeConfig(configSchema.parse(input));
+  db.transaction(() => {
+    const activeOver = db.prepare(`SELECT u.username FROM users u WHERE u.storage_quota_uses_default=1 AND (SELECT COALESCE(SUM(size),0) FROM uploads WHERE user_id=u.id AND deleted_at IS NULL)>? LIMIT 1`).get(parsed.userStorageSettings.defaultQuotaBytes) as {username:string}|undefined;
+    if(activeOver)throw Object.assign(new Error(`The active storage default is below ${activeOver.username}'s current usage.`),{status:409});
+    const trashOver = db.prepare(`SELECT u.username FROM users u WHERE u.trash_quota_uses_default=1 AND (SELECT COALESCE(SUM(size),0) FROM uploads WHERE user_id=u.id AND deleted_at IS NOT NULL)>? LIMIT 1`).get(parsed.userStorageSettings.defaultTrashQuotaBytes) as {username:string}|undefined;
+    if(trashOver)throw Object.assign(new Error(`The trash storage default is below ${trashOver.username}'s current usage.`),{status:409});
+    db.prepare(`INSERT INTO app_config(id, value, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(JSON.stringify(parsed),new Date().toISOString());
+    db.prepare("UPDATE users SET storage_quota_bytes=?,updated_at=? WHERE storage_quota_uses_default=1").run(parsed.userStorageSettings.defaultQuotaBytes,new Date().toISOString());
+    db.prepare("UPDATE users SET trash_quota_bytes=?,updated_at=? WHERE trash_quota_uses_default=1").run(parsed.userStorageSettings.defaultTrashQuotaBytes,new Date().toISOString());
+  })();
+  return parsed;
+}
 function isAdmin(user: AuthUser) { return user.role === "admin" || user.role === "superadmin"; }
 export function canUseModel(model: ModelConfig, user: AuthUser) { return !model.isAlias || !model.ownerId || model.ownerId === user.id || model.isPublic === true; }
 function visiblePreset(preset: ReasoningPreset, user: AuthUser) { return preset.kind === "builtin" || !preset.ownerId || preset.ownerId === user.id; }

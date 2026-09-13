@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  try { const user = requireUser(request);const query=new URL(request.url).searchParams;const config=await readConfig();await purgeDeletedUploads(user.id,config.userStorageSettings.trashRetentionDays);const result=await storagePage(user.id,{page:Number(query.get("page")||1),pageSize:Number(query.get("pageSize")||24),sort:String(query.get("sort")||"created_desc") as StorageSort,query:String(query.get("q")||""),state:"active"});const{trashQuotaBytes:_trashQuotaBytes,trashUsedBytes:_trashUsedBytes,...visible}=result;return Response.json(visible); }
+  try { const user = requireUser(request);const query=new URL(request.url).searchParams;const config=await readConfig();await purgeDeletedUploads(user.id,config.userStorageSettings.trashRetentionDays);const result=await storagePage(user.id,{page:Number(query.get("page")||1),pageSize:Number(query.get("pageSize")||24),sort:String(query.get("sort")||"created_desc") as StorageSort,query:String(query.get("q")||""),state:"active",attachableOnly:query.get("attachable")==="1"});const{trashQuotaBytes:_trashQuotaBytes,trashUsedBytes:_trashUsedBytes,...visible}=result;return Response.json(visible); }
   catch (error) { return authErrorResponse(error); }
 }
 

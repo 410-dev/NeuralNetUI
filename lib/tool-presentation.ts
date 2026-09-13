@@ -7,6 +7,7 @@ const TOOL_NAMES: Record<string, Record<Locale, string>> = {
   visit_page: { en: "Page visit", ko: "페이지 방문" },
   browser: { en: "Browser", ko: "브라우저" },
   host_computer: { en: "Host computer", ko: "호스트 컴퓨터" },
+  storage_access: { en: "Storage access", ko: "저장소 접근" },
   get_current_time: { en: "Current time", ko: "현재 시간" },
   get_current_location: { en: "Current location", ko: "현재 위치" },
   ask_multiple_choice: { en: "Multiple choice", ko: "다중 선택" },

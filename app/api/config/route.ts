@@ -19,7 +19,7 @@ export async function PUT(request: Request) {
     return NextResponse.json(publicConfig(saved, { ...user, displayName: admin ? incoming.profile?.name || user.displayName : user.displayName, preferences: { ...user.preferences, sendReasoningToModel: incoming.preferences?.sendReasoningToModel, exportReasoning: incoming.preferences?.exportReasoning, language: incoming.preferences?.language, showModelIdentifiers: incoming.preferences?.showModelIdentifiers, renderStrikethrough: incoming.preferences?.renderStrikethrough, defaultModelId: incoming.preferences?.defaultModelId, defaultReasoningPresetId: incoming.preferences?.defaultReasoningPresetId, appearance: incoming.preferences?.appearance } }));
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof ZodError ? error.issues[0]?.message : "설정을 저장하지 못했습니다." },
+      { error: error instanceof ZodError ? error.issues[0]?.message : error instanceof Error ? error.message : "설정을 저장하지 못했습니다." },
       { status: error && typeof error === "object" && "status" in error ? Number(error.status) : 400 },
     );
   }

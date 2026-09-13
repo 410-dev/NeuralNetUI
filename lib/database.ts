@@ -315,6 +315,14 @@ function openDatabase() {
     `);
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(13, new Date().toISOString());
   })();
+  const quotaDefaultsVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (quotaDefaultsVersion.version < 14) connection.transaction(() => {
+    connection.exec(`
+      ALTER TABLE users ADD COLUMN storage_quota_uses_default INTEGER NOT NULL DEFAULT 0 CHECK (storage_quota_uses_default IN (0, 1));
+      ALTER TABLE users ADD COLUMN trash_quota_uses_default INTEGER NOT NULL DEFAULT 0 CHECK (trash_quota_uses_default IN (0, 1));
+    `);
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(14, new Date().toISOString());
+  })();
   return connection;
 }
 

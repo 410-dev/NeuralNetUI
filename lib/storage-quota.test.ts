@@ -10,6 +10,8 @@ process.env.NEURAL_CHAT_DATA_DIR=root;
 const {db}=await import("./database.ts");
 const {deleteUpload,purgeDeletedUploads,restoreUpload,saveGeneratedImage,saveHostFile,storagePage,storageSummary}=await import("./uploads.ts");
 const {executeHostComputerTool}=await import("./host-computer-tool.ts");
+const {executeStorageAccessTool}=await import("./storage-tool.ts");
+const toolSettings={maxToolRounds:8,maxBrowserTabs:8,maxMultipleChoiceQuestions:3,maxAttachmentsPerMessage:12,textDownloadLimitMb:1,textCharacterLimit:24_000,imageDownloadLimitMb:10,imageUploadLimitMb:20,pdfSizeLimitMb:25,pdfPageLimit:100,pdfTextCharacterLimit:100_000,pdfVisionPageLimit:6,pdfProcessingTimeoutSeconds:30,temporaryFileTtlMinutes:60,orphanUploadTtlHours:24};
 
 test("user storage quota is enforced atomically and generated images are retained",async()=>{
   const id=crypto.randomUUID(),stamp=new Date().toISOString();
@@ -20,8 +22,12 @@ test("user storage quota is enforced atomically and generated images are retaine
   const imported=await saveHostFile(source,id);assert.equal(imported.metadata.mimeType,"text/plain");assert.match(imported.markdown,/download=1/);assert.equal(await readFile(imported.path,"utf8"),"private host file");
   const imageSource=path.join(root,"host image.png");await sharp({create:{width:4,height:3,channels:4,background:{r:30,g:90,b:160,alpha:1}}}).png().toFile(imageSource);const importedImage=await saveHostFile(imageSource,id);assert.equal(importedImage.metadata.mimeType,"image/png");assert.match(importedImage.markdown,/^!\[host image\.png\]\(\/api\/uploads\//);
   const throughTool=await executeHostComputerTool(`storage:${id}`,{action:"store_file",path:source},id) as {result:{visibility:string;markdown:string;attachment:{id:string}}};assert.equal(throughTool.result.visibility,"owner-only");assert.match(throughTool.result.markdown,/download=1/);
+  const visualThroughTool=await executeHostComputerTool(`storage:${id}`,{action:"store_file",path:imageSource},id,toolSettings) as {result:{loadedIntoModelContext:boolean};content?:Array<{type:string}>};assert.equal(visualThroughTool.result.loadedIntoModelContext,true);assert.equal(visualThroughTool.content?.some(part=>part.type==="image_file"),true);
+  const search=await executeStorageAccessTool({action:"search",query:"host image"},id,toolSettings) as {result:{total:number;files:Array<{id:string}>}};assert.equal(search.result.total,2);
+  const loaded=await executeStorageAccessTool({action:"read",file_id:importedImage.metadata.id},id,toolSettings);assert.equal(loaded.content?.some(part=>part.type==="image_file"),true);
+  const otherId=crypto.randomUUID();db.prepare("INSERT INTO users(id,username,display_name,password_hash,role,preferences,storage_quota_bytes,created_at,updated_at) VALUES(?,?,?,?,?,'{}',?,?,?)").run(otherId,`other-${otherId}`,"Other","unused","user",1024*1024,stamp,stamp);await assert.rejects(executeStorageAccessTool({action:"read",file_id:importedImage.metadata.id},otherId,toolSettings),/not found/i);
   const summary=await storageSummary(id);assert.equal(summary.files.find(file=>file.id===saved.metadata.id)?.retained,true);
-  const page=await storagePage(id,{page:1,pageSize:1,sort:"name_asc"});assert.equal(page.total,4);assert.equal(page.files.length,1);assert.equal(page.files[0].name,"host image.png");
+  const page=await storagePage(id,{page:1,pageSize:1,sort:"name_asc"});assert.equal(page.total,5);assert.equal(page.files.length,1);assert.equal(page.files[0].name,"host image.png");
   const found=await storagePage(id,{query:"host notes",state:"active"});assert.equal(found.total,2);await deleteUpload(imported.metadata.id,id);assert.equal((await storagePage(id,{query:"host notes",state:"active"})).total,1);const trashed=await storagePage(id,{query:"host notes",state:"deleted"});assert.equal(trashed.total,1);assert.equal(trashed.trashUsedBytes,imported.metadata.size);await restoreUpload(imported.metadata.id,id);assert.equal((await storagePage(id,{query:"host notes",state:"active"})).total,2);
   await deleteUpload(imported.metadata.id,id);db.prepare("UPDATE uploads SET deleted_at=? WHERE id=?").run(new Date(Date.now()-61*86400_000).toISOString(),imported.metadata.id);assert.equal(await purgeDeletedUploads(id,60),1);assert.equal((await storagePage(id,{state:"deleted"})).files.some(file=>file.id===imported.metadata.id),false);
   await assert.rejects(saveGeneratedImage(Buffer.concat([pngHeader,Buffer.alloc(1024*1024)]),id),/quota exceeded/i);

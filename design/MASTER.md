@@ -43,6 +43,7 @@
 - Keep the top-level group collapsed by default. When the user opens it, keep the currently active call expanded and completed calls collapsed until requested.
 - Match tool headings to the reasoning heading typography: unboxed icons, regular weight, and the same font sizing.
 - Show localized tool-call markers only in the rendered reasoning view; never mix those markers into stored or upstream reasoning content.
+- In the composer add-menu, group toggles under Internet, Ambient awareness, Agent, and Interaction. Every group is a keyboard-accessible disclosure, and the complete menu is height-bounded with internal scrolling.
 
 ## Shared browser surface
 
@@ -101,6 +102,9 @@
 - Deleted records remain visually distinct only in audit surfaces, with explicit restore and permanent-delete controls. Ordinary user surfaces omit trash navigation and retention explanations.
 - Storage capacity uses a compact percentage label to the left of a thin pill meter. The fill is white below 75%, yellow from 75%, and red from 90%; hovering or focusing the percentage reveals used, remaining, and total capacity. Aggregate administration shows separate active and trash meters.
 - Clicking a chat image opens a near-viewport lightbox with a fixed top-right close control; Escape and backdrop click also close it.
+- Let the composer reopen owned images and PDFs through the same live-search, sorting, and pagination language as Storage manager. Selecting an existing file creates a message reference and never deletes the stored source when the draft reference is removed.
+- Workspace active/trash defaults and deletion retention belong in Harness storage management. A zero per-user quota is an inheritance marker, not zero capacity; inherited accounts follow later workspace-default changes.
+- User management opens as a dedicated modal with live search and 10-account pages. Its compact account rows show active storage and trash usage separately; quota editing stays in the per-user modal.
 
 ## Composer
 

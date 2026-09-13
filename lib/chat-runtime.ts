@@ -20,6 +20,7 @@ import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type Enab
 import { assertOwnedBrowserSession, executeBrowserTool } from "./browser-tool";
 import { deterministicHostAssessment, executeHostComputerTool, hostActionRequiresApproval, hostComputerToolDefinition, isShellHostAction, type HostRiskAssessment } from "./host-computer-tool";
 import { canUseHostComputer } from "./host-environment";
+import { executeStorageAccessTool, storageAccessToolDefinition } from "./storage-tool";
 import type { ChatWaitPhase, Conversation, HarnessSettings, MessageStep, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
 import type { ModelContentPart } from "./document-processing";
 import { promises as fs } from "node:fs";
@@ -427,8 +428,9 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
   if (call.function.name === "host_computer") {
     const authorization = await authorizeHostAction(job, call, args, hostPolicy);
     if (!authorization.approved) return { result: authorization.result };
-    return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args, job.userId);
+    return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args, job.userId, settings);
   }
+  if (call.function.name === "storage_access" && enabled.storageAccess) return executeStorageAccessTool(args, job.userId, settings);
   return executeWebTool(call.function.name, call.function.arguments, enabled, settings);
 }
 
@@ -451,10 +453,12 @@ async function run(job: ChatJob) {
     const enabled: EnabledWebTools = {
       internetSearch: job.input.tools?.internetSearch === true, pageVisit: job.input.tools?.pageVisit === true,
       browser: job.input.tools?.browser === true && config.experimental?.browserTool === true,
+      storageAccess: job.input.tools?.storageAccess === true,
       currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
       hostComputer: job.input.tools?.hostComputer === true && canUseHostComputer(job.userRole, config.experimental?.hostComputerTool === true),
     };
     const tools = toolDefinitions(enabled, config.toolSettings);
+    if (enabled.storageAccess) tools.push(storageAccessToolDefinition());
     const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
     const harnessContext = { config, model, userId: job.userId, signal: job.controller.signal, onPhase: (phase: ChatWaitPhase) => setWaitPhase(job, phase) };
     if (enabled.hostComputer) tools.push(hostComputerToolDefinition());

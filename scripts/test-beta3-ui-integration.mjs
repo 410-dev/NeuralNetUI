@@ -69,10 +69,13 @@ async function seed(id, messages) {
 try {
   for (let i = 0; i < 120; i++) { try { if ((await fetch(`${root}/api/auth/status`)).ok) break; } catch {} await delay(100); }
   const setup = await api('/api/auth/setup', 'POST', { username: 'beta3qa', displayName: 'Beta 3 QA', password: 'LocalBeta3QA-220' }); assert.equal(setup.status, 201); cookie = setup.headers.get('set-cookie').split(';')[0];
-  await json('/api/users/defaults', 'PATCH', { defaultStorageQuotaBytes: 2 * 1024 * 1024 });
-  const created = await json('/api/users', 'POST', { username: 'storageqa', displayName: 'Storage QA', password: 'LocalBeta3QA-221', role: 'user' });
-  const managedUser = created.users.find(user => user.username === 'storageqa'); assert.ok(managedUser); assert.equal(managedUser.storageQuotaBytes, 2 * 1024 * 1024);
-  const auditCreated = await json('/api/users', 'POST', { username: 'auditqa', displayName: 'Audit QA', password: 'LocalBeta3QA-222', role: 'admin' }); const auditUser = auditCreated.users.find(user => user.username === 'auditqa'); assert.ok(auditUser); assert.equal(auditUser.canAudit, false); assert.equal(auditUser.trashQuotaBytes, 4 * 1024 * 1024);
+  await json('/api/users/defaults', 'PATCH', { defaultStorageQuotaBytes: 2 * 1024 * 1024, defaultTrashQuotaBytes: 4 * 1024 * 1024 });
+  await json('/api/users', 'POST', { username: 'storageqa', displayName: 'Storage QA', password: 'LocalBeta3QA-221', role: 'user' });
+  await json('/api/users', 'POST', { username: 'auditqa', displayName: 'Audit QA', password: 'LocalBeta3QA-222', role: 'admin' });
+  const createdUsers = await json('/api/users?q=qa&page=1');
+  assert.equal(createdUsers.pageSize, 10); assert.equal(createdUsers.total, 3);
+  const managedUser = createdUsers.users.find(user => user.username === 'storageqa'); assert.ok(managedUser); assert.equal(managedUser.storageQuotaBytes, 2 * 1024 * 1024); assert.equal(managedUser.storageQuotaUsesDefault, true);
+  const auditUser = createdUsers.users.find(user => user.username === 'auditqa'); assert.ok(auditUser); assert.equal(auditUser.canAudit, false); assert.equal(auditUser.trashQuotaBytes, 4 * 1024 * 1024); assert.equal(auditUser.trashQuotaUsesDefault, true);
   const login = await fetch(`${root}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'storageqa', password: 'LocalBeta3QA-221' }) });
   assert.equal(login.status, 200); const userCookie = login.headers.get('set-cookie').split(';')[0];
   const auditLogin = await fetch(`${root}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'auditqa', password: 'LocalBeta3QA-222' }) }); assert.equal(auditLogin.status, 200); const auditCookie = auditLogin.headers.get('set-cookie').split(';')[0];
@@ -114,7 +117,7 @@ try {
   const deletedChats = await jsonAs(`/api/users/${managedUser.id}/audit?view=conversations&state=deleted&q=${deletedId}`, auditCookie); assert.equal(deletedChats.total, 1); assert.ok(deletedChats.items[0].deletedAt); const deletedPreview = await jsonAs(`/api/users/${managedUser.id}/audit?view=conversation&conversationId=${deletedId}`, auditCookie); assert.ok(deletedPreview.conversation.deletedAt);
   await jsonAs(`/api/users/${managedUser.id}/audit`, auditCookie, 'PATCH', { resource: 'conversation', id: deletedId, action: 'restore' }); const ownerRestoredRead = await fetch(`${root}/api/conversations/${deletedId}`, { headers: { cookie: userCookie } }); assert.equal(ownerRestoredRead.status, 200);
   const expiredId = 'storage-audit-8'; const expiredDelete = await fetch(`${root}/api/conversations/${expiredId}`, { method: 'DELETE', headers: { cookie: userCookie } }); assert.equal(expiredDelete.status, 204); const maintenanceDb = new Database(path.join(data, 'qa.sqlite3')); maintenanceDb.prepare('UPDATE conversations SET deleted_at=? WHERE id=?').run(new Date(Date.now() - 61 * 86400_000).toISOString(), expiredId); maintenanceDb.close(); const expiredAudit = await fetch(`${root}/api/users/${managedUser.id}/audit?view=conversation&conversationId=${expiredId}`, { headers: { cookie: auditCookie } }); assert.equal(expiredAudit.status, 404);
-  console.log('PASS beta 5 audit grants, soft-delete restore, live search, quota totals, pagination, branch preview, and ZIP export');
+  console.log('PASS beta 6 inherited quotas, user pagination, audit grants, soft-delete restore, live search, quota totals, branch preview, and ZIP export');
   let config = await json('/api/config');
   const model = { id: 'qa-model', sourceModel: 'qa-model', name: 'Beta 3 model', connectionId: 'qa', isAlias: false, visible: true, reasoningSupported: false, reasoningPresets: [], contextWindowTokens: 4096 };
   config.connections = [{ id: 'qa', name: 'QA', driver: 'openai', baseUrl: `http://127.0.0.1:${mock.address().port}/v1`, apiKey: '', clearApiKey: true, models: [model] }];
@@ -127,7 +130,7 @@ try {
   const coveredTool = { id: 'covered-assistant', role: 'assistant', content: 'old answer', createdAt: stamp, toolEvents: [{ id: 'covered-tool', name: 'visit_page', status: 'completed', startedAt: stamp, result: { text: 'covered tool output '.repeat(300) } }], steps: [{ kind: 'tools', ids: ['covered-tool'] }, { kind: 'content', text: 'old answer' }] };
   await seed('live-compaction', [{ id: 'old-user', role: 'user', content: 'old context '.repeat(1200), createdAt: stamp }, coveredTool, { id: 'compact-user', role: 'user', content: 'QA_COMPACTION', createdAt: stamp }]);
   await waitSnapshot('live-compaction', value => value.waitPhase === 'compacting-context' && value.message.steps?.some(step => step.kind === 'compaction' && !step.seconds && step.reasoning && step.summary));
-  console.log(`PASS beta 5 held states: post-tool prompt progress and live compaction output`);
+  console.log(`PASS beta 6 held states: post-tool prompt progress and live compaction output`);
   if (keep) { console.log(`QA_READY ${root} beta3qa LocalBeta3QA-220 tool-progress live-compaction`); await new Promise(() => {}); }
   releaseHold();
   await waitSnapshot('tool-progress', value => value.status === 'completed');

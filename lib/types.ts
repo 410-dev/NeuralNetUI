@@ -97,11 +97,15 @@ export interface UserSummary extends AccountInfo {
   trashQuotaBytes: number;
   trashUsedBytes: number;
   auditEnabled: boolean;
+  storageQuotaUsesDefault: boolean;
+  trashQuotaUsesDefault: boolean;
 }
 
 export interface UserStorageSettings {
-  /** Default quota assigned to newly created accounts. */
+  /** Workspace default active quota inherited by new accounts and accounts set to zero. */
   defaultQuotaBytes: number;
+  /** Workspace default trash quota inherited by new accounts and accounts set to zero. */
+  defaultTrashQuotaBytes: number;
   /** Deleted chats and files are retained for this many days, up to 60. */
   trashRetentionDays: number;
 }
@@ -241,6 +245,7 @@ export interface EnabledTools {
   internetSearch: boolean;
   pageVisit: boolean;
   browser: boolean;
+  storageAccess: boolean;
   currentTime: boolean;
   location: boolean;
   multipleChoice: boolean;
@@ -256,6 +261,8 @@ export interface StoredAttachment {
   height?: number;
   url: string;
   thumbnailUrl?: string;
+  /** Client-only marker: removing a draft reference must not delete the stored source file. */
+  fromStorage?: boolean;
 }
 
 export interface StorageFile extends StoredAttachment {
