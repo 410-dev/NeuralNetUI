@@ -79,19 +79,37 @@ function PermissionMatrixDialog({ ko, initial, onSave, onClose }: { ko:boolean; 
   </div>,document.body);
 }
 
+export function StorageSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDraft:React.Dispatch<React.SetStateAction<PublicConfig>>}) {
+  const ko=draft.preferences.language==="ko";
+  const quotaUnit=(bytes:number):"MB"|"GB"=>bytes>=1024**3&&bytes%1024**3===0?"GB":"MB";
+  const [storageUnit,setStorageUnit]=useState<"MB"|"GB">(()=>quotaUnit(draft.userStorageSettings.defaultQuotaBytes));
+  const [trashUnit,setTrashUnit]=useState<"MB"|"GB">(()=>quotaUnit(draft.userStorageSettings.defaultTrashQuotaBytes));
+  const patchStorage=(value:Partial<PublicConfig["userStorageSettings"]>)=>setDraft(d=>({...d,userStorageSettings:{...d.userStorageSettings,...value}}));
+  const quotaValue=(bytes:number,unit:"MB"|"GB")=>bytes/(unit==="GB"?1024**3:1024**2);
+  const quotaBytes=(value:number,unit:"MB"|"GB")=>Math.round(value*(unit==="GB"?1024**3:1024**2));
+  return <div className="settings-section wide storage-settings-section">
+    <SectionTitle icon={<HardDrive size={19}/>} title={ko?"저장소 관리":"Storage management"} description={ko?"사용자 저장소·휴지통의 기본 할당량과 삭제 보존 기간을 관리합니다. 0으로 설정된 사용자 할당량은 이 기본값을 자동으로 따릅니다.":"Manage workspace defaults for user storage, trash, and deleted-item retention. User quotas set to zero automatically inherit these values."}/>
+    <div className="settings-group">
+      <h4>{ko?"기본 할당량":"Default quotas"}</h4>
+      <div className="storage-default-grid">
+        <label className="field"><span>{ko?"기본 저장소 할당량":"Default storage quota"}</span><div className="storage-default-value"><input type="number" min={1} max={storageUnit==="GB"?10240:10485760} step={storageUnit==="GB"?.25:1} value={quotaValue(draft.userStorageSettings.defaultQuotaBytes,storageUnit)} onChange={e=>patchStorage({defaultQuotaBytes:quotaBytes(Number(e.target.value),storageUnit)})}/><SelectMenu label={ko?"저장소 기본 단위":"Storage default unit"} value={storageUnit} options={[{value:"MB",label:"MB"},{value:"GB",label:"GB"}]} onChange={value=>setStorageUnit(value as "MB"|"GB")}/></div><small>{ko?"신규 사용자와 저장소 할당량이 0인 모든 사용자에게 적용됩니다.":"Applies to new users and every user whose storage quota is set to zero."}</small></label>
+        <label className="field"><span>{ko?"기본 휴지통 할당량":"Default trash quota"}</span><div className="storage-default-value"><input type="number" min={1} max={trashUnit==="GB"?20480:20971520} step={trashUnit==="GB"?.25:1} value={quotaValue(draft.userStorageSettings.defaultTrashQuotaBytes,trashUnit)} onChange={e=>patchStorage({defaultTrashQuotaBytes:quotaBytes(Number(e.target.value),trashUnit)})}/><SelectMenu label={ko?"휴지통 기본 단위":"Trash default unit"} value={trashUnit} options={[{value:"MB",label:"MB"},{value:"GB",label:"GB"}]} onChange={value=>setTrashUnit(value as "MB"|"GB")}/></div><small>{ko?"신규 사용자와 휴지통 할당량이 0인 모든 사용자에게 적용됩니다.":"Applies to new users and every user whose trash quota is set to zero."}</small></label>
+      </div>
+    </div>
+    <div className="settings-group">
+      <h4>{ko?"삭제 보존":"Deleted-item retention"}</h4>
+      <div className="tool-settings-grid storage-retention-grid"><label className="field"><span>{ko?"삭제 보존 기간":"Retention period"}</span><input type="number" min={1} max={60} step={1} value={draft.userStorageSettings.trashRetentionDays} onChange={e=>patchStorage({trashRetentionDays:Math.min(60,Math.max(1,Math.floor(Number(e.target.value)||1)))})}/><small>{ko?"삭제된 채팅과 파일을 서버에 보존하는 기간입니다. 1~60일 사이에서 설정합니다.":"How long deleted chats and files remain on the server, from 1 to 60 days."}</small></label></div>
+    </div>
+  </div>;
+}
+
 export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDraft:React.Dispatch<React.SetStateAction<PublicConfig>>}) {
   const ko=draft.preferences.language==="ko";
   const h=draft.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const [prompt,setPrompt]=useState<"compactPrompt"|"resumePrompt"|"titlePrompt"|"hostCommandAnalysisPrompt"|null>(null);
   const [permissionMatrix,setPermissionMatrix]=useState(false);
-  const quotaUnit=(bytes:number):"MB"|"GB"=>bytes>=1024**3&&bytes%1024**3===0?"GB":"MB";
-  const [storageUnit,setStorageUnit]=useState<"MB"|"GB">(()=>quotaUnit(draft.userStorageSettings.defaultQuotaBytes));
-  const [trashUnit,setTrashUnit]=useState<"MB"|"GB">(()=>quotaUnit(draft.userStorageSettings.defaultTrashQuotaBytes));
   const superadmin=draft.account?.role==="superadmin";
   const patch=(value:Partial<HarnessSettings>)=>setDraft(d=>({...d,harnessSettings:{...(d.harnessSettings || DEFAULT_HARNESS_SETTINGS),...value}}));
-  const patchStorage=(value:Partial<PublicConfig["userStorageSettings"]>)=>setDraft(d=>({...d,userStorageSettings:{...d.userStorageSettings,...value}}));
-  const quotaValue=(bytes:number,unit:"MB"|"GB")=>bytes/(unit==="GB"?1024**3:1024**2);
-  const quotaBytes=(value:number,unit:"MB"|"GB")=>Math.round(value*(unit==="GB"?1024**3:1024**2));
   const effortLabel=(value:string)=>{ const label=EFFORT_LABELS[value]; return label ? label[ko?1:0] : value; };
   function modelFields(kind:"compact"|"title") {
     const modelKey=kind==="compact"?"compactModelId":"titleModelId";
@@ -106,14 +124,6 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
     </div>;
   }
   return <div className="harness-settings">
-    <section className="settings-section wide">
-      <SectionTitle icon={<HardDrive size={19}/>} title={ko?"저장소 관리":"Storage management"} description={ko?"사용자 저장소·휴지통의 기본 할당량과 삭제 보존 기간을 관리합니다. 0으로 설정된 사용자 할당량은 이 기본값을 자동으로 따릅니다.":"Manage workspace defaults for user storage, trash, and deleted-item retention. User quotas set to zero automatically inherit these values."}/>
-      <div className="storage-default-grid">
-        <label className="field"><span>{ko?"기본 저장소 할당량":"Default storage quota"}</span><div className="storage-default-value"><input type="number" min={1} max={storageUnit==="GB"?10240:10485760} step={storageUnit==="GB"?.25:1} value={quotaValue(draft.userStorageSettings.defaultQuotaBytes,storageUnit)} onChange={e=>patchStorage({defaultQuotaBytes:quotaBytes(Number(e.target.value),storageUnit)})}/><SelectMenu compact label={ko?"저장소 기본 단위":"Storage default unit"} value={storageUnit} options={[{value:"MB",label:"MB"},{value:"GB",label:"GB"}]} onChange={value=>setStorageUnit(value as "MB"|"GB")}/></div><small>{ko?"신규 사용자와 저장소 할당량이 0인 모든 사용자에게 적용됩니다.":"Applies to new users and every user whose storage quota is set to zero."}</small></label>
-        <label className="field"><span>{ko?"기본 휴지통 할당량":"Default trash quota"}</span><div className="storage-default-value"><input type="number" min={1} max={trashUnit==="GB"?20480:20971520} step={trashUnit==="GB"?.25:1} value={quotaValue(draft.userStorageSettings.defaultTrashQuotaBytes,trashUnit)} onChange={e=>patchStorage({defaultTrashQuotaBytes:quotaBytes(Number(e.target.value),trashUnit)})}/><SelectMenu compact label={ko?"휴지통 기본 단위":"Trash default unit"} value={trashUnit} options={[{value:"MB",label:"MB"},{value:"GB",label:"GB"}]} onChange={value=>setTrashUnit(value as "MB"|"GB")}/></div><small>{ko?"신규 사용자와 휴지통 할당량이 0인 모든 사용자에게 적용됩니다.":"Applies to new users and every user whose trash quota is set to zero."}</small></label>
-      </div>
-      <label className="field storage-retention-field"><span>{ko?"삭제 보존 기간":"Deleted-item retention"}</span><input type="number" min={1} max={60} step={1} value={draft.userStorageSettings.trashRetentionDays} onChange={e=>patchStorage({trashRetentionDays:Math.min(60,Math.max(1,Math.floor(Number(e.target.value)||1)))})}/><small>{ko?"삭제된 채팅과 파일을 서버에 보존하는 기간입니다. 1~60일 사이에서 설정합니다.":"How long deleted chats and files remain on the server, from 1 to 60 days."}</small></label>
-    </section>
     <section className="settings-section wide">
       <SectionTitle icon={<Layers size={19}/>} title={ko?"컨텍스트 처리":"Context handling"} description={ko?"모델의 컨텍스트 창이 가득 찼을 때 이전 대화를 어떻게 다룰지 정합니다.":"Choose what happens to earlier turns once the model's context window fills up."}/>
       <OptionCards label={ko?"처리 방식":"Mode"} value={h.contextMode} onSelect={id=>patch({contextMode:id as HarnessSettings["contextMode"]})} options={[

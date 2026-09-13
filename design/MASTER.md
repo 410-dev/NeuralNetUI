@@ -104,6 +104,7 @@
 - Clicking a chat image opens a near-viewport lightbox with a fixed top-right close control; Escape and backdrop click also close it.
 - Let the composer reopen owned images and PDFs through the same live-search, sorting, and pagination language as Storage manager. Selecting an existing file creates a message reference and never deletes the stored source when the draft reference is removed.
 - Workspace active/trash defaults and deletion retention belong in Harness storage management. A zero per-user quota is an inheritance marker, not zero capacity; inherited accounts follow later workspace-default changes.
+- Place Harness storage management immediately after Tool and file limits. Group quota defaults and deletion retention in the same quiet bordered topic blocks used by tool limits, and keep MB/GB selectors exactly the same height as their numeric inputs.
 - User management opens as a dedicated modal with live search and 10-account pages. Its compact account rows show active storage and trash usage separately; quota editing stays in the per-user modal.
 
 ## Composer
