@@ -88,28 +88,38 @@ export async function ensureLegacyUploadsMigrated() {
   await legacyMigration;
 }
 
-function insertWithinQuota(row: { id:string; name:string; mimeType:string; size:number; width?:number; height?:number; userId:string; retained:boolean }) {
+function insertWithinQuota(row: { id:string; name:string; mimeType:string; size:number; width?:number; height?:number; userId:string; retained:boolean; reservationId?:string }) {
   db.transaction(() => {
     const quota = db.prepare("SELECT storage_quota_bytes AS quota FROM users WHERE id = ?").get(row.userId) as { quota: number } | undefined;
     if (!quota) throw new Error("Storage owner not found.");
+    if(row.reservationId){const reservation=db.prepare("SELECT size,completed_upload_id AS completedUploadId FROM storage_upload_sessions WHERE id=? AND user_id=?").get(row.reservationId,row.userId) as {size:number;completedUploadId:string|null}|undefined;if(!reservation||reservation.size!==row.size)throw new Error("Upload reservation not found.");if(reservation.completedUploadId)throw new Error("Upload is already complete.");}
     const used = (db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ? AND deleted_at IS NULL").get(row.userId) as { bytes: number }).bytes;
-    if (used + row.size > quota.quota) throw new Error(`Storage quota exceeded (${used + row.size} / ${quota.quota} bytes).`);
+    const pending=(db.prepare("SELECT COALESCE(SUM(size),0) AS bytes FROM storage_upload_sessions WHERE user_id=? AND completed_upload_id IS NULL AND (? IS NULL OR id<>?)").get(row.userId,row.reservationId??null,row.reservationId??null) as {bytes:number}).bytes;
+    if (used + pending + row.size > quota.quota) throw new Error(`Storage quota exceeded (${used + pending + row.size} / ${quota.quota} bytes).`);
     db.prepare(`INSERT INTO uploads(id, name, mime_type, size, width, height, created_at, user_id, retained) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(row.id, row.name, row.mimeType, row.size, row.width ?? null, row.height ?? null, new Date().toISOString(), row.userId, Number(row.retained));
+    if(row.reservationId)db.prepare("UPDATE storage_upload_sessions SET completed_upload_id=? WHERE id=? AND user_id=? AND completed_upload_id IS NULL").run(row.id,row.reservationId,row.userId);
   })();
 }
 
-function assertQuotaPreflight(userId:string,size:number){
+function assertQuotaPreflight(userId:string,size:number,reservationId?:string){
   const quota=db.prepare("SELECT storage_quota_bytes AS quota FROM users WHERE id = ?").get(userId) as {quota:number}|undefined;
   if(!quota)throw new Error("Storage owner not found.");
   const used=(db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ? AND deleted_at IS NULL").get(userId) as {bytes:number}).bytes;
-  if(used+size>quota.quota)throw new Error(`Storage quota exceeded (${used+size} / ${quota.quota} bytes).`);
+  const pending=(db.prepare("SELECT COALESCE(SUM(size),0) AS bytes FROM storage_upload_sessions WHERE user_id=? AND completed_upload_id IS NULL AND (? IS NULL OR id<>?)").get(userId,reservationId??null,reservationId??null) as {bytes:number}).bytes;
+  if(used+pending+size>quota.quota)throw new Error(`Storage quota exceeded (${used+pending+size} / ${quota.quota} bytes).`);
 }
 
 function storedFileMimeType(header:Buffer,name:string){
   const raster=sniffRasterMimeType(header);if(raster)return raster;
   if(header.subarray(0,5).toString("ascii")==="%PDF-")return "application/pdf";
   return FILE_MIME_TYPES[path.extname(name).toLowerCase()]||"application/octet-stream";
+}
+
+function safeStoredName(value:string){
+  const name=String(value||"").normalize("NFC").replace(/[\u0000-\u001f\u007f]/g,"").replace(/[\\/]+/g,"-").trim();
+  if(!name||name==="."||name==="..")throw new Error("A valid file name is required.");
+  return name.slice(0,240);
 }
 
 async function createStoredThumbnail(source:string,destination:string){
@@ -143,6 +153,34 @@ export async function saveHostFile(sourcePath:string,userId:string){
     const escapedName=name.replace(/([\\\]])/g,"\\$1");
     return{metadata,path:paths.original,markdown:mimeType.startsWith("image/")?`![${escapedName}](${metadata.url})`:`[${escapedName}](${metadata.url}?download=1)`};
   }catch(error){await Promise.all([temporary,paths.original,paths.thumbnail].map(target=>fs.unlink(target).catch(()=>undefined)));throw error;}
+}
+
+/** Move an already assembled upload into retained owner-only storage without buffering it in memory. */
+export async function saveStagedUpload(sourcePath:string,nameInput:string,userId:string,reservationId:string){
+  await ensureLegacyUploadsMigrated();
+  const source=path.resolve(sourcePath);const sourceStats=await fs.stat(source);
+  if(!sourceStats.isFile())throw new Error("Only regular files can be stored.");
+  if(!Number.isSafeInteger(sourceStats.size)||sourceStats.size<0)throw new Error("The file size is not supported.");
+  assertQuotaPreflight(userId,sourceStats.size,reservationId);
+  const name=safeStoredName(nameInput);const id=randomUUID();const paths=pathsFor(id);const handle=await fs.open(source,"r");const header=Buffer.alloc(Math.min(32,sourceStats.size));
+  try{if(header.length)await handle.read(header,0,header.length,0);}finally{await handle.close();}
+  let mimeType=storedFileMimeType(header,name);const dimensions=mimeType.startsWith("image/")?await createStoredThumbnail(source,paths.thumbnail):undefined;
+  if(mimeType.startsWith("image/")&&!dimensions)mimeType="application/octet-stream";
+  const metadata:StoredAttachment={id,name,mimeType,size:sourceStats.size,width:dimensions?.width,height:dimensions?.height,url:`/api/uploads/${id}`,...(mimeType.startsWith("image/")?{thumbnailUrl:`/api/uploads/${id}?variant=thumbnail`}:{})};
+  await fs.mkdir(uploadsDir,{recursive:true});
+  try{
+    await fs.rename(source,paths.original);await fs.chmod(paths.original,0o600).catch(()=>undefined);
+    insertWithinQuota({...metadata,userId,retained:true,reservationId});return metadata;
+  }catch(error){await Promise.all([paths.original,paths.thumbnail].map(target=>fs.unlink(target).catch(()=>undefined)));throw error;}
+}
+
+export async function saveTextFile(nameInput:string,kind:"markdown"|"text",content:string,userId:string){
+  const extension=kind==="markdown"?".md":".txt";const mimeType=kind==="markdown"?"text/markdown":"text/plain";
+  let name=safeStoredName(nameInput);if(!name.toLowerCase().endsWith(extension))name=`${name.replace(/\.(?:md|txt)$/i,"")}${extension}`;
+  const data=Buffer.from(content,"utf8");assertQuotaPreflight(userId,data.length);const id=randomUUID();const paths=pathsFor(id);const temporary=`${paths.original}.${randomUUID()}.tmp`;
+  const metadata:StoredAttachment={id,name,mimeType,size:data.length,url:`/api/uploads/${id}`};await fs.mkdir(uploadsDir,{recursive:true});
+  try{await fs.writeFile(temporary,data,{mode:0o600,flag:"wx"});await fs.rename(temporary,paths.original);insertWithinQuota({...metadata,userId,retained:true});return metadata;}
+  catch(error){await Promise.all([temporary,paths.original].map(target=>fs.unlink(target).catch(()=>undefined)));throw error;}
 }
 
 export async function saveUpload(file: File, thumbnail: File | undefined, userId: string, settings: ToolSettings, dimensions?: { width?: number; height?: number }, retained = false): Promise<StoredAttachment> {

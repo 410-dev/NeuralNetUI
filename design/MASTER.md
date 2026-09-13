@@ -107,6 +107,8 @@
 - Place Harness storage management immediately after Tool and file limits. Group quota defaults and deletion retention in the same quiet bordered topic blocks used by tool limits, and keep MB/GB selectors exactly the same height as their numeric inputs.
 - Keep the tool-limit validation note visibly inside the Tool and file limits section, name that scope in the copy, and separate the following Storage management heading with deliberate padding. Storage management descriptions place each sentence on a new semantic line while still allowing normal responsive wrapping within a sentence.
 - User management opens as a dedicated modal with live search and 10-account pages. Its compact account rows show active storage and trash usage separately; quota editing stays in the per-user modal.
+- Personal storage offers direct multi-file upload and Markdown/text creation above search. Keep uploads below proxy request limits with resumable-sized chunks, show aggregate progress, and register a file only after complete server-side verification.
+- The ordinary personal browser has no trash or delete affordance. Its creation modal uses the shared pill fields and SelectMenu; Markdown editing provides an explicit rendered-preview tab before saving.
 
 ## Composer
 

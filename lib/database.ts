@@ -323,6 +323,20 @@ function openDatabase() {
     `);
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(14, new Date().toISOString());
   })();
+  const storageUploadSessionsVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (storageUploadSessionsVersion.version < 15) connection.transaction(() => {
+    connection.exec(`
+      CREATE TABLE storage_upload_sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        size INTEGER NOT NULL CHECK (size >= 0),
+        completed_upload_id TEXT REFERENCES uploads(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX storage_upload_sessions_user_idx ON storage_upload_sessions(user_id, completed_upload_id, created_at);
+    `);
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(15, new Date().toISOString());
+  })();
   return connection;
 }
 
