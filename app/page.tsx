@@ -12,7 +12,7 @@ import { SelectMenu, usePopoverPresence } from "./select-menu";
 import { NeuralMark } from "./neural-mark";
 import { ACCENT_PALETTES, accentColorOf, accentVariables, DEFAULT_APPEARANCE, DEFAULT_LOGIN_APPEARANCE, defaultReasoningNote, normalizeHexColor, reasoningNote, REASONING_NOTE_KEYS, revealStep } from "@/lib/appearance";
 import { capabilitySummary, driverCapabilities } from "@/lib/driver-capabilities";
-import { lastContentStep, reasoningStepIsWhole, stepToolEvents, transcriptSteps } from "@/lib/transcript";
+import { lastContentStep, reasoningStepIsWhole, replaceAssistantContent, stepToolEvents, transcriptSteps } from "@/lib/transcript";
 import { greetingFor, greetingsFor, BAND_STARTS, timeBandFor } from "@/lib/greetings";
 import { chatWaitLabel } from "@/lib/chat-progress";
 import { normalizeReasoning, reasoningOptionName, isReasoningToggle } from "@/lib/reasoning-capabilities";
@@ -27,6 +27,7 @@ import {
 import { FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -899,7 +900,7 @@ export default function Home() {
     const content = editedText.trim(); if (!content) return;
     const index = source.messages.findIndex((message) => message.id === messageId); if (index < 0 || source.messages[index].role !== "assistant") return;
     const stamp = now(); const newBranchId = uid("branch"); const original = source.messages[index]; const revisionGroupId = original.revisionGroupId || original.id;
-    const edited: StoredMessage = { ...original, id: uid("assistant"), revisionGroupId, content, createdAt: stamp };
+    const edited: StoredMessage = { ...replaceAssistantContent(original, content), id: uid("assistant"), revisionGroupId, createdAt: stamp };
     const path = [...source.messages.slice(0, index), edited];
     const branch: ChatBranch = { id: newBranchId, name: `${locale === "ko" ? "응답 수정" : "Response edit"} ${conversation.branches.length + 1}`, parentBranchId: source.id,
       forkedFromMessageId: messageId, messages: path, createdAt: stamp, updatedAt: stamp };
@@ -1518,6 +1519,25 @@ function useRevealedText(target: string, active: boolean, pacing: AppearancePref
   return paced ? (target.startsWith(shown) ? shown : target) : target;
 }
 
+/**
+ * Keeps react-markdown's custom element types stable across parent scroll-state renders. Replacing
+ * the renderer functions would remount large images; authenticated no-store sources would then be
+ * downloaded again, which is especially visible under mobile memory pressure.
+ */
+function ChatMarkdown({ text, c, renderStrikethrough, onImagePreview }: { text: string; c: CopySet; renderStrikethrough: boolean; onImagePreview: (value: { src: string; alt: string }) => void }) {
+  const components = useMemo(() => ({
+    a: (props) => <a {...props} target="_blank" rel="noreferrer" />,
+    img: ({ src, alt, ...props }) => {
+      const source = typeof src === "string" ? src : "";
+      const open = () => source && onImagePreview({ src: source, alt: alt || "" });
+      return <img {...props} src={source} alt={alt || ""} role="button" tabIndex={0} className="chat-expandable-image" onClick={open} onKeyDown={event => { if (source && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); open(); } }} />;
+    },
+    pre: ({ children }) => <CodeSnippet c={c}>{children}</CodeSnippet>,
+    del: ({ node, children, ...props }) => renderStrikethrough ? <del {...props}>{children}</del> : <>{literalStrikethroughSource(text, node, String(children))}</>,
+  } satisfies Components), [c, onImagePreview, renderStrikethrough, text]);
+  return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: true }], remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>{text}</ReactMarkdown>;
+}
+
 function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethrough, appearance, pending, revisions, onFork, onEditAssistant, onRegenerate, onRegenerateUser, onDeleteUser, onRevision }: { c: CopySet; locale: Locale; message: StoredMessage; waitPhase?: ChatWaitPhase; waitProgress?: number; renderStrikethrough: boolean; appearance: AppearancePreferences; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(message.content);
@@ -1542,7 +1562,6 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
   const liveContentIndex = lastContentStep(steps);
   const wholeReasoning = reasoningStepIsWhole(message);
   const waitStatus = pending && waitPhase && waitPhase !== "compacting-context" ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
-  const markdown = (text: string) => <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: true }], remarkMath]} rehypePlugins={[rehypeKatex]} components={{ a: (props) => <a {...props} target="_blank" rel="noreferrer" />,img:({src,alt,...props})=>{const source=typeof src==="string"?src:"";return <img {...props} src={source} alt={alt||""} role="button" tabIndex={0} className="chat-expandable-image" onClick={()=>source&&setImagePreview({src:source,alt:alt||""})} onKeyDown={event=>{if(source&&(event.key==="Enter"||event.key===" ")){event.preventDefault();setImagePreview({src:source,alt:alt||""});}}}/>;}, pre: ({ children }) => <CodeSnippet c={c}>{children}</CodeSnippet>, del: ({ node, children, ...props }) => renderStrikethrough ? <del {...props}>{children}</del> : <>{literalStrikethroughSource(text, node, String(children))}</> }}>{text}</ReactMarkdown>;
   return <div className="message-row assistant-message long-press-target" {...longPress}>
     {editing
       ? <div className="assistant-edit"><textarea value={text} onChange={(event) => setText(event.target.value)} autoFocus /><div><button onClick={() => { setText(message.content); setEditing(false); }}>{c.cancel}</button><button className="save-response" onClick={() => { if (text.trim()) onEditAssistant(message.id, text); setEditing(false); }}><Check size={13} /> {c.saveEdit}</button></div></div>
@@ -1557,7 +1576,7 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
           }
           const live = index === liveContentIndex && pending;
           const body = live ? shownContent : step.text;
-          return <div key={index} className={`assistant-copy markdown-body ${live && fading ? "stream-fade" : ""}`}>{body ? markdown(body) : null}</div>;
+          return <div key={index} className={`assistant-copy markdown-body ${live && fading ? "stream-fade" : ""}`}>{body ? <ChatMarkdown text={body} c={c} renderStrikethrough={renderStrikethrough} onImagePreview={setImagePreview} /> : null}</div>;
         })}
         {waitStatus}
         {!steps.length && (pending && !waitingForChoice && !waitPhase ? <div className="assistant-copy markdown-body"><span className="typing"><i /><i /><i /></span></div> : null)}

@@ -37,3 +37,25 @@ export function stepToolEvents(ids: string[], events: ToolEvent[] = []): ToolEve
 export function reasoningStepIsWhole(message: StoredMessage): boolean {
   return !(message.steps || []).some((step) => step.kind === "reasoning");
 }
+
+/**
+ * Replaces the user-visible answer without leaving stale per-stage content behind. Assistant
+ * edits represent one complete replacement, while reasoning, tool and compaction records remain
+ * useful audit context. Keep those records in order and put the replacement where the final
+ * delivered-content stage lived (or at the end when the original had no content stage).
+ */
+export function replaceAssistantContent(message: StoredMessage, content: string): StoredMessage {
+  const trimmed = content.trim();
+  const steps = message.steps;
+  if (!steps?.length) return { ...message, content: trimmed };
+  const finalContentIndex = lastContentStep(steps);
+  const retained = steps.filter((step) => step.kind !== "content");
+  const insertionIndex = finalContentIndex < 0
+    ? retained.length
+    : steps.slice(0, finalContentIndex).filter((step) => step.kind !== "content").length;
+  return {
+    ...message,
+    content: trimmed,
+    steps: [...retained.slice(0, insertionIndex), { kind: "content", text: trimmed }, ...retained.slice(insertionIndex)],
+  };
+}

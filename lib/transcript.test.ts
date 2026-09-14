@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { lastContentStep, reasoningStepIsWhole, stepToolEvents, transcriptSteps } from "./transcript.ts";
+import { lastContentStep, reasoningStepIsWhole, replaceAssistantContent, stepToolEvents, transcriptSteps } from "./transcript.ts";
 import type { MessageStep, StoredMessage, ToolEvent } from "./types.ts";
 
 const event = (id: string): ToolEvent => ({ id, name: "internet_search", status: "completed", startedAt: "now" });
@@ -47,4 +47,31 @@ test("a tool round resolves only its own events, in the order requested", () => 
   // An id with no stored event is skipped rather than rendering a placeholder.
   assert.deepEqual(stepToolEvents(["t1", "missing"], events).map((item) => item.id), ["t1"]);
   assert.deepEqual(stepToolEvents(["t1"], undefined), []);
+});
+
+test("editing an assistant answer replaces stale content steps and keeps technical activity", () => {
+  const original = message({
+    content: "old beforeold after",
+    reasoning: "plan",
+    toolEvents: [event("t1")],
+    steps: [
+      { kind: "reasoning", text: "plan" },
+      { kind: "content", text: "old before" },
+      { kind: "tools", ids: ["t1"] },
+      { kind: "content", text: "old after" },
+    ],
+  });
+  const edited = replaceAssistantContent(original, "  corrected answer  ");
+  assert.equal(edited.content, "corrected answer");
+  assert.deepEqual(edited.steps, [
+    { kind: "reasoning", text: "plan" },
+    { kind: "tools", ids: ["t1"] },
+    { kind: "content", text: "corrected answer" },
+  ]);
+  assert.deepEqual(transcriptSteps(edited).filter((step) => step.kind === "content"), [{ kind: "content", text: "corrected answer" }]);
+});
+
+test("editing a recorded assistant answer adds content when the transcript had activity only", () => {
+  const edited = replaceAssistantContent(message({ content: "", steps: [{ kind: "tools", ids: ["t1"] }] }), "new answer");
+  assert.deepEqual(edited.steps, [{ kind: "tools", ids: ["t1"] }, { kind: "content", text: "new answer" }]);
 });
