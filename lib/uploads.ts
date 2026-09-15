@@ -259,14 +259,14 @@ export async function storageSummary(userId: string) {
   if (!account) throw Object.assign(new Error("Storage owner not found."), { code: "ENOENT" });
   const files = db.prepare(`
     SELECT u.id, u.name, u.mime_type, u.size, u.width, u.height, u.created_at, u.retained,
-      (SELECT COUNT(*) FROM message_attachments ma WHERE ma.upload_id = u.id) AS reference_count
+      (SELECT COUNT(DISTINCT m.conversation_id) FROM message_attachments ma JOIN messages m ON m.id=ma.message_id JOIN conversations c ON c.id=m.conversation_id WHERE ma.upload_id=u.id AND c.deleted_at IS NULL) AS reference_count
     FROM uploads u WHERE u.user_id = ? AND u.deleted_at IS NULL ORDER BY u.created_at DESC
   `).all(userId) as UploadRow[];
   const mapped: StorageFile[] = files.map(row=>({ ...toAttachment(row), createdAt: row.created_at!, referenceCount: row.reference_count || 0, retained: row.retained === 1 }));
   return { quotaBytes: account.quotaBytes, usedBytes: mapped.reduce((sum,file)=>sum+file.size,0), files: mapped };
 }
 
-export async function managedStorageFiles(userId:string){await ensureLegacyUploadsMigrated();const rows=db.prepare("SELECT id,name,mime_type,size,width,height,created_at,deleted_at,retained,(SELECT COUNT(*) FROM message_attachments ma WHERE ma.upload_id=uploads.id) AS reference_count FROM uploads WHERE user_id=? ORDER BY created_at DESC").all(userId) as UploadRow[];return rows.map(row=>({...toAttachment(row),createdAt:row.created_at!,referenceCount:row.reference_count||0,retained:row.retained===1,...(row.deleted_at?{deletedAt:row.deleted_at}:{})})) as StorageFile[];}
+export async function managedStorageFiles(userId:string){await ensureLegacyUploadsMigrated();const rows=db.prepare("SELECT id,name,mime_type,size,width,height,created_at,deleted_at,retained,(SELECT COUNT(DISTINCT m.conversation_id) FROM message_attachments ma JOIN messages m ON m.id=ma.message_id JOIN conversations c ON c.id=m.conversation_id WHERE ma.upload_id=uploads.id AND c.deleted_at IS NULL) AS reference_count FROM uploads WHERE user_id=? ORDER BY created_at DESC").all(userId) as UploadRow[];return rows.map(row=>({...toAttachment(row),createdAt:row.created_at!,referenceCount:row.reference_count||0,retained:row.retained===1,...(row.deleted_at?{deletedAt:row.deleted_at}:{})})) as StorageFile[];}
 
 export type StorageSort="created_desc"|"created_asc"|"name_asc"|"name_desc"|"size_asc"|"size_desc";
 export async function storagePage(userId:string,input:{page?:number;pageSize?:number;sort?:StorageSort;query?:string;state?:"all"|"active"|"deleted";attachableOnly?:boolean}={}){
@@ -278,7 +278,7 @@ export async function storagePage(userId:string,input:{page?:number;pageSize?:nu
   const pageSize=Math.max(1,Math.min(100,Math.floor(input.pageSize||24)));const pageCount=Math.max(1,Math.ceil(total/pageSize));const page=Math.max(1,Math.min(pageCount,Math.floor(input.page||1)));
   const sort:StorageSort=(["created_desc","created_asc","name_asc","name_desc","size_asc","size_desc"] as StorageSort[]).includes(input.sort as StorageSort)?input.sort as StorageSort:"created_desc";
   const order:{[key in StorageSort]:string}={created_desc:"u.created_at DESC,u.id",created_asc:"u.created_at ASC,u.id",name_asc:"LOWER(u.name) ASC,u.id",name_desc:"LOWER(u.name) DESC,u.id",size_asc:"u.size ASC,u.id",size_desc:"u.size DESC,u.id"};
-  const rows=db.prepare(`SELECT u.id,u.name,u.mime_type,u.size,u.width,u.height,u.created_at,u.deleted_at,u.retained,(SELECT COUNT(*) FROM message_attachments ma WHERE ma.upload_id=u.id) AS reference_count FROM uploads u WHERE u.user_id=? ${stateSql} ${attachableSql} ${searchSql} ORDER BY ${order[sort]} LIMIT ? OFFSET ?`).all(userId,...filterArgs,pageSize,(page-1)*pageSize) as UploadRow[];
+  const rows=db.prepare(`SELECT u.id,u.name,u.mime_type,u.size,u.width,u.height,u.created_at,u.deleted_at,u.retained,(SELECT COUNT(DISTINCT m.conversation_id) FROM message_attachments ma JOIN messages m ON m.id=ma.message_id JOIN conversations c ON c.id=m.conversation_id WHERE ma.upload_id=u.id AND c.deleted_at IS NULL) AS reference_count FROM uploads u WHERE u.user_id=? ${stateSql} ${attachableSql} ${searchSql} ORDER BY ${order[sort]} LIMIT ? OFFSET ?`).all(userId,...filterArgs,pageSize,(page-1)*pageSize) as UploadRow[];
   const files:StorageFile[]=rows.map(row=>({...toAttachment(row),createdAt:row.created_at!,referenceCount:row.reference_count||0,retained:row.retained===1,...(row.deleted_at?{deletedAt:row.deleted_at}:{})}));
   return{quotaBytes:account.quotaBytes,usedBytes:account.usedBytes,trashQuotaBytes:account.trashQuotaBytes,trashUsedBytes:account.trashUsedBytes,total,page,pageSize,pageCount,sort,query,state,files};
 }
@@ -354,7 +354,7 @@ export async function moveUploadsToTrash(ids: string[], userId: string) {
   if (!unique.length || unique.length > 100) throw new Error("Select 1 to 100 files.");
   unique.forEach(assertId); const placeholders = unique.map(() => "?").join(",");
   return db.transaction(() => {
-    const rows = db.prepare(`SELECT u.id,(SELECT COUNT(*) FROM message_attachments ma WHERE ma.upload_id=u.id) AS reference_count FROM uploads u WHERE u.user_id=? AND u.deleted_at IS NULL AND u.id IN (${placeholders})`).all(userId, ...unique) as Array<{id:string;reference_count:number}>;
+    const rows = db.prepare(`SELECT u.id,(SELECT COUNT(DISTINCT m.conversation_id) FROM message_attachments ma JOIN messages m ON m.id=ma.message_id JOIN conversations c ON c.id=m.conversation_id WHERE ma.upload_id=u.id AND c.deleted_at IS NULL) AS reference_count FROM uploads u WHERE u.user_id=? AND u.deleted_at IS NULL AND u.id IN (${placeholders})`).all(userId, ...unique) as Array<{id:string;reference_count:number}>;
     if (rows.length !== unique.length) throw Object.assign(new Error("One or more selected files were not found."), { code: "ENOENT" });
     if (rows.some(row => row.reference_count > 0)) throw new Error("Files attached to saved conversations cannot be deleted.");
     const stamp = new Date().toISOString();

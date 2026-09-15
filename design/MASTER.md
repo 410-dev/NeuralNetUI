@@ -108,7 +108,10 @@
 - Keep the tool-limit validation note visibly inside the Tool and file limits section, name that scope in the copy, and separate the following Storage management heading with deliberate padding. Storage management descriptions place each sentence on a new semantic line while still allowing normal responsive wrapping within a sentence.
 - User management opens as a dedicated modal with live search and 10-account pages. Its compact account rows show active storage and trash usage separately; quota editing stays in the per-user modal.
 - Personal storage offers direct multi-file upload and Markdown/text creation above search. Keep uploads below proxy request limits with resumable-sized chunks, show aggregate progress, and register a file only after complete server-side verification.
-- The ordinary personal browser shows five files per page. A trash icon performs an immediate soft delete, while a long press enters check-marked multi-selection for an atomic bulk soft delete. Files referenced by saved chats remain protected. The creation modal uses the shared pill fields and SelectMenu; Markdown editing provides an explicit rendered-preview tab before saving.
+- The personal browser always uses two columns and chooses three to seven visible rows from the viewport height without becoming a full-height modal. Enter multi-selection through an explicit action; while selecting, replace each row's download/delete actions with one vertically centred circular check control. The attachment picker uses the same check control instead of a text Select action.
+- Keep delete controls available for files used by active chats. Deleting one opens a related-chat dialog where titles navigate to their chats, circular checks select chats for bulk deletion, and one explicit destructive action can delete every related chat together with the file. Ordinary and related-chat deletion remain recoverable soft deletes.
+- Put a small indented Manage chats action at the bottom of the sidebar history scroller. Its dedicated modal searches titles, IDs, and content, filters by hours or days since last activity, and supports page selection, selected deletion, and deletion of every chat matching the visible filters.
+- The creation modal uses the shared pill fields and SelectMenu; Markdown editing provides an explicit rendered-preview tab before saving.
 
 ## Composer
 
@@ -165,7 +168,7 @@
 
 - The footer offers a save only while the draft differs from the saved configuration. With nothing changed, disable the save and label the other button Close rather than Cancel — there is nothing to cancel.
 - Never cap a model's output with a hidden constant. Give the limit a setting whose zero means "use whatever the context window leaves".
-- Keep image preprocessing inside each model card under a compact Vision group. A single switch chooses stored originals versus a proportional long-edge limit; reveal the numeric pixel limit only for bounded mode and state that neither choice mutates the stored original.
+- Keep image preprocessing as a simple ungrouped Image input row inside each model card. Place the long-edge pixel input immediately left of its switch; the switch enables or disables that input, and a disabled limit means stored originals are sent. State that neither choice mutates the stored original.
 
 ## Experimental features
 

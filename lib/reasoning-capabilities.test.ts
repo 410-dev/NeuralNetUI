@@ -20,12 +20,13 @@ test("explicit metadata overrides family fallbacks, including disabled and empty
 });
 test("aliases follow base capabilities and preserve custom prompt content and ownership", () => {
   const custom = { id: "custom", name: "Custom", kind: "custom" as const, effort: "high", systemPrompt: "Keep me", systemPromptMode: "replace" as const, ownerId: "owner" };
-  const alias = { ...model(["high"]), isAlias: true, reasoningPresets: [custom] };
-  const inherited = inheritReasoning(alias, model(["off", "on"]));
+  const alias = { ...model(["high"]), isAlias: true, visionImageMode:"max-resolution" as const, visionMaxEdgePixels:640, reasoningPresets: [custom] };
+  const inherited = inheritReasoning(alias, { ...model(["off", "on"]), visionImageMode:"original" as const, visionMaxEdgePixels:2048 });
   assert.deepEqual(inherited.reasoningEfforts, ["off", "on"]);
   assert.deepEqual(inherited.reasoningPresets.find(p => p.id === "custom"), custom);
   assert.equal(reasoningEffort(inherited, custom), undefined);
   assert.equal(reasoningEffort(inherited, inherited.reasoningPresets.find(p => p.effort === "off")), "none");
+  assert.deepEqual({mode:inherited.visionImageMode,pixels:inherited.visionMaxEdgePixels},{mode:"max-resolution",pixels:640});
   assert.equal(inheritReasoning(alias, undefined).reasoningSupported, false);
 });
 test("unsupported models have Default and never send unadvertised effort", () => {

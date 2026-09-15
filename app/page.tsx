@@ -4,6 +4,7 @@ import { contextUsage, type ContextUsage } from "../lib/context-usage";
 import { HarnessSettingsPanel, StorageSettingsPanel, TextDialog } from "./harness-settings";
 import { HistorySearch } from "./history-search";
 import { StorageManager } from "./storage-manager";
+import { ChatManager } from "./chat-manager";
 import { AdminConversationsDialog, AdminFilesDialog } from "./admin-user-audit";
 import { ImageLightbox } from "./image-lightbox";
 import { StorageUsageMeter } from "./storage-usage-meter";
@@ -111,7 +112,7 @@ const translations = {
     toolsSettings: "Harness settings", toolsSettingsTitle: "Tool and file limits", toolsSettingsDesc: "Control tool iterations, interactive tools, downloads, PDF processing, and temporary upload cleanup.", maxToolRounds: "Maximum tool rounds", maxBrowserTabs: "Browser tabs per session", maxMultipleChoiceQuestions: "Questions per multiple-choice call", maxAttachments: "Attachments per message", textDownloadLimit: "Text download limit (MB)", textCharacterLimit: "Text characters sent to model", imageDownloadLimit: "Image URL limit (MB)", imageUploadLimit: "Image upload limit (MB)", pdfSizeLimit: "PDF limit (MB)", pdfPageLimit: "PDF pages processed", pdfTextLimit: "PDF characters sent to model", pdfVisionPages: "Scanned PDF vision pages", pdfTimeout: "PDF processing timeout (seconds)", temporaryFileTtl: "Temporary file cleanup (minutes)", orphanTtl: "Unattached upload retention (hours)", toolLoopGroup: "Tool loop", interactiveToolGroup: "Interactive tools", attachmentGroup: "Attachments and downloads", pdfGroup: "PDF processing", cleanupGroup: "Temporary file cleanup", toolsSafetyHelp: "Tool and file limit values are validated against server safety boundaries when saved.",
     userManagement: "User management", userManagementDesc: "Administrators can create accounts, change display names and roles, and delete accounts.", username: "Username", password: "Password", role: "Role", standardUser: "User", administrator: "Administrator", addUser: "Add user", saveDisplayName: "Save user changes", deleteUser: "Delete user", confirmDeleteUser: "Permanently delete this user and all of their data?", userDeleted: "User deleted.", publicModel: "Public custom model", publicModelDesc: "Allow every user to use this custom model.",
     contextWindow: "Context window", contextWindowHelp: "Set a per-model fallback limit. When the API also advertises a limit, the smaller value is used.", aliasContextWindowHelp: "Leave empty to inherit the base model. A value here overrides the base model setting while respecting the server limit.", inheritedContextWindow: "Inherited from base model", apiContextWindow: "API-detected context", effectiveContextWindow: "Effective maximum", contextUsed: "context tokens used", contextUnavailable: "Set this model's context window in Settings.",
-    visionSettings: "Vision", visionSettingsDesc: "Control only the image copy sent to this model. Stored originals are never changed.", visionUseOriginal: "Use original images", visionUseOriginalDesc: "Send the stored image without model-context downscaling.", visionMaxResolution: "Maximum long edge (px)", visionMaxResolutionHelp: "When original mode is off, images are proportionally reduced to this long-edge limit before inference.",
+    visionSettings: "Image input", visionSettingsDesc: "Limit the image copy sent to this model. Stored originals are never changed.", visionUseOriginal: "Limit image resolution", visionUseOriginalDesc: "Turn on to proportionally reduce images before inference; turn off to use originals.", visionMaxResolution: "Maximum long edge (px)", visionMaxResolutionHelp: "Images are proportionally reduced to this long-edge limit before inference.",
     loginAccentTitle: "Sign-in screen accent", loginAccentHelp: "Accent for the sign-in screen, shared by everyone. Each account's own accent applies once they are signed in.",
     applyToEveryone: "Apply to everyone", applyingToEveryone: "Applying…", appliedToEveryone: "Applied to every account.",
     servedReasoningLocked: "Reasoning templates for served models are an administrator's to change. Add a custom model to keep templates of your own.",
@@ -158,7 +159,7 @@ const translations = {
     toolsSettings: "하네스 설정", toolsSettingsTitle: "도구 및 파일 제한", toolsSettingsDesc: "도구 반복, 인터랙티브 도구, 다운로드, PDF 처리 및 임시 업로드 정리 기준을 설정합니다.", maxToolRounds: "최대 도구 호출 라운드", maxBrowserTabs: "브라우저 세션당 탭 수", maxMultipleChoiceQuestions: "다중 선택 호출당 질문 수", maxAttachments: "메시지당 첨부 개수", textDownloadLimit: "텍스트 다운로드 제한 (MB)", textCharacterLimit: "모델에 전달할 텍스트 글자 수", imageDownloadLimit: "이미지 URL 제한 (MB)", imageUploadLimit: "이미지 업로드 제한 (MB)", pdfSizeLimit: "PDF 제한 (MB)", pdfPageLimit: "처리할 PDF 페이지 수", pdfTextLimit: "모델에 전달할 PDF 글자 수", pdfVisionPages: "스캔 PDF 비전 페이지 수", pdfTimeout: "PDF 처리 제한 시간 (초)", temporaryFileTtl: "임시 파일 정리 시간 (분)", orphanTtl: "미첨부 업로드 보관 시간", toolLoopGroup: "도구 반복", interactiveToolGroup: "인터랙티브 도구", attachmentGroup: "첨부 및 다운로드", pdfGroup: "PDF 처리", cleanupGroup: "임시 파일 정리", toolsSafetyHelp: "도구 및 파일 제한 값은 저장 시 서버의 안전 범위 안에서 검증됩니다.",
     userManagement: "사용자 관리", userManagementDesc: "관리자는 계정을 만들고, 다른 사용자의 표시 이름과 권한을 변경하거나 계정을 삭제할 수 있습니다.", username: "사용자 이름", password: "비밀번호", role: "역할", standardUser: "일반 사용자", administrator: "관리자", addUser: "사용자 추가", saveDisplayName: "사용자 변경 저장", deleteUser: "사용자 삭제", confirmDeleteUser: "이 사용자와 모든 데이터를 영구적으로 삭제할까요?", userDeleted: "사용자를 삭제했습니다.", publicModel: "커스텀 모델 공개", publicModelDesc: "모든 사용자가 이 커스텀 모델을 사용할 수 있습니다.",
     contextWindow: "컨텍스트 윈도우", contextWindowHelp: "모델별 대체 한도를 설정합니다. API도 한도를 반환하면 둘 중 작은 값을 사용합니다.", aliasContextWindowHelp: "비워 두면 기반 모델 값을 상속합니다. 값을 입력하면 서버 한도 안에서 기반 모델 설정을 오버라이드합니다.", inheritedContextWindow: "기반 모델에서 상속", apiContextWindow: "API 감지 컨텍스트", effectiveContextWindow: "적용 최대값", contextUsed: "컨텍스트 토큰 사용", contextUnavailable: "설정에서 이 모델의 컨텍스트 윈도우를 지정해 주세요.",
-    visionSettings: "Vision", visionSettingsDesc: "이 모델에 전달되는 이미지 사본만 설정합니다. 저장된 원본은 변경하지 않습니다.", visionUseOriginal: "원본 이미지 사용", visionUseOriginalDesc: "모델 컨텍스트용 축소 없이 저장된 이미지를 그대로 전송합니다.", visionMaxResolution: "긴 변 최대 해상도 (px)", visionMaxResolutionHelp: "원본 모드가 꺼져 있으면 추론 전에 비율을 유지한 채 이 긴 변 한도까지 축소합니다.",
+    visionSettings: "이미지 입력", visionSettingsDesc: "이 모델에 전달되는 이미지 사본의 해상도만 제한합니다. 저장된 원본은 변경하지 않습니다.", visionUseOriginal: "이미지 해상도 제한", visionUseOriginalDesc: "켜면 추론 전에 이미지를 비율에 맞춰 축소하고, 끄면 원본을 사용합니다.", visionMaxResolution: "긴 변 최대 해상도 (px)", visionMaxResolutionHelp: "추론 전에 비율을 유지한 채 이 긴 변 한도까지 축소합니다.",
     loginAccentTitle: "로그인 화면 액센트 색상", loginAccentHelp: "로그인 화면에 모두에게 같이 적용되는 색상입니다. 계정별 액센트 색상은 로그인 후에 적용됩니다.",
     applyToEveryone: "전체 적용", applyingToEveryone: "적용하는 중…", appliedToEveryone: "모든 계정에 적용했습니다.",
     servedReasoningLocked: "서빙 모델의 추론 템플릿은 관리자만 변경할 수 있습니다. 직접 관리하려면 커스텀 모델을 추가하세요.",
@@ -273,6 +274,7 @@ export default function Home() {
   const [searching, setSearching] = useState(false);
   const [storageOpen, setStorageOpen] = useState(false);
   const [storagePickerOpen, setStoragePickerOpen] = useState(false);
+  const [chatManagerOpen, setChatManagerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [renameTarget, setRenameTarget] = useState<ConversationSummary | null>(null);
   const [temporaryMode, setTemporaryMode] = useState(false);
@@ -632,7 +634,7 @@ export default function Home() {
     setConfig(structuredClone(emptyConfig)); selectedModelIdRef.current = ""; setSelectedModelId(""); setSelectedPresetId("");
     setConversation(null); setMessages([]); setHistories([]); setDraft(""); setDraftAttachments([]); setIsGenerating(false); setPendingWait(null); setError("");
     // The settings preview holds the departing account's accent; drop it so the sign-in screen shows its own.
-    setSearching(false); setExportOpen(false); setMobileOpen(false); setAccentPreview("");
+    setSearching(false); setStorageOpen(false); setStoragePickerOpen(false); setChatManagerOpen(false); setExportOpen(false); setMobileOpen(false); setAccentPreview("");
   }
 
   async function loadConversation(id: string, navigate = true, allowNew = false, selectedBranchId?: string) {
@@ -678,6 +680,12 @@ export default function Home() {
       if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || c.deleteAllChats); }
       setHistories([]);
     } catch (caught) { setError(caught instanceof Error ? caught.message : c.deleteAllChats); }
+  }
+
+  async function managedChatsChanged() {
+    const activeId=conversation?.id;const response=await fetch("/api/conversations",{cache:"no-store"});const body=await response.json().catch(()=>({}));if(!response.ok)return;
+    const next:ConversationSummary[]=body.conversations||[];setHistories(next);
+    if(activeId&&!next.some(item=>item.id===activeId)){await fetch(`/api/chat/${activeId}`,{method:"DELETE"}).catch(()=>undefined);newChat();}
   }
 
   async function switchBranch(branchId: string) {
@@ -1018,6 +1026,7 @@ export default function Home() {
           <div className="history-list">
             {visibleHistory.map((item) => <div className={`history-row ${item.id === conversation?.id ? "active" : ""}`} key={item.id}><button className="history-item" onClick={() => loadConversation(item.id)}><span>{item.title}</span></button><div className="history-row-actions"><button className="history-rename" onClick={() => setRenameTarget(item)} title={locale === "ko" ? "제목 변경" : "Rename chat"} aria-label={`${locale === "ko" ? "제목 변경" : "Rename chat"}: ${item.title}`}><Pencil size={13}/></button><button className="history-delete" onClick={() => void deleteHistory(item.id)} title={c.deleteChat} aria-label={`${c.deleteChat}: ${item.title}`}><Trash2 size={13} /></button></div></div>)}
             {!visibleHistory.length && <p className="history-empty">{c.historyEmpty}</p>}
+            <button className="chat-manager-launch" onClick={()=>{setChatManagerOpen(true);setMobileOpen(false);}}><SlidersHorizontal size={13}/><span>{locale==="ko"?"채팅 관리하기":"Manage chats"}</span></button>
           </div>
         </section>
         <button className="profile-card" title={c.settings} aria-label={c.settings} onClick={() => { setSettingsOpen(true); setMobileOpen(false); }}><span className="avatar"><UserRound size={19} /></span><span><strong>{config.profile.name}</strong><small>{c.settingsConnections}</small></span><Settings size={18} /></button>
@@ -1058,8 +1067,14 @@ export default function Home() {
       {browserEnabled && browserViewOpen && <BrowserSplitView c={c} conversationId={conversation?.id} pendingHandoff={pendingBrowserHandoff} onComplete={async () => { if (!pendingBrowserHandoff) return false; return submitToolInput(pendingBrowserHandoff.id, { completed: true }); }} onClose={() => setBrowserViewOpen(false)} />}
 
       {searching && <HistorySearch ko={locale === "ko"} onClose={() => setSearching(false)} onSelect={(id, branchId) => { setSearching(false); void loadConversation(id, true, false, branchId); }} />}
-      {storageOpen && <StorageManager ko={locale === "ko"} onClose={() => setStorageOpen(false)} />}
+      {storageOpen && <StorageManager ko={locale === "ko"} onClose={() => setStorageOpen(false)} onOpenConversation={id=>void loadConversation(id)} onConversationsChanged={()=>void managedChatsChanged()} />}
       {storagePickerOpen && <StorageManager ko={locale === "ko"} selectMode maxSelectable={Math.max(0,config.toolSettings.maxAttachmentsPerMessage-draftAttachments.length)} onSelect={attachStoredFiles} onClose={() => setStoragePickerOpen(false)} />}
+      {chatManagerOpen&&<ChatManager
+        ko={locale==="ko"}
+        onClose={()=>setChatManagerOpen(false)}
+        onOpenConversation={id=>{setChatManagerOpen(false);void loadConversation(id);}}
+        onDeleted={()=>void managedChatsChanged()}
+      />}
       {renameTarget && <TextDialog title={locale === "ko" ? "채팅 제목 변경" : "Rename chat"} value={renameTarget.title} onClose={() => setRenameTarget(null)} onSave={title => { const target = renameTarget; void (async () => { try { const response = await fetch(`/api/conversations/${target.id}`, {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({title})}); if (!response.ok) throw new Error(locale === "ko" ? "제목 변경 실패" : "Rename failed"); setConversation(current => current?.id === target.id ? {...current,title} : current); await refreshHistories(); setRenameTarget(null); } catch (caught) { setError(caught instanceof Error ? caught.message : "Rename failed"); setRenameTarget(null); } })(); }} />}
       {settingsOpen && <SettingsPanel initial={config} onAccentPreview={setAccentPreview} onClose={() => { setSettingsOpen(false); setAccentPreview(""); }} onLogout={async () => { resetWorkspaceForAuthChange(); await fetch("/api/auth/logout", { method: "POST" }); setSettingsOpen(false); setAuth(await fetch("/api/auth/status").then((response) => response.json()).catch(() => ({ setupRequired: false, authenticated: false, user: null }))); }} onSaved={(next) => { setConfig(next); setSendReasoning(next.preferences.sendReasoningToModel); const visible = next.models.filter((item) => item.visible !== false); const model = visible.find((item) => item.id === selectedModelIdRef.current) || visible.find((item) => item.id === next.preferences.defaultModelId) || visible[0]; const preset = model?.reasoningPresets.find((item) => item.id === selectedPresetId) || model?.reasoningPresets.find((item) => item.id === next.preferences.defaultReasoningPresetId) || model?.reasoningPresets[0]; selectedModelIdRef.current = model?.id || ""; setSelectedModelId(model?.id || ""); setSelectedPresetId(preset?.id || ""); }} />}
       {exportOpen && conversation && <ExportDialog c={c} conversation={conversation} initialIncludeReasoning={config.preferences.exportReasoning} onClose={() => setExportOpen(false)} onPreference={(value) => { const next = { ...config, preferences: { ...config.preferences, exportReasoning: value } }; setConfig(next); fetch("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) }); }} />}
@@ -1959,12 +1974,7 @@ function ModelSettings({ c, draft, setDraft, activeModelId, setActiveModelId, ac
         <label className="field"><span>{activeModel.isAlias ? c.baseModel : c.servedIdentifier}</span>{activeModel.isAlias ? <SelectMenu label={c.baseModel} value={activeModel.sourceModel} options={draft.models.filter((model) => !model.isAlias && model.visible !== false).map((model) => ({ value: model.sourceModel, label: model.name, detail: draft.preferences.showModelIdentifiers !== false ? model.sourceModel : undefined }))} onChange={(value) => { const base = draft.models.find((model) => !model.isAlias && model.sourceModel === value); updateModel({ sourceModel: value, connectionId: base?.connectionId }); }} /> : <input value={activeModel.sourceModel} onChange={(event) => updateModel({ sourceModel: event.target.value })} />}</label>
         <label className="field context-window-field"><span>{c.contextWindow}</span><input type="number" min={1} step={1} inputMode="numeric" value={activeModel.contextWindowTokens ?? ""} onChange={(event) => setContextWindow(event.target.value)} placeholder={effectiveContext ? String(effectiveContext) : "131072"} /><small>{activeModel.isAlias ? c.aliasContextWindowHelp : c.contextWindowHelp}</small>{inheritedContext ? <small>{c.inheritedContextWindow}: {formatTokens(inheritedContext, draft.preferences.language)}</small> : null}{advertisedContext ? <small>{c.apiContextWindow}: {formatTokens(advertisedContext, draft.preferences.language)}</small> : null}{effectiveContext ? <small>{c.effectiveContextWindow}: {formatTokens(effectiveContext, draft.preferences.language)}</small> : null}</label>
         <label className="field"><span>{c.description}</span><input value={activeModel.description || ""} onChange={(event) => updateModel({ description: event.target.value })} /></label>
-        <div className="settings-group model-vision-settings">
-          <h4>{c.visionSettings}</h4>
-          <p>{c.visionSettingsDesc}</p>
-          <div className="model-visibility-row"><div><strong>{c.visionUseOriginal}</strong><small>{c.visionUseOriginalDesc}</small></div><button role="switch" aria-label={c.visionUseOriginal} aria-checked={activeModel.visionImageMode !== "max-resolution"} className={`toggle ${activeModel.visionImageMode !== "max-resolution" ? "on" : ""}`} onClick={() => updateModel({ visionImageMode: activeModel.visionImageMode === "max-resolution" ? "original" : "max-resolution" })}><i /></button></div>
-          {activeModel.visionImageMode === "max-resolution" && <label className="field"><span>{c.visionMaxResolution}</span><input type="number" min={128} max={8192} step={1} inputMode="numeric" value={activeModel.visionMaxEdgePixels ?? 1024} onChange={(event) => setVisionMaxEdge(event.target.value)} /><small>{c.visionMaxResolutionHelp}</small></label>}
-        </div>
+        <div className="model-image-input-row"><div><strong>{c.visionSettings}</strong><small>{c.visionSettingsDesc}</small></div><label><span>{c.visionMaxResolution}</span><input type="number" min={128} max={8192} step={1} inputMode="numeric" disabled={activeModel.visionImageMode !== "max-resolution"} value={activeModel.visionMaxEdgePixels ?? 1024} onChange={(event) => setVisionMaxEdge(event.target.value)} title={c.visionMaxResolutionHelp}/></label><button role="switch" aria-label={c.visionUseOriginal} aria-checked={activeModel.visionImageMode === "max-resolution"} className={`toggle ${activeModel.visionImageMode === "max-resolution" ? "on" : ""}`} onClick={() => updateModel({ visionImageMode: activeModel.visionImageMode === "max-resolution" ? "original" : "max-resolution" })} title={c.visionUseOriginalDesc}><i /></button></div>
         <label className="field"><span>{c.systemPrompt}</span><textarea rows={5} value={activeModel.systemPrompt || ""} onChange={(event) => updateModel({ systemPrompt: event.target.value })} placeholder={c.systemPromptPlaceholder} /></label>
         {activeModel.isAlias && <button className="danger-action" onClick={removeModel}><Trash2 size={15} /> {c.deleteAlias}</button>}
       </div> : <EmptyState text={c.noModel} />}</div>

@@ -212,20 +212,80 @@ export async function listConversations(userId: string): Promise<ConversationSum
 
 export async function listManagedConversationIds(userId:string){await ensureLegacyConversationsMigrated(userId);return(db.prepare("SELECT id FROM conversations WHERE user_id=? AND temporary=0 ORDER BY updated_at DESC").all(userId) as Array<{id:string}>).map(row=>row.id);}
 
-export async function listConversationsPage(userId:string,input:{page?:number;pageSize?:number;query?:string;state?:"all"|"active"|"deleted"}={}){
+export async function listConversationsPage(userId:string,input:{page?:number;pageSize?:number;query?:string;state?:"all"|"active"|"deleted";inactiveHours?:number}={}){
   await ensureLegacyConversationsMigrated(userId);
   const query=String(input.query||"").trim().slice(0,200);const state=input.state==="active"||input.state==="deleted"?input.state:"all";
   const stateSql=state==="active"?"AND c.deleted_at IS NULL":state==="deleted"?"AND c.deleted_at IS NOT NULL":"";
+  const inactiveHours=Number.isFinite(input.inactiveHours)&&Number(input.inactiveHours)>0?Math.min(24*365*20,Number(input.inactiveHours)):0;
+  const inactiveSql=inactiveHours?"AND c.updated_at <= ?":"";const inactiveArgs=inactiveHours?[new Date(Date.now()-inactiveHours*3600_000).toISOString()]:[];
   const searchSql=query?"AND (instr(lower(c.id),lower(?))>0 OR instr(lower(c.title),lower(?))>0 OR EXISTS(SELECT 1 FROM branches sb JOIN branch_messages sbm ON sbm.branch_id=sb.id JOIN messages sm ON sm.id=sbm.message_id WHERE sb.conversation_id=c.id AND instr(lower(sm.content),lower(?))>0))":"";
-  const searchArgs=query?[query,query,query]:[];const total=(db.prepare(`SELECT COUNT(*) AS total FROM conversations c WHERE c.user_id = ? AND c.temporary = 0 ${stateSql} ${searchSql}`).get(userId,...searchArgs) as {total:number}).total;
-  const pageSize=Math.max(1,Math.min(10,Math.floor(input.pageSize||10)));const pageCount=Math.max(1,Math.ceil(total/pageSize));const page=Math.max(1,Math.min(pageCount,Math.floor(input.page||1)));
+  const searchArgs=query?[query,query,query]:[];const args=[...inactiveArgs,...searchArgs];const total=(db.prepare(`SELECT COUNT(*) AS total FROM conversations c WHERE c.user_id = ? AND c.temporary = 0 ${stateSql} ${inactiveSql} ${searchSql}`).get(userId,...args) as {total:number}).total;
+  const pageSize=Math.max(1,Math.min(100,Math.floor(input.pageSize||10)));const pageCount=Math.max(1,Math.ceil(total/pageSize));const page=Math.max(1,Math.min(pageCount,Math.floor(input.page||1)));
   const items=db.prepare(`
     SELECT c.id,c.title,c.active_branch_id AS activeBranchId,COUNT(b.id) AS branchCount,c.updated_at AS updatedAt,c.deleted_at AS deletedAt
     FROM conversations c LEFT JOIN branches b ON b.conversation_id=c.id
-    WHERE c.user_id=? AND c.temporary=0 ${stateSql} ${searchSql} GROUP BY c.id
+    WHERE c.user_id=? AND c.temporary=0 ${stateSql} ${inactiveSql} ${searchSql} GROUP BY c.id
     ORDER BY c.updated_at DESC,c.id LIMIT ? OFFSET ?
-  `).all(userId,...searchArgs,pageSize,(page-1)*pageSize) as Array<ConversationSummary&{deletedAt:string|null}>;
-  return{items:items.map(item=>({...item,deletedAt:item.deletedAt||undefined})),total,page,pageSize,pageCount,query,state};
+  `).all(userId,...args,pageSize,(page-1)*pageSize) as Array<ConversationSummary&{deletedAt:string|null}>;
+  return{items:items.map(item=>({...item,deletedAt:item.deletedAt||undefined})),total,page,pageSize,pageCount,query,state,inactiveHours};
+}
+
+export async function conversationsReferencingUpload(uploadId:string,userId:string){
+  await Promise.all([ensureLegacyConversationsMigrated(userId),ensureLegacyUploadsMigrated()]);
+  if(!/^[a-zA-Z0-9_-]+$/.test(uploadId))throw new Error("Invalid upload id");
+  if(!db.prepare("SELECT 1 FROM uploads WHERE id=? AND user_id=? AND deleted_at IS NULL").get(uploadId,userId))throw Object.assign(new Error("File not found."),{code:"ENOENT"});
+  return db.prepare(`
+    SELECT c.id,c.title,c.active_branch_id AS activeBranchId,COUNT(DISTINCT b.id) AS branchCount,c.updated_at AS updatedAt
+    FROM conversations c
+    JOIN messages m ON m.conversation_id=c.id
+    JOIN message_attachments ma ON ma.message_id=m.id AND ma.upload_id=?
+    LEFT JOIN branches b ON b.conversation_id=c.id
+    WHERE c.user_id=? AND c.deleted_at IS NULL
+    GROUP BY c.id ORDER BY c.updated_at DESC,c.id
+  `).all(uploadId,userId) as ConversationSummary[];
+}
+
+export async function deleteConversations(ids:string[],userId:string){
+  await ensureLegacyConversationsMigrated(userId);
+  const unique=[...new Set(ids.map(String))];
+  if(!unique.length||unique.length>5000)throw new Error("Select 1 to 5000 conversations.");
+  if(unique.some(id=>!/^[a-zA-Z0-9_-]+$/.test(id)))throw new Error("Invalid conversation id");
+  const placeholders=unique.map(()=>"?").join(",");const stamp=new Date().toISOString();
+  const deleted=db.transaction(()=>{
+    const found=(db.prepare(`SELECT id FROM conversations WHERE user_id=? AND temporary=0 AND deleted_at IS NULL AND id IN (${placeholders})`).all(userId,...unique) as Array<{id:string}>).map(row=>row.id);
+    if(found.length!==unique.length)throw Object.assign(new Error("One or more conversations were not found."),{code:"ENOENT"});
+    db.prepare(`UPDATE conversations SET deleted_at=? WHERE user_id=? AND deleted_at IS NULL AND id IN (${placeholders})`).run(stamp,userId,...unique);
+    return found;
+  })();
+  for(const id of deleted){discardChatJobs(userId,id);closeHostComputerSession(`${userId}:${id}`);}
+  return deleted;
+}
+
+export async function deleteConversationsMatching(userId:string,input:{query?:string;inactiveHours?:number}){
+  await ensureLegacyConversationsMigrated(userId);
+  const query=String(input.query||"").trim().slice(0,200);const inactiveHours=Number.isFinite(input.inactiveHours)&&Number(input.inactiveHours)>0?Math.min(24*365*20,Number(input.inactiveHours)):0;
+  const inactiveSql=inactiveHours?"AND c.updated_at <= ?":"";const inactiveArgs=inactiveHours?[new Date(Date.now()-inactiveHours*3600_000).toISOString()]:[];
+  const searchSql=query?"AND (instr(lower(c.id),lower(?))>0 OR instr(lower(c.title),lower(?))>0 OR EXISTS(SELECT 1 FROM branches sb JOIN branch_messages sbm ON sbm.branch_id=sb.id JOIN messages sm ON sm.id=sbm.message_id WHERE sb.conversation_id=c.id AND instr(lower(sm.content),lower(?))>0))":"";
+  const searchArgs=query?[query,query,query]:[];
+  const ids=(db.prepare(`SELECT c.id FROM conversations c WHERE c.user_id=? AND c.temporary=0 AND c.deleted_at IS NULL ${inactiveSql} ${searchSql} ORDER BY c.updated_at`).all(userId,...inactiveArgs,...searchArgs) as Array<{id:string}>).map(row=>row.id);
+  return ids.length?deleteConversations(ids,userId):[];
+}
+
+export async function deleteReferencedConversationsAndUpload(uploadId:string,conversationIds:string[],userId:string){
+  await Promise.all([ensureLegacyConversationsMigrated(userId),ensureLegacyUploadsMigrated()]);
+  if(!/^[a-zA-Z0-9_-]+$/.test(uploadId))throw new Error("Invalid upload id");
+  const unique=[...new Set(conversationIds.map(String))];if(unique.some(id=>!/^[a-zA-Z0-9_-]+$/.test(id)))throw new Error("Invalid conversation id");
+  const stamp=new Date().toISOString();
+  const deleted=db.transaction(()=>{
+    if(!db.prepare("SELECT 1 FROM uploads WHERE id=? AND user_id=? AND deleted_at IS NULL").get(uploadId,userId))throw Object.assign(new Error("File not found."),{code:"ENOENT"});
+    const referenced=(db.prepare(`SELECT DISTINCT c.id FROM conversations c JOIN messages m ON m.conversation_id=c.id JOIN message_attachments ma ON ma.message_id=m.id WHERE ma.upload_id=? AND c.user_id=? AND c.deleted_at IS NULL ORDER BY c.id`).all(uploadId,userId) as Array<{id:string}>).map(row=>row.id);
+    if(referenced.length!==unique.length||referenced.some(id=>!unique.includes(id)))throw new Error("Every active conversation using this file must be selected.");
+    if(unique.length){const placeholders=unique.map(()=>"?").join(",");db.prepare(`UPDATE conversations SET deleted_at=? WHERE user_id=? AND deleted_at IS NULL AND id IN (${placeholders})`).run(stamp,userId,...unique);}
+    db.prepare("UPDATE uploads SET deleted_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL").run(stamp,uploadId,userId);
+    return referenced;
+  })();
+  for(const id of deleted){discardChatJobs(userId,id);closeHostComputerSession(`${userId}:${id}`);}
+  return{deletedConversations:deleted.length,deletedFile:true};
 }
 
 type ConversationRow = {
