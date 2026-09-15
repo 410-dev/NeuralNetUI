@@ -165,6 +165,7 @@
 
 - The footer offers a save only while the draft differs from the saved configuration. With nothing changed, disable the save and label the other button Close rather than Cancel — there is nothing to cancel.
 - Never cap a model's output with a hidden constant. Give the limit a setting whose zero means "use whatever the context window leaves".
+- Keep image preprocessing inside each model card under a compact Vision group. A single switch chooses stored originals versus a proportional long-edge limit; reveal the numeric pixel limit only for bounded mode and state that neither choice mutates the stored original.
 
 ## Experimental features
 

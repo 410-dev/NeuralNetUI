@@ -13,6 +13,9 @@
 
     <Property Id="ACCESS_MODE" Value="lan-and-tailscale" Secure="yes" />
     <Property Id="APP_PORT" Value="65500" Secure="yes" />
+    <!-- Never initiate or prompt for a system restart, including during same-version upgrades. -->
+    <Property Id="REBOOT" Value="ReallySuppress" Secure="yes" />
+    <Property Id="REBOOTPROMPT" Value="Suppress" Secure="yes" />
     <Launch Condition="Installed OR (APP_PORT &gt;= 1 AND APP_PORT &lt;= 65535)"
             Message="The listening port must be between 1 and 65535." />
 

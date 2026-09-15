@@ -23,6 +23,8 @@ const modelSchema = z.object({
   reasoningPresets: z.array(presetSchema),
   contextWindowTokens: z.number().int().positive().optional(),
   apiContextWindowTokens: z.number().int().positive().optional(),
+  visionImageMode: z.enum(["original", "max-resolution"]).optional(),
+  visionMaxEdgePixels: z.number().int().min(128).max(8192).optional(),
   isPublic: z.boolean().optional(),
 }).strict();
 

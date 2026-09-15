@@ -60,6 +60,10 @@ export interface ModelConfig {
   contextWindowTokens?: number;
   /** Context limit advertised by the OpenAI-compatible model API. */
   apiContextWindowTokens?: number;
+  /** Whether stored image originals or bounded model-context derivatives are sent. */
+  visionImageMode?: "original" | "max-resolution";
+  /** Long-edge pixel limit used only when visionImageMode is max-resolution. */
+  visionMaxEdgePixels?: number;
   ownerId?: string;
   isPublic?: boolean;
   /** Connection that serves this model. Aliases inherit their base model connection. */

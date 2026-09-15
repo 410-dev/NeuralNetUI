@@ -3,14 +3,14 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { assertUploadSignature, extractPdf, isSupportedUploadMimeType, pdfModelContent, sniffRasterMimeType, type ModelContentPart, type PdfExtraction } from "./document-processing.ts";
-import type { StorageFile, StoredAttachment, ToolSettings } from "./types.ts";
+import type { ModelConfig, StorageFile, StoredAttachment, ToolSettings } from "./types.ts";
 import { completeStorageMigration, dataDir, db, storageMigrationCompleted } from "./database.ts";
+import { resolvedVisionSettings } from "./vision-settings.ts";
 
 const uploadsDir = path.join(dataDir, "uploads");
 const legacyMigrationName = "legacy-uploads-v1";
 let legacyMigration: Promise<void> | undefined;
 const modelImageJobs = new Map<string, Promise<string>>();
-const MODEL_IMAGE_MAX_SIDE = 1600;
 const FILE_MIME_TYPES:Record<string,string>={
   ".txt":"text/plain", ".md":"text/markdown", ".csv":"text/csv", ".tsv":"text/tab-separated-values",
   ".json":"application/json", ".xml":"application/xml", ".yaml":"application/yaml", ".yml":"application/yaml",
@@ -29,10 +29,16 @@ const pathsFor = (id: string) => {
   return {
     original: path.join(uploadsDir, `${id}.original`),
     thumbnail: path.join(uploadsDir, `${id}.thumbnail`),
-    modelImage: path.join(uploadsDir, `${id}.model.jpg`),
+    legacyModelImage: path.join(uploadsDir, `${id}.model.jpg`),
+    previousModelImage: path.join(uploadsDir, `${id}.model-v2.jpg`),
     extraction: path.join(uploadsDir, `${id}.pdf.json`),
     metadata: path.join(uploadsDir, `${id}.json`),
   };
+};
+
+const modelImagePath = (id: string, maxEdgePixels: number) => {
+  assertId(id);
+  return path.join(uploadsDir, `${id}.model-v3-${maxEdgePixels}.jpg`);
 };
 
 type UploadRow = {
@@ -297,22 +303,26 @@ export async function readUploadDataUrl(id: string, userId: string) {
   return `data:${metadata.mimeType};base64,${data.toString("base64")}`;
 }
 
-export async function readUploadModelContent(id: string, userId: string, settings: ToolSettings): Promise<ModelContentPart[]> {
+export async function readUploadModelContent(id: string, userId: string, settings: ToolSettings, model?: Pick<ModelConfig, "visionImageMode" | "visionMaxEdgePixels">): Promise<ModelContentPart[]> {
   const { metadata, paths } = await readUpload(id, userId);
   if (metadata.mimeType.startsWith("image/")) {
-    let job = modelImageJobs.get(id);
+    const vision = resolvedVisionSettings(model);
+    if (vision.mode === "original") return [{ type: "image_file", file_path: paths.original, mime_type: metadata.mimeType }];
+    const destination = modelImagePath(id, vision.maxEdgePixels);
+    const jobKey = `${id}:${vision.maxEdgePixels}`;
+    let job = modelImageJobs.get(jobKey);
     if (!job) {
       job = (async () => {
-        try { await fs.access(paths.modelImage); return paths.modelImage; } catch { /* Build the immutable derivative once. */ }
-        const temporary = `${paths.modelImage}.${randomUUID()}.tmp`;
+        try { await fs.access(destination); return destination; } catch { /* Build the immutable derivative once. */ }
+        const temporary = `${destination}.${randomUUID()}.tmp`;
         try {
           await sharp(paths.original, { limitInputPixels: 200_000_000, sequentialRead: true, pages: 1 }).rotate()
-            .resize({ width: MODEL_IMAGE_MAX_SIDE, height: MODEL_IMAGE_MAX_SIDE, fit: "inside", withoutEnlargement: true })
+            .resize({ width: vision.maxEdgePixels, height: vision.maxEdgePixels, fit: "inside", withoutEnlargement: true })
             .flatten({ background: "#ffffff" }).jpeg({ quality: 82, mozjpeg: true }).toFile(temporary);
-          await fs.chmod(temporary, 0o600).catch(() => undefined); await fs.rename(temporary, paths.modelImage); return paths.modelImage;
+          await fs.chmod(temporary, 0o600).catch(() => undefined); await fs.rename(temporary, destination); return destination;
         } finally { await fs.unlink(temporary).catch(() => undefined); }
-      })().finally(() => { modelImageJobs.delete(id); });
-      modelImageJobs.set(id, job);
+      })().finally(() => { modelImageJobs.delete(jobKey); });
+      modelImageJobs.set(jobKey, job);
     }
     return [{ type: "image_file", file_path: await job, mime_type: "image/jpeg" }];
   }
@@ -365,7 +375,8 @@ export async function purgeDeletedUploads(userId:string,retentionDays:number){
 
 export async function deleteUploadFiles(id: string) {
   const paths = pathsFor(id);
-  await Promise.all(Object.values(paths).map((target) => fs.unlink(target).catch((error: NodeJS.ErrnoException) => {
+  const configuredDerivatives = await fs.readdir(uploadsDir).then(files => files.filter(file => file.startsWith(`${id}.model-v3-`) && file.endsWith(".jpg")).map(file => path.join(uploadsDir, file)), () => [] as string[]);
+  await Promise.all([...Object.values(paths), ...configuredDerivatives].map((target) => fs.unlink(target).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== "ENOENT") throw error;
   })));
 }

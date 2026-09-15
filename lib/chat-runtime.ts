@@ -21,7 +21,7 @@ import { assertOwnedBrowserSession, executeBrowserTool } from "./browser-tool";
 import { deterministicHostAssessment, executeHostComputerTool, hostActionRequiresApproval, hostComputerToolDefinition, isShellHostAction, type HostRiskAssessment } from "./host-computer-tool";
 import { canUseHostComputer } from "./host-environment";
 import { executeStorageAccessTool, storageAccessToolDefinition } from "./storage-tool";
-import type { ChatWaitPhase, Conversation, HarnessSettings, MessageStep, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
+import type { ChatWaitPhase, Conversation, HarnessSettings, MessageStep, ModelConfig, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
 import type { ModelContentPart } from "./document-processing";
 import { promises as fs } from "node:fs";
 
@@ -218,12 +218,12 @@ function finishSubscribers(job: ChatJob) {
   job.subscribers.clear();
 }
 
-async function upstreamMessages(input: StartChatJobInput, userId: string, systemPrompt: string, settings: ToolSettings): Promise<UpstreamMessage[]> {
+async function upstreamMessages(input: StartChatJobInput, userId: string, systemPrompt: string, settings: ToolSettings, model: ModelConfig): Promise<UpstreamMessage[]> {
   const converted = await Promise.all(input.messages.filter((message) => message.content || message.attachments?.length || message.toolEvents?.length).map(async (message) => {
     const attachments = message.role === "user" ? message.attachments || [] : [];
     const content = attachments.length ? [
       ...(message.content ? [{ type: "text", text: message.content }] : []),
-      ...(await Promise.all(attachments.map(({ id }) => readUploadModelContent(id, userId, settings)))).flat(),
+      ...(await Promise.all(attachments.map(({ id }) => readUploadModelContent(id, userId, settings, model)))).flat(),
     ] : message.content;
     return restoreToolHistory({ role: message.role, content, toolEvents: message.toolEvents, ...(input.sendReasoning && message.role === "assistant" && message.reasoning_content ? { reasoning_content: message.reasoning_content } : {}) });
   }));
@@ -407,7 +407,7 @@ function validateQuestions(value: unknown, maximum: number) {
 
 type ToolExecution = { result: unknown; content?: ModelContentPart[] };
 
-async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings, hostPolicy: HostExecutionPolicy): Promise<ToolExecution> {
+async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings, hostPolicy: HostExecutionPolicy, model: ModelConfig): Promise<ToolExecution> {
   const args = parseArguments(call.function.arguments);
   if (call.function.name === "get_current_time" && enabled.currentTime) return { result: currentTime(job.input.clientContext?.timeZone, job.input.clientContext?.locale || "en-US") };
   if (call.function.name === "get_current_location" && enabled.location) {
@@ -433,9 +433,9 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
   if (call.function.name === "host_computer") {
     const authorization = await authorizeHostAction(job, call, args, hostPolicy);
     if (!authorization.approved) return { result: authorization.result };
-    return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args, job.userId, settings);
+    return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args, job.userId, settings, model);
   }
-  if (call.function.name === "storage_access" && enabled.storageAccess) return executeStorageAccessTool(args, job.userId, settings);
+  if (call.function.name === "storage_access" && enabled.storageAccess) return executeStorageAccessTool(args, job.userId, settings, model);
   return executeWebTool(call.function.name, call.function.arguments, enabled, settings);
 }
 
@@ -454,7 +454,7 @@ async function run(job: ChatJob) {
     const modelPrompt = model.systemPrompt?.trim() || ""; const presetPrompt = preset?.kind === "custom" ? preset.systemPrompt?.trim() || "" : "";
     let systemPrompt = modelPrompt;
     if (presetPrompt) systemPrompt = preset?.systemPromptMode === "replace" ? presetPrompt : preset?.systemPromptMode === "prepend" ? [presetPrompt, modelPrompt].filter(Boolean).join("\n\n") : [modelPrompt, presetPrompt].filter(Boolean).join("\n\n");
-    let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt, config.toolSettings);
+    let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt, config.toolSettings, model);
     const enabled: EnabledWebTools = {
       internetSearch: job.input.tools?.internetSearch === true, pageVisit: job.input.tools?.pageVisit === true,
       browser: job.input.tools?.browser === true && config.experimental?.browserTool === true,
@@ -639,7 +639,7 @@ async function run(job: ChatJob) {
         // A host action may wait for approval or run an isolated assessment model. Do not hold
         // this chat's residency lease through either operation (serial policy would self-deadlock).
         if (call.function.name === "host_computer") { releaseModel?.(); releaseModel = undefined; }
-        try { execution = await executeTool(job, call, enabled, config.toolSettings, hostPolicy); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
+        try { execution = await executeTool(job, call, enabled, config.toolSettings, hostPolicy, model); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
         catch (error) {
           if ((error as Error).name === "AbortError") throw error;
           execution = { result: { error: error instanceof Error ? error.message : "Tool execution failed." } };

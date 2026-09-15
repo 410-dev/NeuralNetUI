@@ -5,7 +5,7 @@ import path from "node:path";
 import { createConnection } from "node:net";
 import type { ModelContentPart } from "./document-processing";
 import { isHostComputerAvailable } from "./host-environment.ts";
-import type { HarnessSettings, ToolSettings } from "./types";
+import type { HarnessSettings, ModelConfig, ToolSettings } from "./types";
 import { hostPermissionForAction } from "./host-permissions.ts";
 import { readUploadModelContent, saveGeneratedImage, saveHostFile } from "./uploads.ts";
 
@@ -253,7 +253,7 @@ async function trayScreenshot() {
   });
 }
 
-export async function executeHostComputerTool(sessionKey: string, args: HostArgs, userId?: string, settings?: ToolSettings): Promise<HostToolExecution> {
+export async function executeHostComputerTool(sessionKey: string, args: HostArgs, userId?: string, settings?: ToolSettings, model?: Pick<ModelConfig, "visionImageMode" | "visionMaxEdgePixels">): Promise<HostToolExecution> {
   if (!isHostComputerAvailable()) throw new Error("The host computer tool is unavailable in a containerized environment.");
   const action = stringArg(args, "action");
   if (action === "search_files") { const root = resolvedPath(args); return { result: await searchFiles(root, stringArg(args, "query", false) || "*", Math.max(1, Math.min(500, Number(args.max_results || 100)))) }; }
@@ -267,7 +267,7 @@ export async function executeHostComputerTool(sessionKey: string, args: HostArgs
   if (action === "store_file") {
     if (!userId) throw new Error("A storage owner is required for private file storage.");
     const stored=await saveHostFile(resolvedPath(args),userId);const image=stored.metadata.mimeType.startsWith("image/");
-    const modelContent=settings&&(image||stored.metadata.mimeType==="application/pdf")?await readUploadModelContent(stored.metadata.id,userId,settings):image?[{type:"image_file" as const,file_path:stored.path,mime_type:stored.metadata.mimeType}]:[];
+    const modelContent=settings&&(image||stored.metadata.mimeType==="application/pdf")?await readUploadModelContent(stored.metadata.id,userId,settings,model):image?[{type:"image_file" as const,file_path:stored.path,mime_type:stored.metadata.mimeType}]:[];
     return{result:{stored:true,storage:"user",attachment:stored.metadata,markdown:stored.markdown,downloadUrl:`${stored.metadata.url}?download=1`,visibility:"owner-only",loadedIntoModelContext:Boolean(modelContent.length)},content:[{type:"text",text:`The host file is stored privately and available in model context. Use this exact Markdown in the user-facing answer: ${stored.markdown}`},...modelContent]};
   }
   if (action === "upload_temp") return { result: await uploadTemporary(resolvedPath(args), Math.max(1, Math.min(100, Number(args.max_downloads || 1)))) };
@@ -288,9 +288,10 @@ export async function executeHostComputerTool(sessionKey: string, args: HostArgs
     if (!userId) throw new Error("A storage owner is required for screenshots.");
     const captured = await screenshot();
     const stored = await saveGeneratedImage(captured.buffer, userId);
+    const modelContent = settings ? await readUploadModelContent(stored.metadata.id, userId, settings, model) : [{ type:"image_file" as const, file_path:stored.path, mime_type:"image/png" as const }];
     return {
       result: { screenshot:true, mimeType:"image/png", size:captured.buffer.length, source:captured.source, attachment:stored.metadata, storage:"user" },
-      content: [{ type:"text", text:`Current host-computer screenshot stored as ${stored.metadata.name}.` }, { type:"image_file", file_path:stored.path, mime_type:"image/png" }] satisfies ModelContentPart[],
+      content: [{ type:"text", text:`Current host-computer screenshot stored as ${stored.metadata.name}.` }, ...modelContent] satisfies ModelContentPart[],
     };
   }
   throw new Error(`Unknown host computer action: ${action}`);
