@@ -71,6 +71,8 @@ internal static class Program
     private sealed class TrayApplicationContext : ApplicationContext
     {
         private readonly NotifyIcon trayIcon;
+        private readonly Stream trayIconStream;
+        private readonly Icon applicationIcon;
         private readonly EventWaitHandle openEvent;
         private readonly System.Windows.Forms.Timer requestTimer;
         private readonly ToolStripMenuItem openItem;
@@ -98,9 +100,13 @@ internal static class Program
             menu.Items.Add(restartItem);
             menu.Items.Add(exitItem);
 
+            trayIconStream = typeof(Program).Assembly.GetManifestResourceStream("NeuralNetUI.Tray.neuralnetui.ico")
+                ?? throw new InvalidOperationException("NeuralNetUI 트레이 아이콘 리소스를 불러오지 못했습니다.");
+            applicationIcon = new Icon(trayIconStream);
+
             trayIcon = new NotifyIcon
             {
-                Icon = SystemIcons.Application,
+                Icon = applicationIcon,
                 Text = "NeuralNetUI",
                 ContextMenuStrip = menu,
                 Visible = true,
@@ -257,6 +263,8 @@ internal static class Program
                 requestTimer.Dispose();
                 trayIcon.Visible = false;
                 trayIcon.Dispose();
+                applicationIcon.Dispose();
+                trayIconStream.Dispose();
                 hostAgentCancellation.Dispose();
             }
             base.Dispose(disposing);

@@ -10,8 +10,12 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>NeuralNetUI.Tray</AssemblyName>
     <RootNamespace>NeuralNetUI.Tray</RootNamespace>
+    <ApplicationIcon>neuralnetui.ico</ApplicationIcon>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <DebugType>none</DebugType>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="neuralnetui.ico" LogicalName="NeuralNetUI.Tray.neuralnetui.ico" />
+  </ItemGroup>
 </Project>

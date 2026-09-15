@@ -126,7 +126,7 @@
 
 ## Product mark and greetings
 
-- One drawn mark stands for a model: a 2-3-2 node-and-edge network in `currentColor`, used in the model settings lists, settings sidebar and favicon. The chat model dropdown omits model icons and centres its selection check vertically.
+- One drawn mark stands for a model: a 2-3-2 node-and-edge network in `currentColor`, used in the model settings lists and settings sidebar. The product favicon and Windows tray use the supplied blue NeuralNetUI ring artwork. The chat model dropdown omits model icons and centres its selection check vertically.
 - Space the mark's layers so the network reads as layers rather than a cluster of touching circles: small nodes, wide gaps, and edges trimmed short of each node so the mark needs no plate behind it.
 - The idle greeting varies by time of day across seven bands with several lines each. Pick randomly on each main-screen entry, excluding the previous visible line, and hold it still while typing. Appearance settings provides expandable time bands with five editable lines per language.
 - Headings that carry Korean use `word-break: keep-all`; breaking between syllables reads as a typo.

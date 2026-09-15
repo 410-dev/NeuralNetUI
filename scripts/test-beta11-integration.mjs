@@ -100,6 +100,11 @@ try {
   page.on("response", async response => { if (/\/api\/storage\?/.test(response.url())) storageResponses.push(`${response.status()} ${await response.text().catch(() => "<unreadable>")}`); });
   page.on("dialog", dialog => dialog.dismiss());
   await page.goto(root, { waitUntil: "networkidle" });
+  const faviconHref = await page.locator('link[rel~="icon"]').first().getAttribute("href");
+  assert.match(faviconHref || "", /\/icon\.png(?:\?|$)/);
+  const faviconResponse = await page.request.get(new URL(faviconHref, root).toString());
+  assert.equal(faviconResponse.status(), 200);
+  assert.match(faviconResponse.headers()["content-type"] || "", /^image\/png\b/);
 
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "Models", exact: true }).click();
@@ -171,7 +176,7 @@ try {
   assert.equal(await managedRows.first().locator(".circle-check").getAttribute("aria-pressed"), "true", `Clicking ${firstTitle} should select it without navigation.`);
 
   await context.close();
-  console.log("PASS Beta 11: aligned image controls, unified pill styling, 10-chat pages, non-navigating selection, and balanced storage cards");
+  console.log("PASS Beta 11: custom favicon, aligned image controls, unified pill styling, 10-chat pages, non-navigating selection, and balanced storage cards");
   if (process.env.BETA11_QA_KEEP === "1") {
     console.log(`Beta 11 manual QA: ${root} | user=beta11qa | password=Beta11-Local-QA-2026`);
     await new Promise(() => {});
