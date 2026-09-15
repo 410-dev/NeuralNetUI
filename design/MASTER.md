@@ -111,6 +111,8 @@
 - The personal browser always uses two columns and chooses three to seven visible rows from the viewport height without becoming a full-height modal. Enter multi-selection through an explicit action; while selecting, replace each row's download/delete actions with one vertically centred circular check control. The attachment picker uses the same check control instead of a text Select action.
 - Keep delete controls available for files used by active chats. Deleting one opens a related-chat dialog where titles navigate to their chats, circular checks select chats for bulk deletion, and one explicit destructive action can delete every related chat together with the file. Ordinary and related-chat deletion remain recoverable soft deletes.
 - Put a small indented Manage chats action at the bottom of the sidebar history scroller. Its dedicated modal searches titles, IDs, and content, filters by hours or days since last activity, and supports page selection, selected deletion, and deletion of every chat matching the visible filters.
+- Keep Manage chats pages at ten sessions. Session rows in both Manage chats and the related-chat view are icon-free full pills; in selection mode, clicking the session body toggles selection instead of navigating away.
+- Personal-storage file cards use the shared large corner language and equal top and bottom breathing room around their previews.
 - The creation modal uses the shared pill fields and SelectMenu; Markdown editing provides an explicit rendered-preview tab before saving.
 
 ## Composer

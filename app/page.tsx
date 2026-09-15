@@ -1026,7 +1026,7 @@ export default function Home() {
           <div className="history-list">
             {visibleHistory.map((item) => <div className={`history-row ${item.id === conversation?.id ? "active" : ""}`} key={item.id}><button className="history-item" onClick={() => loadConversation(item.id)}><span>{item.title}</span></button><div className="history-row-actions"><button className="history-rename" onClick={() => setRenameTarget(item)} title={locale === "ko" ? "제목 변경" : "Rename chat"} aria-label={`${locale === "ko" ? "제목 변경" : "Rename chat"}: ${item.title}`}><Pencil size={13}/></button><button className="history-delete" onClick={() => void deleteHistory(item.id)} title={c.deleteChat} aria-label={`${c.deleteChat}: ${item.title}`}><Trash2 size={13} /></button></div></div>)}
             {!visibleHistory.length && <p className="history-empty">{c.historyEmpty}</p>}
-            <button className="chat-manager-launch" onClick={()=>{setChatManagerOpen(true);setMobileOpen(false);}}><SlidersHorizontal size={13}/><span>{locale==="ko"?"채팅 관리하기":"Manage chats"}</span></button>
+            <button className="chat-manager-launch" onClick={()=>{setChatManagerOpen(true);setMobileOpen(false);}}><span>{locale==="ko"?"채팅 관리하기":"Manage chats"}</span></button>
           </div>
         </section>
         <button className="profile-card" title={c.settings} aria-label={c.settings} onClick={() => { setSettingsOpen(true); setMobileOpen(false); }}><span className="avatar"><UserRound size={19} /></span><span><strong>{config.profile.name}</strong><small>{c.settingsConnections}</small></span><Settings size={18} /></button>
