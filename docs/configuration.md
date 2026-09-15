@@ -1,0 +1,80 @@
+# 설정 파일과 환경 변수
+
+NeuralNetUI의 설정은 **적용 범위**에 따라 세 곳에 나뉘어 있습니다. 어디에 무엇이 있는지 아는 것이 가장 중요합니다.
+
+| 범위 | 저장 위치 | 편집 방법 | 예 |
+| --- | --- | --- | --- |
+| 서버 프로세스 | `app-config.json` (파일) | 파일 직접 편집, 재시작 필요 | 수신 주소, 포트, 접근 범위 |
+| 워크스페이스 | SQLite `app_config` 테이블 | 설정 화면(관리자) | 연결, 모델, 도구 한도, 하네스, 저장소 기본값 |
+| 계정별 | SQLite `users` 테이블 | 설정 화면(각 사용자) | 언어, 모양, 기본 모델/추론, 표시 옵션 |
+
+예외가 하나 있습니다. `loginAppearance`(로그인 화면 액센트)는 워크스페이스 설정이지만, 로그인 전에도 읽어야 하므로 비인증 엔드포인트 `/api/auth/status`로 노출됩니다.
+
+## app-config.json
+
+서버 프로세스 자체의 설정만 담당하며, 애플리케이션 데이터는 들어 있지 않습니다.
+
+```json
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 3000,
+    "accessMode": "lan-and-tailscale"
+  }
+}
+```
+
+| 키 | 값 | 설명 |
+| --- | --- | --- |
+| `server.host` | IP 주소 | 수신할 인터페이스. `0.0.0.0`은 모든 인터페이스 |
+| `server.port` | 포트 번호 | HTTP 수신 포트 |
+| `server.accessMode` | `lan` \| `tailscale` \| `lan-and-tailscale` | 원격 접속 허용 범위 |
+
+`accessMode`는 Windows MSI 서비스의 원격 접속 범위와 방화벽 규칙을 정합니다. 로컬 루프백 접속은 항상 허용되고, 허용 범위 밖의 인터넷 주소는 거부됩니다.
+
+설정 파일을 바꾸지 않고 검증만 하려면:
+
+```bash
+node scripts/start-server.mjs --check
+```
+
+## 환경 변수
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `PORT` | `app-config.json` 값 | 수신 포트. 파일 값보다 우선 |
+| `NEURAL_CHAT_HOST` | `app-config.json` 값 | 수신 주소. 파일 값보다 우선 |
+| `NEURAL_CHAT_SERVER_CONFIG` | `<앱 루트>/app-config.json` | 서버 설정 파일 경로 |
+| `NEURAL_CHAT_DATA_DIR` | `<앱 루트>/data` | DB·업로드가 저장될 디렉터리 |
+| `NEURAL_CHAT_DB_PATH` | `<데이터 디렉터리>/neural-chat.sqlite3` | DB 파일만 다른 위치에 둘 때 |
+| `NEURAL_CHAT_BROWSER_EXECUTABLE` | 자동 탐지 | 브라우저 도구가 사용할 Chromium 실행 파일 |
+| `NEURAL_CHAT_PYTHON` | 자동 탐지 | 검색·PDF 처리에 사용할 Python 실행 파일 |
+| `NEURAL_CHAT_WINDOWS_SERVICE` | — | Windows 서비스로 실행 중임을 알리는 내부 표시 |
+| `OPENAI_API_KEY` | — | OpenAI 드라이버 연결에 저장된 키가 없을 때의 대체 키 |
+
+`.env.example`을 복사해 `.env`로 쓸 수 있습니다.
+
+> **API 키 처리** — 저장된 API 키는 브라우저 응답에 다시 포함되지 않습니다(`hasApiKey` 불리언만 전달). 설정의 **저장된 API 키 삭제**는 저장 시 기존 키와 환경 변수 키의 대체 사용을 함께 끕니다. 새 키를 입력하면 다시 활성화됩니다.
+
+## 데이터 저장 위치
+
+```
+data/
+├── neural-chat.sqlite3        # 사용자, 세션, 설정, 대화, 메시지, 업로드 메타데이터
+├── neural-chat.sqlite3-wal    # WAL 저널
+├── neural-chat.sqlite3-shm    # 공유 메모리
+└── uploads/                   # 원본 파일, 썸네일, PDF 텍스트 추출 캐시
+```
+
+- SQLite는 WAL 모드, 외래키 검사, 5초 busy timeout을 사용합니다.
+- 대화의 모든 브랜치와 메시지는 한 트랜잭션으로 저장됩니다.
+- DB 비대화를 막기 위해 파일 본문은 DB가 아니라 `uploads`에 보관하고, DB에는 메타데이터와 메시지 연결만 둡니다.
+- 한 데이터 디렉터리를 여러 앱 인스턴스가 **동시에 공유하면 안 됩니다**. 다중 인스턴스가 필요하면 PostgreSQL과 객체 스토리지로 이전해야 합니다.
+
+## 스키마 마이그레이션
+
+서버가 기동할 때 `schema_migrations` 테이블의 버전을 확인하고 필요한 마이그레이션만 순서대로 적용합니다. 현재 버전은 15이며, 전체 목록은 [아키텍처](architecture.md#데이터베이스)에 있습니다. 파일 기반 구버전 데이터(`data/config.json`, `data/conversations/*.json`, `data/uploads/*.json`)는 별도의 `storage_migrations` 기록으로 한 번만 이관되고 원본은 삭제되지 않습니다.
+
+## 설정 내보내기와 가져오기
+
+`설정 > 일반`에서 모델, alias, 표시 여부, Reasoning 프리셋, 기본 선택을 2-space 들여쓰기 JSON(`neuralnetui-model-settings` v1)으로 내보내고 다시 가져올 수 있습니다. 가져온 설정은 검증 후 즉시 저장되며, 소유권 메타데이터는 내보내지 않습니다.
