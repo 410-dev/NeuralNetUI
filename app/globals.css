@@ -568,6 +568,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .model-image-input-row { display:grid; grid-template-columns:minmax(0,1fr) 150px auto; align-items:center; gap:10px; margin:15px 0; padding:4px 0; }
 .model-image-input-row > div strong,.model-image-input-row > div small { display:block; }.model-image-input-row > div strong { font-size:12px; }.model-image-input-row > div small { margin-top:4px; color:var(--dim); font-size:9.5px; line-height:1.4; }
 .model-image-input-row > label { display:grid; gap:5px; }.model-image-input-row > label span { color:var(--muted); font-size:8.5px; }.model-image-input-row > label input { width:100%; height:38px; padding:0 12px; border:1px solid var(--border-strong); border-radius:var(--radius-pill); outline:0; color:var(--text); background:var(--field); text-align:right; font-size:12.5px; font-variant-numeric:tabular-nums; transition:border-color .16s,background .16s; }.model-image-input-row > label input:focus { border-color:rgb(var(--accent-bright-rgb) / .55); }.model-image-input-row > label input:disabled { opacity:.42; cursor:not-allowed; }
+.model-image-input-row > .toggle { align-self:end; margin-bottom:8px; }
 .preset-editor-body { grid-template-columns: 1fr; }
 .preset-editor-body label { grid-column: 1; }
 

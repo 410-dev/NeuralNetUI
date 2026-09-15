@@ -111,6 +111,18 @@ try {
   assert.notEqual(resolutionStyle.background, "rgb(255, 255, 255)");
   assert.equal(resolutionStyle.borderStyle, "solid");
   assert.ok(resolutionStyle.radius >= resolutionStyle.height / 2);
+  const resolutionAlignment = await page.locator(".model-image-input-row").evaluate(element => {
+    const input = element.querySelector("input").getBoundingClientRect();
+    const toggle = element.querySelector(".toggle").getBoundingClientRect();
+    return {
+      inputCenter: input.top + input.height / 2,
+      toggleCenter: toggle.top + toggle.height / 2,
+    };
+  });
+  assert.ok(
+    Math.abs(resolutionAlignment.inputCenter - resolutionAlignment.toggleCenter) <= 1,
+    `Resolution input and toggle are vertically misaligned: ${JSON.stringify(resolutionAlignment)}`,
+  );
   await page.locator(".settings-panel > header button").click();
 
   const urlBeforeStorage = page.url();
@@ -159,7 +171,7 @@ try {
   assert.equal(await managedRows.first().locator(".circle-check").getAttribute("aria-pressed"), "true", `Clicking ${firstTitle} should select it without navigation.`);
 
   await context.close();
-  console.log("PASS Beta 11: unified pill styling, 10-chat pages, non-navigating selection, and balanced storage cards");
+  console.log("PASS Beta 11: aligned image controls, unified pill styling, 10-chat pages, non-navigating selection, and balanced storage cards");
   if (process.env.BETA11_QA_KEEP === "1") {
     console.log(`Beta 11 manual QA: ${root} | user=beta11qa | password=Beta11-Local-QA-2026`);
     await new Promise(() => {});

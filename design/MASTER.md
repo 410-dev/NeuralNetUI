@@ -11,6 +11,7 @@
 - Popovers animate both ways. Keep them mounted through the exit keyframes with `usePopoverPresence` and anchor the transform origin to the edge they grow from.
 - Motion is elastic: share the `--spring` easing for shape, width and scale changes so the interface feels physical rather than linear.
 - Reset a control's background explicitly. A styled `button` that leaves `background` unset shows the browser's disabled plate.
+- When a labelled field is paired with a switch, align the switch to the field body rather than centring it against the combined label-and-field stack.
 
 ## Principles
 
