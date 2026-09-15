@@ -1093,7 +1093,7 @@ function BrowserSplitView({ c, conversationId, pendingHandoff, onComplete, onClo
           setNotice("");
         }
       } catch (error) { if (!cancelled) setNotice(error instanceof Error ? error.message : "Browser view failed."); }
-      if (!cancelled) timer = window.setTimeout(poll, 700);
+      if (!cancelled) timer = window.setTimeout(poll, 400);
     };
     void poll();
     return () => { cancelled = true; window.clearTimeout(timer); };

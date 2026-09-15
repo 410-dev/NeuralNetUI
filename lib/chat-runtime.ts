@@ -354,7 +354,12 @@ function waitForBrowser(job: ChatJob, call: ToolCall) {
   job.status = "waiting"; updateToolEvent(job, call.id, { status: "waiting" });
   return new Promise<unknown>((resolve, reject) => {
     const abort = () => { job.waiting.delete(call.id); reject(new DOMException("Stopped", "AbortError")); };
-    job.waiting.set(call.id, (value) => { job.controller.signal.removeEventListener("abort", abort); job.waiting.delete(call.id); job.status = "running"; resolve(value); });
+    job.waiting.set(call.id, (value) => {
+      job.controller.signal.removeEventListener("abort", abort); job.waiting.delete(call.id); job.status = "running";
+      // Input has been accepted: immediately replace the approval/question UI with the active
+      // tool state instead of leaving a stale approval card mounted until execution finishes.
+      updateToolEvent(job, call.id, { status: "calling" }); resolve(value);
+    });
     job.controller.signal.addEventListener("abort", abort, { once: true });
   });
 }

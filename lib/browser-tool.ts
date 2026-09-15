@@ -13,6 +13,7 @@ const MAX_SESSIONS_PER_OWNER = 2;
 const MAX_TEXT_CHARACTERS = 24_000;
 const MAX_SNAPSHOT_CHARACTERS = 32_000;
 const MAX_FULL_PAGE_SCREENSHOT_HEIGHT = 1_600;
+const DNS_CACHE_TTL_MS = 30_000;
 const ALLOWED_ACTIONS = new Set(["open", "inspect", "click", "type", "select", "press", "scroll", "wait", "screenshot", "list_tabs", "new_tab", "switch_tab", "close_tab", "set_tab_metadata", "close"]);
 const VIEWPORT = { width: 1280, height: 800 } as const;
 const BROWSER_VIEW_ACTIONS = new Set(["click", "drag", "scroll", "key", "insert_text", "navigate", "back", "forward", "reload", "new_tab", "switch_tab", "close_tab"]);
@@ -60,6 +61,7 @@ export type BrowserViewAction =
   | { action: "back" | "forward" | "reload"; sessionId: string };
 
 const sessions = new Map<string, BrowserSession>();
+const publicAddressCache = new Map<string, { expiresAt: number; promise: Promise<readonly string[]> }>();
 let sharedBrowser: Browser | undefined;
 let launchPromise: Promise<Browser> | undefined;
 
@@ -84,8 +86,16 @@ async function assertPublicBrowserUrl(raw: string) {
   const url = new URL(raw);
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("The browser only opens public HTTP(S) URLs.");
   if (url.username || url.password) throw new Error("Credential-bearing URLs are not allowed.");
-  const addresses = await lookup(url.hostname, { all: true });
-  if (!addresses.length || addresses.some(({ address }) => privateBrowserAddress(address))) throw new Error("Private or local network pages cannot be opened.");
+  const cacheKey = url.hostname.toLowerCase(); const now = Date.now();
+  let cached = publicAddressCache.get(cacheKey);
+  if (!cached || cached.expiresAt <= now) {
+    const promise = lookup(url.hostname, { all: true }).then(records => records.map(record => record.address));
+    if (!publicAddressCache.has(cacheKey) && publicAddressCache.size >= 256) publicAddressCache.delete(publicAddressCache.keys().next().value!);
+    cached = { expiresAt: now + DNS_CACHE_TTL_MS, promise }; publicAddressCache.set(cacheKey, cached);
+    void promise.catch(() => { if (publicAddressCache.get(cacheKey)?.promise === promise) publicAddressCache.delete(cacheKey); });
+  }
+  const addresses = await cached.promise;
+  if (!addresses.length || addresses.some(privateBrowserAddress)) throw new Error("Private or local network pages cannot be opened.");
   return url;
 }
 
@@ -142,22 +152,40 @@ export function normalizeBrowserAction(value: unknown): BrowserAction {
   return { action: "press", sessionId, target, key: stringValue(args.key, "key") };
 }
 
+export function browserExecutableCandidates(platform: NodeJS.Platform, environment: Record<string, string | undefined>, bundled: string, packaged?: string) {
+  return [
+    platform === "win32" ? path.join(environment.PROGRAMFILES || "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe") : undefined,
+    platform === "win32" ? path.join(environment["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)", "Microsoft", "Edge", "Application", "msedge.exe") : undefined,
+    platform === "win32" ? path.join(environment.PROGRAMFILES || "C:\\Program Files", "Microsoft", "Edge", "Application", "msedge.exe") : undefined,
+    platform === "win32" ? path.join(environment.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe") : undefined,
+    platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : undefined,
+    platform === "linux" ? "/usr/bin/google-chrome" : undefined,
+    packaged,
+    bundled,
+    platform === "linux" ? "/usr/bin/chromium" : undefined,
+    platform === "linux" ? "/usr/bin/chromium-browser" : undefined,
+  ].filter((candidate): candidate is string => Boolean(candidate));
+}
+
+export function browserLaunchArguments(headed: boolean, platform: NodeJS.Platform = process.platform) {
+  return [
+    "--disable-blink-features=AutomationControlled",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-features=CalculateNativeWinOcclusion",
+    ...(platform === "linux" ? ["--disable-dev-shm-usage", "--no-sandbox"] : []),
+    ...(headed ? ["--window-position=-32000,-32000", `--window-size=${VIEWPORT.width},${VIEWPORT.height}`] : []),
+  ];
+}
+
 async function executablePath() {
   const configured = process.env.NEURAL_CHAT_BROWSER_EXECUTABLE;
   const bundled = chromium.executablePath();
   const packaged = await findPackagedBrowser(path.join(process.cwd(), "browser"));
   const candidates = [
     configured,
-    packaged,
-    bundled,
-    process.platform === "win32" ? path.join(process.env.PROGRAMFILES || "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe") : undefined,
-    process.platform === "win32" ? path.join(process.env["PROGRAMFILES(X86)"] || "C:\\Program Files (x86)", "Microsoft", "Edge", "Application", "msedge.exe") : undefined,
-    process.platform === "win32" ? path.join(process.env.PROGRAMFILES || "C:\\Program Files", "Microsoft", "Edge", "Application", "msedge.exe") : undefined,
-    process.platform === "win32" ? path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe") : undefined,
-    process.platform === "linux" ? "/usr/bin/chromium" : undefined,
-    process.platform === "linux" ? "/usr/bin/chromium-browser" : undefined,
-    process.platform === "linux" ? "/usr/bin/google-chrome" : undefined,
-    process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : undefined,
+    ...browserExecutableCandidates(process.platform, process.env, bundled, packaged),
   ].filter((candidate): candidate is string => Boolean(candidate));
   for (const candidate of candidates) {
     try { await fs.access(candidate); return candidate; } catch { /* try the next supported browser */ }
@@ -186,10 +214,8 @@ async function browserInstance() {
     const browser = await chromium.launch({
       executablePath: await executablePath(),
       headless: !browserIsHeaded(),
-      args: [
-        ...(process.platform === "linux" ? ["--disable-dev-shm-usage", "--no-sandbox"] : []),
-        ...(browserIsHeaded() ? ["--window-position=-32000,-32000", `--window-size=${VIEWPORT.width},${VIEWPORT.height}`] : []),
-      ],
+      ignoreDefaultArgs: ["--enable-automation"],
+      args: browserLaunchArguments(browserIsHeaded()),
     });
     browser.on("disconnected", () => {
       if (sharedBrowser !== browser) return;
@@ -262,6 +288,7 @@ async function newSession(ownerKey: string, maxTabs: number) {
   if (owned.length >= MAX_SESSIONS_PER_OWNER) throw new Error(`This conversation is limited to ${MAX_SESSIONS_PER_OWNER} browser sessions. Close an existing browser session before opening another.`);
   if (sessions.size >= MAX_SESSIONS) throw new Error(`The browser is limited to ${MAX_SESSIONS} active sessions. Close an existing browser session before opening another.`);
   const context = await (await browserInstance()).newContext({ viewport: VIEWPORT, acceptDownloads: false, serviceWorkers: "block" });
+  await context.addInitScript(() => { Object.defineProperty(Navigator.prototype, "webdriver", { get: () => undefined, configurable: true }); });
   await context.route("**/*", guardRoute);
   await context.routeWebSocket("**/*", (webSocket) => webSocket.close());
   const session: BrowserSession = { id: crypto.randomUUID(), ownerKey, context, tabs: new Map(), activeTabId: "", maxTabs, createdAt: Date.now(), touchedAt: Date.now() };

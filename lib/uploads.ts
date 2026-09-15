@@ -9,6 +9,8 @@ import { completeStorageMigration, dataDir, db, storageMigrationCompleted } from
 const uploadsDir = path.join(dataDir, "uploads");
 const legacyMigrationName = "legacy-uploads-v1";
 let legacyMigration: Promise<void> | undefined;
+const modelImageJobs = new Map<string, Promise<string>>();
+const MODEL_IMAGE_MAX_SIDE = 1600;
 const FILE_MIME_TYPES:Record<string,string>={
   ".txt":"text/plain", ".md":"text/markdown", ".csv":"text/csv", ".tsv":"text/tab-separated-values",
   ".json":"application/json", ".xml":"application/xml", ".yaml":"application/yaml", ".yml":"application/yaml",
@@ -27,6 +29,7 @@ const pathsFor = (id: string) => {
   return {
     original: path.join(uploadsDir, `${id}.original`),
     thumbnail: path.join(uploadsDir, `${id}.thumbnail`),
+    modelImage: path.join(uploadsDir, `${id}.model.jpg`),
     extraction: path.join(uploadsDir, `${id}.pdf.json`),
     metadata: path.join(uploadsDir, `${id}.json`),
   };
@@ -296,7 +299,23 @@ export async function readUploadDataUrl(id: string, userId: string) {
 
 export async function readUploadModelContent(id: string, userId: string, settings: ToolSettings): Promise<ModelContentPart[]> {
   const { metadata, paths } = await readUpload(id, userId);
-  if (metadata.mimeType.startsWith("image/")) return [{ type: "image_file", file_path: paths.original, mime_type: metadata.mimeType }];
+  if (metadata.mimeType.startsWith("image/")) {
+    let job = modelImageJobs.get(id);
+    if (!job) {
+      job = (async () => {
+        try { await fs.access(paths.modelImage); return paths.modelImage; } catch { /* Build the immutable derivative once. */ }
+        const temporary = `${paths.modelImage}.${randomUUID()}.tmp`;
+        try {
+          await sharp(paths.original, { limitInputPixels: 200_000_000, sequentialRead: true, pages: 1 }).rotate()
+            .resize({ width: MODEL_IMAGE_MAX_SIDE, height: MODEL_IMAGE_MAX_SIDE, fit: "inside", withoutEnlargement: true })
+            .flatten({ background: "#ffffff" }).jpeg({ quality: 82, mozjpeg: true }).toFile(temporary);
+          await fs.chmod(temporary, 0o600).catch(() => undefined); await fs.rename(temporary, paths.modelImage); return paths.modelImage;
+        } finally { await fs.unlink(temporary).catch(() => undefined); }
+      })().finally(() => { modelImageJobs.delete(id); });
+      modelImageJobs.set(id, job);
+    }
+    return [{ type: "image_file", file_path: await job, mime_type: "image/jpeg" }];
+  }
   if (metadata.mimeType === "application/pdf") {
     let cached: PdfExtraction | undefined;
     try {
@@ -316,13 +335,22 @@ export async function readUploadModelContent(id: string, userId: string, setting
 }
 
 export async function deleteUpload(id: string, userId: string) {
+  await moveUploadsToTrash([id], userId);
+}
+
+export async function moveUploadsToTrash(ids: string[], userId: string) {
   await ensureLegacyUploadsMigrated();
-  assertId(id);
-  const owned = db.prepare("SELECT 1 FROM uploads WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(id, userId);
-  if (!owned) throw Object.assign(new Error("Attachment not found."), { code: "ENOENT" });
-  const references = db.prepare("SELECT COUNT(*) AS count FROM message_attachments WHERE upload_id = ?").get(id) as { count: number };
-  if (references.count) throw new Error("This file is attached to a saved conversation.");
-  db.prepare("UPDATE uploads SET deleted_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL").run(new Date().toISOString(),id,userId);
+  const unique = [...new Set(ids.map(String))];
+  if (!unique.length || unique.length > 100) throw new Error("Select 1 to 100 files.");
+  unique.forEach(assertId); const placeholders = unique.map(() => "?").join(",");
+  return db.transaction(() => {
+    const rows = db.prepare(`SELECT u.id,(SELECT COUNT(*) FROM message_attachments ma WHERE ma.upload_id=u.id) AS reference_count FROM uploads u WHERE u.user_id=? AND u.deleted_at IS NULL AND u.id IN (${placeholders})`).all(userId, ...unique) as Array<{id:string;reference_count:number}>;
+    if (rows.length !== unique.length) throw Object.assign(new Error("One or more selected files were not found."), { code: "ENOENT" });
+    if (rows.some(row => row.reference_count > 0)) throw new Error("Files attached to saved conversations cannot be deleted.");
+    const stamp = new Date().toISOString();
+    for (const id of unique) db.prepare("UPDATE uploads SET deleted_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL").run(stamp, id, userId);
+    return unique.length;
+  })();
 }
 
 export async function restoreUpload(id:string,userId:string){await ensureLegacyUploadsMigrated();assertId(id);db.transaction(()=>{const row=db.prepare("SELECT size FROM uploads WHERE id=? AND user_id=? AND deleted_at IS NOT NULL").get(id,userId) as {size:number}|undefined;if(!row)throw Object.assign(new Error("Deleted file not found."),{code:"ENOENT"});const account=db.prepare("SELECT storage_quota_bytes AS quota FROM users WHERE id=?").get(userId) as {quota:number};const used=(db.prepare("SELECT COALESCE(SUM(size),0) AS bytes FROM uploads WHERE user_id=? AND deleted_at IS NULL").get(userId) as {bytes:number}).bytes;if(used+row.size>account.quota)throw new Error("Storage quota exceeded; increase the active quota before restoring this file.");db.prepare("UPDATE uploads SET deleted_at=NULL WHERE id=? AND user_id=? AND deleted_at IS NOT NULL").run(id,userId);})();}
