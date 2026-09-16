@@ -231,6 +231,33 @@ export function logAdminAudit(actorUserId: string, targetUserId: string, action:
     .run(actorUserId, targetUserId, action.slice(0, 120), detail?.slice(0, 4000) || null, new Date().toISOString());
 }
 
+/** Removes a departing account's private aliases and reasoning presets from the workspace configuration. */
+export function removeOwnedConfigEntries(userId: string) {
+  const stored = db.prepare("SELECT value FROM app_config WHERE id = 1").get() as { value: string } | undefined;
+  if (stored) {
+    try {
+      type StoredModel = { isAlias?: boolean; ownerId?: string; reasoningPresets?: Array<{ ownerId?: string }> };
+      const config = JSON.parse(stored.value) as {
+        models?: StoredModel[];
+        connections?: Array<{ models?: StoredModel[] }>;
+      };
+      if (Array.isArray(config.models)) {
+        config.models = config.models
+          .filter((model) => !(model.isAlias && model.ownerId === userId))
+          .map((model) => ({
+            ...model,
+            reasoningPresets: Array.isArray(model.reasoningPresets)
+              ? model.reasoningPresets.filter((preset) => preset.ownerId !== userId)
+              : model.reasoningPresets,
+          }));
+      }
+      for (const connection of config.connections || []) if (Array.isArray(connection.models)) connection.models = connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets?.filter((preset) => preset.ownerId !== userId) }));
+      db.prepare("UPDATE app_config SET value = ?, updated_at = ? WHERE id = 1")
+        .run(JSON.stringify(config), new Date().toISOString());
+    } catch { /* invalid config is recovered by the config module */ }
+  }
+}
+
 export async function deleteManagedUser(actor: AuthUser, userId: string) {
   if (actor.id === userId) throw new AuthError("현재 로그인한 계정은 삭제할 수 없습니다.", 409);
   const target = db.prepare("SELECT role FROM users WHERE id = ?").get(userId) as { role: UserRole } | undefined;
@@ -244,29 +271,7 @@ export async function deleteManagedUser(actor: AuthUser, userId: string) {
     db.prepare("DELETE FROM conversations WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM uploads WHERE user_id = ?").run(userId);
 
-    const stored = db.prepare("SELECT value FROM app_config WHERE id = 1").get() as { value: string } | undefined;
-    if (stored) {
-      try {
-        type StoredModel = { isAlias?: boolean; ownerId?: string; reasoningPresets?: Array<{ ownerId?: string }> };
-        const config = JSON.parse(stored.value) as {
-          models?: StoredModel[];
-          connections?: Array<{ models?: StoredModel[] }>;
-        };
-        if (Array.isArray(config.models)) {
-          config.models = config.models
-            .filter((model) => !(model.isAlias && model.ownerId === userId))
-            .map((model) => ({
-              ...model,
-              reasoningPresets: Array.isArray(model.reasoningPresets)
-                ? model.reasoningPresets.filter((preset) => preset.ownerId !== userId)
-                : model.reasoningPresets,
-            }));
-        }
-        for (const connection of config.connections || []) if (Array.isArray(connection.models)) connection.models = connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets?.filter((preset) => preset.ownerId !== userId) }));
-        db.prepare("UPDATE app_config SET value = ?, updated_at = ? WHERE id = 1")
-          .run(JSON.stringify(config), new Date().toISOString());
-      } catch { /* invalid config is recovered by the config module */ }
-    }
+    removeOwnedConfigEntries(userId);
 
     const deleted = db.prepare("DELETE FROM users WHERE id = ? AND role != 'superadmin'").run(userId);
     if (!deleted.changes) throw new AuthError("최고 관리자 계정은 삭제할 수 없습니다.", 409);

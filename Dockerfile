@@ -39,6 +39,9 @@ COPY --from=builder --chown=node:node /app/scripts/process-pdf.py ./scripts/proc
 
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 
+# The npm 7zip-bin tarball does not keep the executable bit on its Linux binary.
+RUN find /app/node_modules/7zip-bin -type f -name 7za -exec chmod 755 {} +
+
 RUN mkdir -p /app/data && chown node:node /app/data
 
 USER node

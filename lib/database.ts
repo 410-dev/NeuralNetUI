@@ -396,8 +396,9 @@ function openDatabase() {
         PRIMARY KEY (credit_id, user_id)
       );
     `);
-    connection.prepare("INSERT INTO plans(id,name,storage_quota_bytes,served_model_ids,model_weights,created_at,updated_at) VALUES (?,?,536870912,'[]','{}',?,?)")
-      .run(defaultPlanId, "Free", stamp, stamp);
+    // The first plan starts from the workspace default so an upgraded install keeps its capacity policy.
+    connection.prepare("INSERT INTO plans(id,name,storage_quota_bytes,served_model_ids,model_weights,created_at,updated_at) VALUES (?,?,?,'[]','{}',?,?)")
+      .run(defaultPlanId, "Free", workspaceStorageDefaults(connection).storage ?? 536870912, stamp, stamp);
     connection.prepare("UPDATE users SET plan_id=? WHERE plan_id IS NULL").run(defaultPlanId);
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(16, stamp);
   })();
@@ -413,10 +414,21 @@ function openDatabase() {
   if (planTrashVersion.version < 18) connection.transaction(() => {
     // Plans own a trash quota beside their active quota; existing plans start at twice their active capacity.
     connection.exec(`ALTER TABLE plans ADD COLUMN trash_quota_bytes INTEGER NOT NULL DEFAULT 1073741824 CHECK (trash_quota_bytes >= 1048576 AND trash_quota_bytes <= 21990232555520);`);
-    connection.prepare("UPDATE plans SET trash_quota_bytes=MIN(storage_quota_bytes*2,21990232555520)").run();
+    const trash = workspaceStorageDefaults(connection).trash;
+    if (trash) connection.prepare("UPDATE plans SET trash_quota_bytes=?").run(trash);
+    else connection.prepare("UPDATE plans SET trash_quota_bytes=MIN(storage_quota_bytes*2,21990232555520)").run();
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(18, new Date().toISOString());
   })();
   return connection;
+}
+
+function workspaceStorageDefaults(connection: Database.Database): { storage?: number; trash?: number } {
+  try {
+    const row = connection.prepare("SELECT value FROM app_config WHERE id = 1").get() as { value: string } | undefined;
+    const settings = row ? JSON.parse(row.value)?.userStorageSettings : undefined;
+    const valid = (value: unknown, max: number) => Number.isSafeInteger(value) && Number(value) >= 1024 ** 2 && Number(value) <= max ? Number(value) : undefined;
+    return { storage: valid(settings?.defaultQuotaBytes, 10 * 1024 ** 4), trash: valid(settings?.defaultTrashQuotaBytes, 20 * 1024 ** 4) };
+  } catch { return {}; }
 }
 
 export const db = globalThis.neuralChatDatabase ?? openDatabase();
