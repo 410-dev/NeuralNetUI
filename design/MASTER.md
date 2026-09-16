@@ -104,6 +104,9 @@
 - Personal backup and restore belongs in Account settings. Administrative global, credential, and per-user images belong in a separate Data management tab; the per-user surface is paginated rather than allowed to grow inside settings.
 - Restore mode is always explicit. Merge is quiet; Replace uses the danger treatment and an in-product confirmation before the file is submitted.
 - Plan editing uses a stable plan list beside one editor on desktop and a horizontally scrollable list above the editor on mobile. Token windows remain repeatable rows rather than separate submenus.
+- Anything that lists accounts — plan assignment, reset-credit recipients, per-user images — opens in its own directory dialog with live search, sort with a direction mark, pagination, and (where it acts on many) circular-check selection that persists across pages plus page-wide and all-results selection. The settings pane only holds a launcher row.
+- A plan owns both its active and trash capacity. Numbers carry their unit inside the same pill, and repeatable rows share one column header on desktop and stack full-width on a phone.
+- An open dropdown inside a dialog takes the first Escape; the second closes the dialog.
 - The sidebar plan donut sits immediately left of Settings and communicates usage through its fill without an adjacent numeric label. Numeric percentages belong inside its popover; the popover may name windows and reset times but never reveals token counts to the user.
 
 - Put Storage manager immediately below Search in the expanded sidebar and retain it as an icon action in the collapsed rail. Storage is personal: every preview, download, list, and deletion request must enforce the signed-in owner on the server.

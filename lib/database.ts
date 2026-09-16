@@ -409,6 +409,13 @@ function openDatabase() {
     );`);
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(17, new Date().toISOString());
   })();
+  const planTrashVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (planTrashVersion.version < 18) connection.transaction(() => {
+    // Plans own a trash quota beside their active quota; existing plans start at twice their active capacity.
+    connection.exec(`ALTER TABLE plans ADD COLUMN trash_quota_bytes INTEGER NOT NULL DEFAULT 1073741824 CHECK (trash_quota_bytes >= 1048576 AND trash_quota_bytes <= 21990232555520);`);
+    connection.prepare("UPDATE plans SET trash_quota_bytes=MIN(storage_quota_bytes*2,21990232555520)").run();
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(18, new Date().toISOString());
+  })();
   return connection;
 }
 

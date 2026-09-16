@@ -122,6 +122,7 @@ export interface UsagePlan {
   modelWeights: Record<string, number>;
   tokenLimits: PlanTokenLimit[];
   storageQuotaBytes: number;
+  trashQuotaBytes: number;
   userCount?: number;
 }
 

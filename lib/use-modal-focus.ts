@@ -26,6 +26,8 @@ export function useModalFocus(onClose: () => void) {
     const focusFirst = () => (preferred() || focusable()[0] || root).focus();
     const keydown = (event: globalThis.KeyboardEvent) => {
       if (root.inert) return;
+      // An open dropdown inside the dialog takes the first Escape for itself.
+      if (event.key === "Escape" && document.activeElement?.closest(".select-menu.open")) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close.current(); }
       if (event.key !== "Tab") return;
       const elements = focusable(); const first = elements[0]; const last = elements.at(-1);

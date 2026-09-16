@@ -132,11 +132,11 @@ export async function createFirstUser(
   if (!displayName || displayName.length > 80) throw new AuthError("표시 이름을 확인해 주세요.", 400);
   const passwordHash = await hashPassword(String(input.password || ""));
   const id = randomUUID(); const stamp = new Date().toISOString();
-  const defaultPlan=(db.prepare("SELECT id,storage_quota_bytes AS storage FROM plans ORDER BY created_at LIMIT 1").get() as {id:string;storage:number}|undefined);
+  const defaultPlan=(db.prepare("SELECT id,storage_quota_bytes AS storage,trash_quota_bytes AS trash FROM plans ORDER BY created_at LIMIT 1").get() as {id:string;storage:number;trash:number}|undefined);
   db.transaction(() => {
     if (!setupRequired()) throw new AuthError("Initial setup is already complete.", 409);
-    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, storage_quota_bytes, trash_quota_bytes, storage_quota_uses_default, trash_quota_uses_default, plan_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'superadmin', '{}', ?, ?, 0, 1, ?, ?, ?)")
-      .run(id, username, displayName, passwordHash, defaultPlan?.storage||defaults.storage, defaults.trash,defaultPlan?.id||null, stamp, stamp);
+    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, storage_quota_bytes, trash_quota_bytes, storage_quota_uses_default, trash_quota_uses_default, plan_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'superadmin', '{}', ?, ?, 0, ?, ?, ?, ?)")
+      .run(id, username, displayName, passwordHash, defaultPlan?.storage||defaults.storage, defaultPlan?.trash||defaults.trash, defaultPlan?0:1, defaultPlan?.id||null, stamp, stamp);
     db.prepare("UPDATE conversations SET user_id = ? WHERE user_id IS NULL").run(id);
     db.prepare("UPDATE uploads SET user_id = ? WHERE user_id IS NULL").run(id);
     const storedConfig = db.prepare("SELECT value FROM app_config WHERE id = 1").get() as { value: string } | undefined;
@@ -178,10 +178,10 @@ export async function createUser(input: { username?: string; displayName?: strin
   if (!displayName || displayName.length > 80) throw new AuthError("표시 이름을 확인해 주세요.", 400);
   const role: UserRole = input.role === "admin" ? "admin" : "user";
   const passwordHash = await hashPassword(String(input.password || "")); const stamp = new Date().toISOString();
-  const defaultPlan=(db.prepare("SELECT id,storage_quota_bytes AS storage FROM plans ORDER BY created_at LIMIT 1").get() as {id:string;storage:number}|undefined);
+  const defaultPlan=(db.prepare("SELECT id,storage_quota_bytes AS storage,trash_quota_bytes AS trash FROM plans ORDER BY created_at LIMIT 1").get() as {id:string;storage:number;trash:number}|undefined);
   try {
-    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, storage_quota_bytes, trash_quota_bytes, storage_quota_uses_default, trash_quota_uses_default, audit_enabled, plan_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '{}', ?, ?, 0, 1, 0, ?, ?, ?)")
-      .run(randomUUID(), username, displayName, passwordHash, role, defaultPlan?.storage||defaults.storage, defaults.trash,defaultPlan?.id||null, stamp, stamp);
+    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, storage_quota_bytes, trash_quota_bytes, storage_quota_uses_default, trash_quota_uses_default, audit_enabled, plan_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '{}', ?, ?, 0, ?, 0, ?, ?, ?)")
+      .run(randomUUID(), username, displayName, passwordHash, role, defaultPlan?.storage||defaults.storage, defaultPlan?.trash||defaults.trash, defaultPlan?0:1, defaultPlan?.id||null, stamp, stamp);
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new AuthError("이미 사용 중인 사용자 이름입니다.", 409);
     throw error;
@@ -217,10 +217,10 @@ export function updateManagedUser(actor: AuthUser, userId: string, input: { disp
     // cannot commit between this check and a quota reduction.
     const used = (db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ? AND deleted_at IS NULL").get(userId) as { bytes: number }).bytes;
     if (quota < used) throw new AuthError("현재 사용 중인 용량보다 할당량을 작게 설정할 수 없습니다.", 409);
-    let assignedQuota=quota;
-    if(input.planId!==undefined&&planId){const plan=db.prepare("SELECT storage_quota_bytes AS bytes FROM plans WHERE id=?").get(planId) as {bytes:number};if(plan.bytes<used)throw new AuthError("플랜 저장소 용량이 현재 사용량보다 작습니다.",409);assignedQuota=plan.bytes;}
+    let assignedQuota=quota,assignedTrash=trashQuota;
+    if(input.planId!==undefined&&planId){const plan=db.prepare("SELECT storage_quota_bytes AS bytes,trash_quota_bytes AS trash FROM plans WHERE id=?").get(planId) as {bytes:number;trash:number};if(plan.bytes<used)throw new AuthError("플랜 저장소 용량이 현재 사용량보다 작습니다.",409);assignedQuota=plan.bytes;assignedTrash=plan.trash;}
     const result = db.prepare("UPDATE users SET display_name = ?, role = ?, storage_quota_bytes = ?, trash_quota_bytes = ?, storage_quota_uses_default=?, trash_quota_uses_default=?, audit_enabled = ?, plan_id=?, updated_at = ? WHERE id = ?")
-      .run(displayName, role, assignedQuota, trashQuota,input.planId!==undefined&&planId?0:Number(storageUsesDefault),Number(trashUsesDefault), Number(auditEnabled),planId, new Date().toISOString(), userId);
+      .run(displayName, role, assignedQuota, assignedTrash,input.planId!==undefined&&planId?0:Number(storageUsesDefault),input.planId!==undefined&&planId?0:Number(trashUsesDefault), Number(auditEnabled),planId, new Date().toISOString(), userId);
     if (!result.changes) throw new AuthError("사용자를 찾을 수 없습니다.", 404);
   })();
   logAdminAudit(actor.id, userId, "user.settings.update", JSON.stringify({ role, storageQuotaBytes: quota, trashQuotaBytes: trashQuota,storageUsesDefault,trashUsesDefault,auditEnabled,planId }));
