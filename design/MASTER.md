@@ -3,12 +3,17 @@
 ## 2.0 form language
 
 - Every button, input and dropdown trigger is a full pill. Multi-line fields and containers use the large corner tokens instead; nothing in the interface reads as a square.
-- Corner radii come from the `--radius-*` tokens. Raise the tokens rather than hand-tuning individual rules.
-- Surfaces and type are hue-free: white and grey only. Colour belongs to the accent, which marks interactive and selected states, and to the danger and success signals.
+- Corner radii come from the `--radius-*` tokens. Raise the tokens rather than hand-tuning individual rules. No rule in the stylesheet writes a pixel corner of its own; the ladder is pill, `xl` for shell panels, `lg` for dialogs and popovers, `card` for cards and grouped panels, `md` for the rows and options inside them, `sm` for small containers, `xs` for icon marks, and `media` for thumbnails, which clip content rather than draw a container.
+- Surfaces and type are hue-free: white and grey only. Colour belongs to the accent, which marks interactive and selected states, and to the danger, warning and success signals.
+- A signal owns one hue and states every role it needs: a mark colour, a text colour that is readable on a dark surface, and its washes. A rule that wants a red reaches for `--danger-text` or `--danger-soft`; it never mixes its own.
+- Secondary type is `--dim`, and `--dim` is the quietest colour allowed to hold words: it clears 4.5:1 against every surface this file defines. Anything fainter is a rule, a track or a dot, never a label. Nothing in the interface sets type below 9px.
+- Every control says where the keyboard is. Controls take an outline ring; fields take the same ring as a shadow, because their own rules clear the outline to keep the pill edge clean. Hover is never the only answer a control gives.
 - The accent is a per-user choice. Never hardcode an accent hue; build translucent accents from `rgb(var(--accent-rgb) / a)` so a palette change reaches every rule.
-- Icons are drawn marks, not badges: white strokes, no plate, no tinted container. Icon-only buttons signal hover with colour and a slight scale, never a filled background.
+- Icons are drawn marks, not badges: white strokes, no plate, no tinted container. Icon-only buttons signal hover with colour and a slight scale, never a filled background — the marks that remove something answer in the danger key instead of the white one. A control carrying a label is a row, not a mark, and keeps its filled hover. The one exception is a mark that sits over a picture rather than over a surface, which needs its own scrim to stay visible.
+- An icon mark is at least 28px square, because a coarse pointer has to reach it too.
 - Native `select` elements cannot carry the pill shape or the popover animation, so the single `SelectMenu` component serves every choice in the app.
 - Popovers animate both ways. Keep them mounted through the exit keyframes with `usePopoverPresence` and anchor the transform origin to the edge they grow from.
+- A popover decides which way to open against the box that actually clips it — the settings pane, a dialog body — not against the window. The window is rarely the first edge it meets. A list that outgrows its trigger sideways anchors to whichever edge keeps it inside.
 - Motion is elastic: share the `--spring` easing for shape, width and scale changes so the interface feels physical rather than linear.
 - Reset a control's background explicitly. A styled `button` that leaves `background` unset shows the browser's disabled plate.
 - When a labelled field is paired with a switch, align the switch to the field body rather than centring it against the combined label-and-field stack.
@@ -126,6 +131,11 @@
 - The tone is the message's kind: danger for what cannot be undone, warning for a recoverable deletion, info for an explanation, success for a completed action. The mark, the detail rule and the confirming action all take that colour.
 - A destructive action that is genuinely two different acts asks which one. Deleting a request that exists in several branches offers this branch or every branch instead of guessing.
 - Actions on a sent message stay out of the way until the pointer comes near. The hover target is the whole conversation row, extended into the gaps above and below, not the bubble alone; coarse pointers keep the actions visible.
+- Every surface that calls itself a dialog takes the shared focus behaviour — the trap, Escape, the inert background, the restored opener. The picture viewer and the mobile action sheet are dialogs like any other; announcing the role without the behaviour is worse than not announcing it.
+- A dialog with something to work in opens with the keyboard there, not on Close. Header controls come first in the markup, so the field names itself and the shared hook honours it.
+- Reporting an absence is one voice, not one per surface: the same colour, size and rhythm wherever nothing was found. The dashed block stays reserved for the state that asks the person to add something. Waiting reads the same everywhere too, and a notice is a bordered message rather than loose text under a form.
+- A title that can grow gives way to the controls beside it. Where those controls are positioned over the page rather than laid out next to it, the title reserves their side of the row itself and truncates.
+- The document's own language follows the chosen language, so an English interface is never announced in a Korean voice.
 
 ## Chat history actions
 

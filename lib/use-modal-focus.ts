@@ -14,7 +14,13 @@ export function useModalFocus(onClose: () => void) {
     siblings.forEach(element => { element.inert = true; });
     const focusable = () => [...root.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex="0"]')]
       .filter(element => element.tabIndex >= 0 && element.getClientRects().length > 0);
-    const focusFirst = () => (focusable()[0] || root).focus();
+    // Header controls come first in the markup, so a search or editing dialog would open with the
+    // keyboard on Close. A dialog that has a field to work in names it and receives focus there.
+    const preferred = () => {
+      const marked = root.querySelector<HTMLElement>("[data-autofocus]");
+      return marked && !marked.hasAttribute("disabled") && marked.getClientRects().length > 0 ? marked : null;
+    };
+    const focusFirst = () => (preferred() || focusable()[0] || root).focus();
     const keydown = (event: globalThis.KeyboardEvent) => {
       if (root.inert) return;
       if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close.current(); }

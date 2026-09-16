@@ -29,7 +29,7 @@ function Pager({page,pageCount,total,ko,onPage}:{page:number;pageCount:number;to
 
 function useLiveSearch(value:string,onSearch:(value:string)=>void){useEffect(()=>{const timer=window.setTimeout(()=>onSearch(value.trim()),180);return()=>window.clearTimeout(timer);},[onSearch,value]);}
 
-function SearchField({value,onChange,placeholder}:{value:string;onChange:(value:string)=>void;placeholder:string}){return <label className="audit-search"><Search size={15}/><input value={value} onChange={event=>onChange(event.target.value)} placeholder={placeholder}/></label>;}
+function SearchField({value,onChange,placeholder}:{value:string;onChange:(value:string)=>void;placeholder:string}){return <label className="audit-search"><Search size={15}/><input data-autofocus value={value} onChange={event=>onChange(event.target.value)} placeholder={placeholder}/></label>;}
 
 async function auditMutation(userId:string,method:"PATCH"|"DELETE",resourceType:"conversation"|"file",id:string){const response=await fetch(`/api/users/${encodeURIComponent(userId)}/audit`,{method,headers:{"Content-Type":"application/json"},body:JSON.stringify({resource:resourceType,id,...(method==="PATCH"?{action:"restore"}:{})})});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.error||"Audit operation failed.");}}
 

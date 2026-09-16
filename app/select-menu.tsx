@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, Info } from "lucide-react";
 
@@ -35,6 +35,9 @@ export function SelectMenu({ value, options, onChange, label, placeholder, disab
 }) {
   const [open, setOpen] = useState(false);
   const [drop, setDrop] = useState<"down" | "up">("down");
+  // A narrow trigger holding long option labels grows the list past its own right edge, so the
+  // list is measured once it exists and anchored to whichever edge keeps it inside.
+  const [align, setAlign] = useState<"start" | "end">("start");
   const [highlight, setHighlight] = useState(0);
   // The popover clips its own overflow, so a capability tooltip is placed against the viewport.
   const [info, setInfo] = useState<{ index: number; right: number; top?: number; bottom?: number } | null>(null);
@@ -58,11 +61,39 @@ export function SelectMenu({ value, options, onChange, label, placeholder, disab
   // Roving focus keeps arrow keys and screen readers on the same option.
   useEffect(() => { if (open) listRef.current?.querySelectorAll<HTMLButtonElement>("[role=\"option\"]")[highlight]?.focus(); }, [open, highlight]);
 
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!open || !list) return;
+    const limit = clippingBounds(triggerRef.current);
+    const box = list.getBoundingClientRect();
+    setAlign(box.right > limit.right && box.width < limit.right - limit.left ? "end" : "start");
+  }, [open, options.length]);
+
+  // The popover is clipped by whichever ancestor scrolls or hides its overflow — the settings
+  // pane, a dialog body — long before the viewport edge is reached. Deciding against the window
+  // opened a list downwards into a boundary a few pixels below it, so the box that actually cuts
+  // the popover off is the one the decision is made against.
+  function clippingBounds(element: HTMLElement | null) {
+    for (let node = element?.parentElement; node; node = node.parentElement) {
+      const { overflow, overflowX, overflowY } = getComputedStyle(node);
+      if (/auto|scroll|hidden/.test(`${overflow}${overflowX}${overflowY}`)) {
+        const box = node.getBoundingClientRect();
+        return {
+          top: Math.max(0, box.top), bottom: Math.min(window.innerHeight, box.bottom),
+          left: Math.max(0, box.left), right: Math.min(window.innerWidth, box.right),
+        };
+      }
+    }
+    return { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth };
+  }
+
   function show() {
     if (disabled || !options.length) return;
-    const box = triggerRef.current?.getBoundingClientRect();
+    const trigger = triggerRef.current;
+    const box = trigger?.getBoundingClientRect();
     const wanted = Math.min(options.length * 44 + 16, 320);
-    setDrop(box && box.bottom + wanted > window.innerHeight && box.top > wanted ? "up" : "down");
+    const limit = clippingBounds(trigger);
+    setDrop(box && box.bottom + wanted > limit.bottom && box.top - limit.top > wanted ? "up" : "down");
     setHighlight(Math.max(0, selectedIndex));
     setOpen(true);
   }
@@ -84,7 +115,7 @@ export function SelectMenu({ value, options, onChange, label, placeholder, disab
       <span>{selected?.label || placeholder || ""}</span>
       <ChevronDown size={15} className={open ? "rotate" : ""} />
     </button>
-    {mounted && <div ref={listRef} className={`popover select-popover ${drop === "up" ? "popover-up" : ""} ${closing ? "closing" : ""}`} role="listbox" aria-label={label} tabIndex={-1}>
+    {mounted && <div ref={listRef} className={`popover select-popover ${drop === "up" ? "popover-up" : ""} ${align === "end" ? "popover-end" : ""} ${closing ? "closing" : ""}`} role="listbox" aria-label={label} tabIndex={-1}>
       {options.map((option, index) => <div className="select-option-row" role="presentation" key={option.value}>
         <button type="button" role="option" aria-selected={option.value === value} aria-describedby={option.info ? `${fieldId}-note-${index}` : undefined} tabIndex={index === highlight ? 0 : -1} className={`select-option ${option.value === value ? "selected" : ""}`} onClick={() => choose(option.value)}>
           <span className="selection-dot">{option.value === value && <Check size={13} />}</span>
