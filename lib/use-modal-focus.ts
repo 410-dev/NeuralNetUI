@@ -16,7 +16,10 @@ export function useModalFocus(onClose: () => void) {
       .filter(element => element.tabIndex >= 0 && element.getClientRects().length > 0);
     // Header controls come first in the markup, so a search or editing dialog would open with the
     // keyboard on Close. A dialog that has a field to work in names it and receives focus there.
+    // On a touch screen, focusing a field raises the keyboard over half the dialog before the
+    // person has asked to type, so the preference only applies where a real pointer is in use.
     const preferred = () => {
+      if (!window.matchMedia("(pointer: fine)").matches) return null;
       const marked = root.querySelector<HTMLElement>("[data-autofocus]");
       return marked && !marked.hasAttribute("disabled") && marked.getClientRects().length > 0 ? marked : null;
     };

@@ -53,6 +53,9 @@ html { touch-action: pan-x pan-y; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: "Segoe UI Variable", "Pretendard", "Apple SD Gothic Neo", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { border: 0; cursor: pointer; background: transparent; }
+/* Android paints a rectangle over a tapped control; on a pill that reads as a glitch, and every
+   control already answers the press with its own :active or state change. */
+button, a, summary, [role="button"] { -webkit-tap-highlight-color: transparent; }
 input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
 input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-inner-spin-button { appearance: none; -webkit-appearance: none; margin: 0; }
 button:disabled { cursor: not-allowed; opacity: .55; }
@@ -1325,10 +1328,9 @@ select:focus-visible {
 @media (max-width: 800px) {
   /* The drawer button owns the first 52px of the row and the actions shed their labels. */
   .chat-surface { --surface-actions-gutter: 222px; }
-  .model-trigger { font-size: 17px; }
 }
 @media (max-width: 560px) {
-  .model-trigger { font-size: 15px; padding: 7px 10px 7px 11px; }
+  .model-trigger { padding-inline: 11px 10px; }
 }
 
 /* Nothing-here states said the same thing in five voices. One voice, and the dashed block stays
@@ -1356,4 +1358,90 @@ select:focus-visible {
   background: rgba(255, 255, 255, .025);
   font-size: 11px;
   line-height: 1.5;
+}
+
+/* ============================================================================================
+   3.0 beta 14, phone pass: a header row of one height, a user list that gets the screen, and
+   settings tabs whose icons sit in the middle of their pills.
+   ============================================================================================ */
+
+/* The create form folds away on a phone; elsewhere the toggle does not exist. */
+.user-create-toggle { display: none; }
+.user-create-fields { display: grid; gap: 13px; }
+.user-create-fields > .subtle-action { width: max-content; }
+
+@media (max-width: 800px) {
+  /* The drawer button, the model picker and the surface actions share one 36px row, centred on
+     the same line, so the title reads as the same weight as the controls around it. */
+  .model-switcher { margin-top: 8px; }
+  .model-trigger { height: 36px; padding-block: 0; font-size: 18px; }
+  .surface-actions { top: 8px; }
+  .surface-action, .surface-action.icon-only { width: 36px; min-height: 36px; }
+}
+
+@media (max-width: 680px) {
+  /* These full-screen rules were written before .harness-dialog and lost to it at equal
+     specificity, so the dialogs kept their rounded frame and 85dvh cap on a phone. */
+  .harness-modal-layer.managed-user-layer { padding: 0; }
+  .harness-dialog.user-manager-dialog,
+  .harness-dialog.managed-user-dialog,
+  .harness-dialog.audit-browser-dialog {
+    width: 100%; height: 100dvh; max-height: none; border: 0; border-radius: 0;
+    padding: 16px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+  .harness-dialog.user-manager-dialog { gap: 12px; }
+
+  .user-create-card { gap: 0; padding: 4px; }
+  .user-create-card > .user-create-toggle {
+    width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 12px;
+    border-radius: var(--radius-md); color: var(--text); font-size: 13px; text-align: left;
+  }
+  .user-create-toggle:active { background: rgba(255, 255, 255, .05); }
+  .user-create-toggle > span { flex: 1; }
+  .user-create-toggle > svg:last-child { color: var(--muted); transition: transform .22s var(--spring); }
+  .user-create-card.open .user-create-toggle > svg:last-child { transform: rotate(180deg); }
+  .user-create-fields { display: none; gap: 12px; padding: 6px 10px 12px; }
+  .user-create-card.open .user-create-fields { display: grid; }
+  .user-create-card .form-grid { gap: 12px; margin-bottom: 0; }
+  .user-create-fields > .subtle-action { width: 100%; justify-content: center; }
+  /* While the form is open the dialog scrolls as one page instead of crushing the list. */
+  .harness-dialog.user-manager-dialog:has(.user-create-card.open) { overflow-y: auto; }
+  .harness-dialog.user-manager-dialog:has(.user-create-card.open) > .managed-user-list { flex: 0 0 auto; overflow: visible; }
+
+  /* Rows keep their own height, and each account reads as a small card: who it is and the Manage
+     action on the first line, storage and trash side by side beneath a rule. */
+  .harness-dialog.user-manager-dialog > .managed-user-list { display: flex; flex-direction: column; gap: 6px; }
+  .managed-user-list > div {
+    flex: 0 0 auto;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    grid-template-areas: "avatar name action" "storage storage storage";
+    column-gap: 10px; row-gap: 10px; padding: 11px 12px; border-radius: var(--radius-md);
+  }
+  .managed-user-list > div > .avatar-mini { grid-area: avatar; }
+  .managed-user-list > div > .managed-user-name { grid-area: name; min-width: 0; }
+  .managed-user-list > div > .managed-user-name :is(strong, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .managed-user-list > div > .subtle-action { grid-area: action; }
+  .managed-user-list > div > .managed-user-storage {
+    grid-area: storage; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    padding-top: 10px; border-top: 1px solid var(--border); text-align: left;
+  }
+  .managed-user-storage > span { min-width: 0; overflow-wrap: anywhere; }
+  .managed-user-storage strong { font-size: 12px; }
+}
+
+@media (max-width: 560px) {
+  /* The label is hidden by size, but it is still a flex item, so the gap beside it pushed every
+     icon 4.5px left of centre. */
+  .settings-body nav button { gap: 0; padding: 0; }
+}
+
+/* A field drawn inside its own pill wrapper takes the ring on the wrapper, which is the shape the
+   person sees; the bare input inside it would draw a rectangle across the pill. The composer
+   already answers focus on its own frame. */
+.user-search-field input:focus-visible, .audit-search input:focus-visible, .chat-manager-search input:focus-visible,
+.chat-age-filter input:focus-visible, .storage-browser-toolbar input:focus-visible, .composer textarea:focus-visible { box-shadow: none; }
+.user-search-field:has(input:focus-visible), .audit-search:has(input:focus-visible), .chat-manager-search:has(input:focus-visible),
+.chat-age-filter:has(input:focus-visible), .storage-browser-toolbar > label:has(input:focus-visible) {
+  border-color: rgb(var(--accent-bright-rgb) / .55);
+  box-shadow: var(--focus-ring);
 }

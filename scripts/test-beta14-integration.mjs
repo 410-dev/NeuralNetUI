@@ -68,6 +68,11 @@ try {
   config.models = [model]; config.preferences.language = "ko"; config.harnessSettings.titleEnabled = false;
   await json("/api/config", "PUT", config);
 
+  // Enough accounts, with one long display name, for the phone-width user list to show its layout.
+  for (const [username, displayName, role] of [["beta14admin", "Beta 14 Admin", "admin"], ["beta14guest", "Guest With A Rather Long Display Name", "user"]]) {
+    await json("/api/users", "POST", { username, displayName, password: "Beta14-Local-QA-2026", role });
+  }
+
   const stamp = new Date().toISOString();
   const conversationId = "beta14-chat";
   await json("/api/conversations", "POST", {
@@ -215,6 +220,86 @@ try {
     await page.setViewportSize({ width: 1180, height: 900 });
     await delay(300);
   }
+
+  // ---- 10. A phone: one header row height, centred tab icons, a user list that gets the screen. ----
+  const phone = await browser.newContext({ viewport: { width: 400, height: 860 }, isMobile: true, hasTouch: true, extraHTTPHeaders: { cookie } });
+  const mobile = await phone.newPage();
+  mobile.on("pageerror", error => browserErrors.push(error.stack || error.message));
+  mobile.on("dialog", dialog => { nativeDialogs.push(dialog.message()); void dialog.dismiss(); });
+  await mobile.goto(root, { waitUntil: "domcontentloaded" });
+  await mobile.locator(".composer").waitFor();
+  const header = await mobile.evaluate(() => [".mobile-menu", ".model-trigger", ".surface-action"].map(selector => {
+    const box = document.querySelector(selector).getBoundingClientRect();
+    return { selector, centre: Math.round(box.top + box.height / 2), height: Math.round(box.height) };
+  }));
+  for (const item of header) {
+    assert.equal(item.height, 36, `${item.selector} must share the 36px header row height.`);
+    assert.equal(item.centre, header[0].centre, `${item.selector} must sit on the drawer button's centre line.`);
+  }
+  assert.equal(await mobile.locator(".model-trigger").evaluate(element => getComputedStyle(element).fontSize), "18px");
+
+  await mobile.locator(".mobile-menu").tap();
+  await mobile.locator(".profile-card").tap();
+  await mobile.locator(".settings-panel").waitFor();
+  await delay(300);
+  const offsets = await mobile.evaluate(() => [...document.querySelectorAll(".settings-body nav button")].map(button => {
+    const outer = button.getBoundingClientRect(); const icon = button.querySelector("svg").getBoundingClientRect();
+    return Math.abs((icon.left + icon.width / 2) - (outer.left + outer.width / 2));
+  }));
+  assert.ok(offsets.every(offset => offset < 0.75), `Every settings tab icon must be centred; offsets ${offsets.map(value => value.toFixed(1)).join(", ")}`);
+
+  const usersTab = mobile.locator(".settings-body nav button").filter({ has: mobile.locator("svg.lucide-users") });
+  await usersTab.scrollIntoViewIfNeeded();
+  await usersTab.tap();
+  await mobile.locator(".user-manager-launch").tap();
+  await mobile.locator(".user-manager-dialog").waitFor();
+  await delay(300);
+  assert.notEqual(await mobile.evaluate(() => document.activeElement?.tagName), "INPUT", "A touch screen must not raise the keyboard by focusing the search field.");
+  const frame = await mobile.locator(".user-manager-dialog").evaluate(element => {
+    const style = getComputedStyle(element); const box = element.getBoundingClientRect();
+    return { radius: style.borderTopLeftRadius, height: Math.round(box.height) };
+  });
+  assert.equal(frame.radius, "0px", "The user manager must be full screen on a phone.");
+  assert.equal(frame.height, 860);
+  assert.equal(await mobile.locator(".user-create-fields").isVisible(), false, "The create form starts folded on a phone.");
+  const users = await mobile.evaluate(() => {
+    const list = document.querySelector(".managed-user-list").getBoundingClientRect();
+    const rows = [...document.querySelectorAll(".managed-user-list > div")].map(row => {
+      const box = row.getBoundingClientRect();
+      return { overflow: row.scrollHeight - row.clientHeight, top: box.top, bottom: box.bottom };
+    });
+    return { listHeight: list.height, rows };
+  });
+  assert.equal(users.rows.length, 3);
+  assert.ok(users.listHeight > 400, `The user list must get the screen; it had ${Math.round(users.listHeight)}px.`);
+  for (const [index, row] of users.rows.entries()) {
+    assert.ok(row.overflow <= 0, `User row ${index} overflows its own box by ${row.overflow}px.`);
+    if (index) assert.ok(row.top >= users.rows[index - 1].bottom, `User row ${index} overlaps the row above it.`);
+  }
+  await mobile.locator(".user-create-toggle").tap();
+  assert.equal(await mobile.locator(".user-create-fields").isVisible(), true, "The toggle unfolds the create form.");
+  assert.equal(await mobile.locator(".user-create-toggle").getAttribute("aria-expanded"), "true");
+  await delay(300);
+  if (process.env.BETA14_SHOTS) await mobile.screenshot({ path: path.join(path.resolve(process.env.BETA14_SHOTS), "05-phone-users.png") });
+  await phone.close();
+
+  // A wrapped search field draws its ring on the pill, not as a rectangle on the bare input.
+  await page.locator(".profile-card").click();
+  await page.locator(".settings-panel").waitFor();
+  await page.locator(".settings-body nav button").filter({ has: page.locator("svg.lucide-users") }).click();
+  await page.locator(".user-manager-launch").click();
+  await page.locator(".user-search-field input").waitFor();
+  await delay(250);
+  const wrapped = await page.evaluate(() => ({
+    focused: document.activeElement?.closest(".user-search-field") !== null,
+    input: getComputedStyle(document.activeElement).boxShadow,
+    pill: getComputedStyle(document.querySelector(".user-search-field")).boxShadow,
+  }));
+  assert.ok(wrapped.focused, "With a fine pointer the user search field still receives focus.");
+  assert.equal(wrapped.input, "none", "The bare input inside a pill must not draw its own ring.");
+  assert.notEqual(wrapped.pill, "none", "The pill wrapper carries the focus ring.");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
 
   // ---- 9. No native dialog, and no page error, at any point. ----
   assert.deepEqual(nativeDialogs, [], `A native browser dialog was opened: ${nativeDialogs.join(" | ")}`);

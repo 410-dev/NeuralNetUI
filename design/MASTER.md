@@ -24,6 +24,9 @@
 - Use the dark neutral surface with restrained blue accents already established by the application.
 - Reveal dense technical information progressively through clear, keyboard-accessible disclosure controls.
 - Preserve readable vertical stacks on mobile and never require horizontal page scrolling.
+- On a phone the drawer button, the model picker and the surface actions form one 36px row on a single centre line; the model title does not shrink below the weight of the controls beside it.
+- Administrative dialogs go full screen on a phone. A creation form that sits above a list folds behind its own disclosure there, so the list gets the screen, and each list row keeps its own height rather than letting secondary figures spill onto the next row.
+- An icon-only tab row stays centred once its labels are hidden: a hidden label is still a flex item, so the gap beside it has to go too.
 - Keep settings categories in a horizontally scrollable tab row on narrow screens so every panel remains reachable without compressing its icon target.
 - Group display-only preferences under Appearance; model identifiers and Markdown strikethrough are personal presentation choices.
 - Present connections, models, and reasoning presets as reorderable selections with drag-and-drop plus adjacent up/down controls; the saved order must match the chat pickers.
@@ -132,7 +135,8 @@
 - A destructive action that is genuinely two different acts asks which one. Deleting a request that exists in several branches offers this branch or every branch instead of guessing.
 - Actions on a sent message stay out of the way until the pointer comes near. The hover target is the whole conversation row, extended into the gaps above and below, not the bubble alone; coarse pointers keep the actions visible.
 - Every surface that calls itself a dialog takes the shared focus behaviour — the trap, Escape, the inert background, the restored opener. The picture viewer and the mobile action sheet are dialogs like any other; announcing the role without the behaviour is worse than not announcing it.
-- A dialog with something to work in opens with the keyboard there, not on Close. Header controls come first in the markup, so the field names itself and the shared hook honours it.
+- A dialog with something to work in opens with the keyboard there, not on Close. Header controls come first in the markup, so the field names itself and the shared hook honours it — only where a fine pointer is in use, because on a touch screen focusing a field raises the keyboard over the dialog before anyone asked to type.
+- A field drawn inside its own pill wrapper takes the focus ring on the wrapper, never as a rectangle on the bare input.
 - Reporting an absence is one voice, not one per surface: the same colour, size and rhythm wherever nothing was found. The dashed block stays reserved for the state that asks the person to add something. Waiting reads the same everywhere too, and a notice is a bordered message rather than loose text under a form.
 - A title that can grow gives way to the controls beside it. Where those controls are positioned over the page rather than laid out next to it, the title reserves their side of the row itself and truncates.
 - The document's own language follows the chosen language, so an English interface is never announced in a Korean voice.
