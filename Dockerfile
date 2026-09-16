@@ -1,6 +1,8 @@
 FROM node:22-bookworm-slim AS dependencies
 
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci
 
@@ -10,7 +12,9 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
-RUN npm run build && mkdir -p public
+RUN NEURAL_CHAT_DATA_DIR=/tmp/neural-chat-build-data node --experimental-strip-types --input-type=module -e "await import('./lib/database.ts')" \
+    && NEURAL_CHAT_DATA_DIR=/tmp/neural-chat-build-data npm run build \
+    && mkdir -p public
 
 FROM node:22-bookworm-slim AS runner
 
