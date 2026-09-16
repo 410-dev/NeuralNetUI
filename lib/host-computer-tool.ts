@@ -113,9 +113,10 @@ function globRegex(query: string) {
   return new RegExp(escaped || ".*", "i");
 }
 
-async function searchFiles(root: string, query: string, maximum: number) {
+async function searchFiles(root: string, query: string, maximum: number, signal?: AbortSignal) {
   const matcher = globRegex(query); const found: Array<Record<string, unknown>> = []; const pending = [root]; let visitedDirectories = 0;
   while (pending.length && found.length < maximum && visitedDirectories < 10_000) {
+    signal?.throwIfAborted();
     const directory = pending.shift()!;
     visitedDirectories += 1;
     let entries; try { entries = await fs.readdir(directory, { withFileTypes: true }); } catch (error) {
@@ -176,16 +177,47 @@ async function movePath(source: string, destination: string, overwrite: boolean)
   }
 }
 
-async function captureCommand(program: string, argv: string[], timeoutMs: number, cwd?: string) {
+function terminateProcessTree(child: ChildProcess) {
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === "win32") {
+    try {
+      const killer = spawn("taskkill.exe", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, shell: false, stdio: "ignore" });
+      killer.once("error", () => { if (child.exitCode === null && child.signalCode === null) child.kill(); });
+      killer.once("exit", () => { if (child.exitCode === null && child.signalCode === null) child.kill(); });
+      killer.unref();
+    } catch { child.kill(); }
+    return;
+  }
+  try { process.kill(-child.pid, "SIGTERM"); } catch { child.kill(); }
+}
+
+function timedSignal(signal: AbortSignal | undefined, milliseconds: number) {
+  const timeout = AbortSignal.timeout(milliseconds);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+async function captureCommand(program: string, argv: string[], timeoutMs: number, cwd?: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   return new Promise<{ stdout: Buffer; stderr: Buffer; exitCode: number | null }>((resolve, reject) => {
-    const child = spawn(program, argv, { cwd, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"] });
-    const stdout: Buffer[] = []; const stderr: Buffer[] = []; let stdoutSize = 0; let stderrSize = 0; let timedOut = false;
+    const child = spawn(program, argv, { cwd, detached: process.platform !== "win32", windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    const stdout: Buffer[] = []; const stderr: Buffer[] = []; let stdoutSize = 0; let stderrSize = 0; let timedOut = false; let aborted = false; let settled = false;
     const collect = (chunks: Buffer[], chunk: Buffer, current: number) => { const remaining = Math.max(0, MAX_OUTPUT_BYTES - current); if (remaining) chunks.push(chunk.subarray(0, remaining)); return current + chunk.length; };
+    const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); };
+    const finish = (error?: unknown, value?: { stdout: Buffer; stderr: Buffer; exitCode: number | null }) => {
+      if (settled) return; settled = true; cleanup(); error ? reject(error) : resolve(value!);
+    };
+    const abort = () => { aborted = true; terminateProcessTree(child); };
     child.stdout?.on("data", (chunk: Buffer) => { stdoutSize = collect(stdout, chunk, stdoutSize); });
     child.stderr?.on("data", (chunk: Buffer) => { stderrSize = collect(stderr, chunk, stderrSize); });
-    const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
-    child.on("error", error => { clearTimeout(timer); reject(error); });
-    child.on("close", exitCode => { clearTimeout(timer); if (timedOut) return reject(new Error(`Command timed out after ${Math.round(timeoutMs / 1000)} seconds.`)); resolve({ stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr), exitCode }); });
+    const timer = setTimeout(() => { timedOut = true; terminateProcessTree(child); }, timeoutMs);
+    child.on("error", error => finish(error));
+    child.on("close", exitCode => {
+      if (aborted) return finish(signal?.reason || new DOMException("The operation was aborted.", "AbortError"));
+      if (timedOut) return finish(new Error(`Command timed out after ${Math.round(timeoutMs / 1000)} seconds.`));
+      finish(undefined, { stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr), exitCode });
+    });
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
   });
 }
 
@@ -195,10 +227,11 @@ function shellExecutable(shell: string) {
   return { program: process.platform === "win32" ? "powershell.exe" : "pwsh", args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"] };
 }
 
-async function uploadTemporary(filePath: string, maxDownloads: number) {
+async function uploadTemporary(filePath: string, maxDownloads: number, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const stats = await fs.stat(filePath); if (!stats.isFile()) throw new Error("Only regular files can be uploaded.");
   const metadata = new URLSearchParams({ filename: path.basename(filePath), size: String(stats.size), max_downloads: String(maxDownloads) });
-  const response = await fetch("https://temp.hysong.dev/api/curl/uploads", { method: "POST", body: metadata, signal: AbortSignal.timeout(20_000) });
+  const response = await fetch("https://temp.hysong.dev/api/curl/uploads", { method: "POST", body: metadata, signal: timedSignal(signal, 20_000) });
   if (!response.ok) throw new Error(`Upload initialization failed (${response.status}).`);
   const [uploadId, uploadToken, chunkSizeText, totalChunksText] = (await response.text()).trim().split("\t");
   const chunkSize = Number(chunkSizeText); const totalChunks = Number(totalChunksText);
@@ -206,46 +239,51 @@ async function uploadTemporary(filePath: string, maxDownloads: number) {
   const handle = await fs.open(filePath, "r");
   try {
     for (let index = 0; index < totalChunks; index += 1) {
+      signal?.throwIfAborted();
       const length = Math.min(chunkSize, stats.size - index * chunkSize); const buffer = Buffer.alloc(length);
       await handle.read(buffer, 0, length, index * chunkSize);
-      const part = await fetch(`https://temp.hysong.dev/api/uploads/${encodeURIComponent(uploadId)}/chunks/${index}`, { method: "PUT", headers: { "X-Upload-Token": uploadToken, "Content-Type": "application/octet-stream" }, body: buffer, signal: AbortSignal.timeout(60_000) });
+      const part = await fetch(`https://temp.hysong.dev/api/uploads/${encodeURIComponent(uploadId)}/chunks/${index}`, { method: "PUT", headers: { "X-Upload-Token": uploadToken, "Content-Type": "application/octet-stream" }, body: buffer, signal: timedSignal(signal, 60_000) });
       if (!part.ok) throw new Error(`Upload chunk ${index + 1}/${totalChunks} failed (${part.status}).`);
     }
   } finally { await handle.close(); }
-  const complete = await fetch(`https://temp.hysong.dev/api/curl/uploads/${encodeURIComponent(uploadId)}/complete`, { method: "POST", headers: { "X-Upload-Token": uploadToken }, signal: AbortSignal.timeout(20_000) });
+  const complete = await fetch(`https://temp.hysong.dev/api/curl/uploads/${encodeURIComponent(uploadId)}/complete`, { method: "POST", headers: { "X-Upload-Token": uploadToken }, signal: timedSignal(signal, 20_000) });
   if (!complete.ok) throw new Error(`Upload completion failed (${complete.status}).`);
   const resultText = (await complete.text()).trim();
   return { uploaded: true, filename: path.basename(filePath), size: stats.size, maxDownloads, response: resultText };
 }
 
-async function screenshot() {
+async function screenshot(signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const work = await fs.mkdtemp(path.join(os.tmpdir(), "neural-chat-screen-")); const target = path.join(work, "screen.png");
   try {
     if (process.platform === "win32" && process.env.NEURAL_CHAT_WINDOWS_SERVICE === "1") {
-      const buffer = await trayScreenshot();
+      const buffer = await trayScreenshot(signal);
       return { buffer, source: "interactive-tray" };
     }
     if (process.platform === "win32") {
       const escaped = target.replace(/'/g, "''");
       const script = `Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; $i=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($i); try{$g.CopyFromScreen($b.Left,$b.Top,0,0,$i.Size);$i.Save('${escaped}',[System.Drawing.Imaging.ImageFormat]::Png)}finally{$g.Dispose();$i.Dispose()}`;
-      const shell = shellExecutable("powershell"); const result = await captureCommand(shell.program, [...shell.args, script], 30_000); if (result.exitCode !== 0) throw new Error(result.stderr.toString("utf8") || "Screenshot command failed.");
+      const shell = shellExecutable("powershell"); const result = await captureCommand(shell.program, [...shell.args, script], 30_000, undefined, signal); if (result.exitCode !== 0) throw new Error(result.stderr.toString("utf8") || "Screenshot command failed.");
     } else if (process.platform === "darwin") {
-      const result = await captureCommand("screencapture", ["-x", target], 30_000); if (result.exitCode !== 0) throw new Error(result.stderr.toString("utf8") || "Screenshot command failed.");
+      const result = await captureCommand("screencapture", ["-x", target], 30_000, undefined, signal); if (result.exitCode !== 0) throw new Error(result.stderr.toString("utf8") || "Screenshot command failed.");
     } else {
       const tool = existsSync("/usr/bin/gnome-screenshot") ? "/usr/bin/gnome-screenshot" : existsSync("/usr/bin/import") ? "/usr/bin/import" : "";
       if (!tool) throw new Error("No supported screenshot utility was found (gnome-screenshot or ImageMagick import). ");
       const argv = tool.endsWith("gnome-screenshot") ? ["-f", target] : ["-window", "root", target];
-      const result = await captureCommand(tool, argv, 30_000); if (result.exitCode !== 0) throw new Error(result.stderr.toString("utf8") || "Screenshot command failed.");
+      const result = await captureCommand(tool, argv, 30_000, undefined, signal); if (result.exitCode !== 0) throw new Error(result.stderr.toString("utf8") || "Screenshot command failed.");
     }
     const buffer = await fs.readFile(target);
     return { buffer, source: "host" };
   } finally { await fs.rm(work, { recursive: true, force: true }).catch(() => undefined); }
 }
 
-async function trayScreenshot() {
+async function trayScreenshot(signal?: AbortSignal) {
+  signal?.throwIfAborted();
   return new Promise<Buffer>((resolve, reject) => {
     const socket = createConnection("\\\\.\\pipe\\NeuralNetUI.HostAgent"); let response = ""; let settled = false;
-    const finish = (error?: Error, value?: Buffer) => { if (settled) return; settled = true; socket.destroy(); error ? reject(error) : resolve(value!); };
+    const abort = () => finish(signal?.reason instanceof Error ? signal.reason : new DOMException("The operation was aborted.", "AbortError"));
+    const finish = (error?: Error, value?: Buffer) => { if (settled) return; settled = true; signal?.removeEventListener("abort", abort); socket.destroy(); error ? reject(error) : resolve(value!); };
+    signal?.addEventListener("abort", abort, { once: true });
     socket.setTimeout(15_000, () => finish(new Error("The interactive tray screenshot bridge timed out.")));
     socket.on("connect", () => socket.write('{"action":"screenshot"}\n'));
     socket.on("data", chunk => { response += chunk.toString("utf8"); if (response.length > 70 * 1024 * 1024) return finish(new Error("The tray screenshot response was too large.")); const newline = response.indexOf("\n"); if (newline < 0) return; try { const payload = JSON.parse(response.slice(0, newline)) as { ok?: boolean; data?: string; error?: string }; if (!payload.ok || !payload.data) return finish(new Error(payload.error || "The tray screenshot bridge failed.")); finish(undefined, Buffer.from(payload.data, "base64")); } catch { finish(new Error("The tray screenshot bridge returned invalid data.")); } });
@@ -253,10 +291,11 @@ async function trayScreenshot() {
   });
 }
 
-export async function executeHostComputerTool(sessionKey: string, args: HostArgs, userId?: string, settings?: ToolSettings, model?: Pick<ModelConfig, "visionImageMode" | "visionMaxEdgePixels">): Promise<HostToolExecution> {
+export async function executeHostComputerTool(sessionKey: string, args: HostArgs, userId?: string, settings?: ToolSettings, model?: Pick<ModelConfig, "visionImageMode" | "visionMaxEdgePixels">, signal?: AbortSignal): Promise<HostToolExecution> {
   if (!isHostComputerAvailable()) throw new Error("The host computer tool is unavailable in a containerized environment.");
+  signal?.throwIfAborted();
   const action = stringArg(args, "action");
-  if (action === "search_files") { const root = resolvedPath(args); return { result: await searchFiles(root, stringArg(args, "query", false) || "*", Math.max(1, Math.min(500, Number(args.max_results || 100)))) }; }
+  if (action === "search_files") { const root = resolvedPath(args); return { result: await searchFiles(root, stringArg(args, "query", false) || "*", Math.max(1, Math.min(500, Number(args.max_results || 100))), signal) }; }
   if (action === "inspect_path") { const target = resolvedPath(args); const stats = await fs.lstat(target); return { result: { path: target, type: stats.isDirectory() ? "directory" : stats.isFile() ? "file" : stats.isSymbolicLink() ? "symlink" : "other", size: stats.size, createdAt: stats.birthtime.toISOString(), modifiedAt: stats.mtime.toISOString(), mode: stats.mode.toString(8), readable: await fs.access(target, constants.R_OK).then(() => true, () => false), writable: await fs.access(target, constants.W_OK).then(() => true, () => false) } }; }
   if (action === "read_file") { const target = resolvedPath(args); const stats = await fs.stat(target); if (!stats.isFile()) throw new Error("Path is not a regular file."); if (stats.size > MAX_READ_BYTES) throw new Error(`File exceeds the ${MAX_READ_BYTES}-byte read limit.`); const buffer = await fs.readFile(target); const encoding = args.encoding === "base64" ? "base64" : "utf8"; return { result: { path: target, encoding, size: buffer.length, content: buffer.toString(encoding) } }; }
   if (action === "write_file") { const target = resolvedPath(args); const encoding = args.encoding === "base64" ? "base64" : "utf8"; const data = Buffer.from(String(args.content || ""), encoding); await atomicWrite(target, data, args.overwrite === true); return { result: { path: target, written: data.length, atomic: true } }; }
@@ -267,15 +306,16 @@ export async function executeHostComputerTool(sessionKey: string, args: HostArgs
   if (action === "store_file") {
     if (!userId) throw new Error("A storage owner is required for private file storage.");
     const stored=await saveHostFile(resolvedPath(args),userId);const image=stored.metadata.mimeType.startsWith("image/");
-    const modelContent=settings&&(image||stored.metadata.mimeType==="application/pdf")?await readUploadModelContent(stored.metadata.id,userId,settings,model):image?[{type:"image_file" as const,file_path:stored.path,mime_type:stored.metadata.mimeType}]:[];
+    const modelContent=settings&&(image||stored.metadata.mimeType==="application/pdf")?await readUploadModelContent(stored.metadata.id,userId,settings,model,signal):image?[{type:"image_file" as const,file_path:stored.path,mime_type:stored.metadata.mimeType}]:[];
     return{result:{stored:true,storage:"user",attachment:stored.metadata,markdown:stored.markdown,downloadUrl:`${stored.metadata.url}?download=1`,visibility:"owner-only",loadedIntoModelContext:Boolean(modelContent.length)},content:[{type:"text",text:`The host file is stored privately and available in model context. Use this exact Markdown in the user-facing answer: ${stored.markdown}`},...modelContent]};
   }
-  if (action === "upload_temp") return { result: await uploadTemporary(resolvedPath(args), Math.max(1, Math.min(100, Number(args.max_downloads || 1)))) };
+  if (action === "upload_temp") return { result: await uploadTemporary(resolvedPath(args), Math.max(1, Math.min(100, Number(args.max_downloads || 1))), signal) };
   if (action === "list_processes") { const session = processSessions.get(sessionKey); return { result: { processes: [...(session?.values() || [])].map(item => ({ pid: item.pid, name: item.name, program: item.program, startedAt: item.startedAt })) } }; }
   if (action === "start_process") {
     const program = stringArg(args, "program"); const argv = Array.isArray(args.arguments) ? args.arguments.map(String) : []; const cwd = args.cwd ? path.resolve(String(args.cwd)) : undefined;
     const child = spawn(program, argv, { cwd, detached: false, windowsHide: true, shell: false, stdio: "ignore" });
     await new Promise<void>((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
+    try { signal?.throwIfAborted(); } catch (error) { terminateProcessTree(child); throw error; }
     if (!child.pid) throw new Error("The background program did not return a PID.");
     const session = processSessions.get(sessionKey) || new Map<number, ManagedProcess>(); processSessions.set(sessionKey, session);
     const managed = { child, pid: child.pid, name: stringArg(args, "process_name", false) || path.basename(program), program, startedAt: new Date().toISOString() }; session.set(child.pid, managed);
@@ -283,12 +323,12 @@ export async function executeHostComputerTool(sessionKey: string, args: HostArgs
     return { result: { pid: managed.pid, name: managed.name, program, startedAt: managed.startedAt } };
   }
   if (action === "kill_process") { const pid = Math.floor(Number(args.pid)); const session = processSessions.get(sessionKey); const managed = session?.get(pid); if (!managed) throw new Error("That PID was not started by the host tool in this conversation."); const signalled = managed.child.kill(); return { result: { pid, name: managed.name, signalled } }; }
-  if (action === "run_shell") { const shell = shellExecutable(stringArg(args, "shell")); const command = stringArg(args, "command"); const timeout = Math.max(1, Math.min(300, Number(args.timeout_seconds || 60))) * 1000; const result = await captureCommand(shell.program, [...shell.args, command], timeout, args.cwd ? path.resolve(String(args.cwd)) : undefined); return { result: { shell: args.shell, exitCode: result.exitCode, stdout: result.stdout.toString("utf8"), stderr: result.stderr.toString("utf8"), truncated: result.stdout.length >= MAX_OUTPUT_BYTES || result.stderr.length >= MAX_OUTPUT_BYTES } }; }
+  if (action === "run_shell") { const shell = shellExecutable(stringArg(args, "shell")); const command = stringArg(args, "command"); const timeout = Math.max(1, Math.min(300, Number(args.timeout_seconds || 60))) * 1000; const result = await captureCommand(shell.program, [...shell.args, command], timeout, args.cwd ? path.resolve(String(args.cwd)) : undefined, signal); return { result: { shell: args.shell, exitCode: result.exitCode, stdout: result.stdout.toString("utf8"), stderr: result.stderr.toString("utf8"), truncated: result.stdout.length >= MAX_OUTPUT_BYTES || result.stderr.length >= MAX_OUTPUT_BYTES } }; }
   if (action === "screenshot") {
     if (!userId) throw new Error("A storage owner is required for screenshots.");
-    const captured = await screenshot();
+    const captured = await screenshot(signal);
     const stored = await saveGeneratedImage(captured.buffer, userId);
-    const modelContent = settings ? await readUploadModelContent(stored.metadata.id, userId, settings, model) : [{ type:"image_file" as const, file_path:stored.path, mime_type:"image/png" as const }];
+    const modelContent = settings ? await readUploadModelContent(stored.metadata.id, userId, settings, model, signal) : [{ type:"image_file" as const, file_path:stored.path, mime_type:"image/png" as const }];
     return {
       result: { screenshot:true, mimeType:"image/png", size:captured.buffer.length, source:captured.source, attachment:stored.metadata, storage:"user" },
       content: [{ type:"text", text:`Current host-computer screenshot stored as ${stored.metadata.name}.` }, ...modelContent] satisfies ModelContentPart[],

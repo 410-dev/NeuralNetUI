@@ -414,7 +414,7 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
     const browserResult = await waitForBrowser(job, call);
     const value = browserResult && typeof browserResult === "object" ? browserResult as Record<string, unknown> : {};
     if (value.error) return { result: { error: String(value.error) } };
-    return { result: await reverseGeocode(Number(value.latitude), Number(value.longitude), Number(value.accuracy)) };
+    return { result: await reverseGeocode(Number(value.latitude), Number(value.longitude), Number(value.accuracy), job.controller.signal) };
   }
   if (call.function.name === "ask_multiple_choice" && enabled.multipleChoice) {
     const normalized = validateQuestions(args, settings.maxMultipleChoiceQuestions); updateToolEvent(job, call.id, { arguments: normalized });
@@ -428,15 +428,15 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
       const response = await waitForBrowser(job, call);
       return { result: { session_id: sessionId, ...(response && typeof response === "object" ? response as Record<string, unknown> : { completed: true }) } };
     }
-    return executeBrowserTool(ownerKey, call.function.arguments, settings, job.userId);
+    return executeBrowserTool(ownerKey, call.function.arguments, settings, job.userId, job.controller.signal);
   }
   if (call.function.name === "host_computer") {
     const authorization = await authorizeHostAction(job, call, args, hostPolicy);
     if (!authorization.approved) return { result: authorization.result };
-    return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args, job.userId, settings, model);
+    return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args, job.userId, settings, model, job.controller.signal);
   }
-  if (call.function.name === "storage_access" && enabled.storageAccess) return executeStorageAccessTool(args, job.userId, settings, model);
-  return executeWebTool(call.function.name, call.function.arguments, enabled, settings);
+  if (call.function.name === "storage_access" && enabled.storageAccess) return executeStorageAccessTool(args, job.userId, settings, model, job.controller.signal);
+  return executeWebTool(call.function.name, call.function.arguments, enabled, settings, job.controller.signal);
 }
 
 async function run(job: ChatJob) {

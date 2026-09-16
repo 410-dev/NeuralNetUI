@@ -84,3 +84,24 @@ test("host file actions and conversation process tracking work end to end", { sk
     await executeHostComputerTool(session, { action: "delete", path: path.join(root, "renamed.txt") });
   } finally { closeHostComputerSession(session); await rm(root, { recursive: true, force: true }); }
 });
+
+test("aborting a running host shell terminates it before its timeout", { skip: !isHostComputerAvailable(), timeout: 10_000 }, async () => {
+  const controller = new AbortController();
+  const startedAt = performance.now();
+  const execution = executeHostComputerTool(
+    `cancel:${crypto.randomUUID()}`,
+    {
+      action: "run_shell",
+      shell: process.platform === "win32" ? "powershell" : "bash",
+      command: process.platform === "win32" ? "Start-Sleep -Seconds 30" : "sleep 30",
+      timeout_seconds: 60,
+    },
+    undefined,
+    undefined,
+    undefined,
+    controller.signal,
+  );
+  setTimeout(() => controller.abort(), 150);
+  await assert.rejects(execution, (error: unknown) => error instanceof Error && error.name === "AbortError");
+  assert.ok(performance.now() - startedAt < 5_000, "The host command did not stop promptly after cancellation.");
+});

@@ -303,7 +303,8 @@ export async function readUploadDataUrl(id: string, userId: string) {
   return `data:${metadata.mimeType};base64,${data.toString("base64")}`;
 }
 
-export async function readUploadModelContent(id: string, userId: string, settings: ToolSettings, model?: Pick<ModelConfig, "visionImageMode" | "visionMaxEdgePixels">): Promise<ModelContentPart[]> {
+export async function readUploadModelContent(id: string, userId: string, settings: ToolSettings, model?: Pick<ModelConfig, "visionImageMode" | "visionMaxEdgePixels">, signal?: AbortSignal): Promise<ModelContentPart[]> {
+  signal?.throwIfAborted();
   const { metadata, paths } = await readUpload(id, userId);
   if (metadata.mimeType.startsWith("image/")) {
     const vision = resolvedVisionSettings(model);
@@ -324,7 +325,8 @@ export async function readUploadModelContent(id: string, userId: string, setting
       })().finally(() => { modelImageJobs.delete(jobKey); });
       modelImageJobs.set(jobKey, job);
     }
-    return [{ type: "image_file", file_path: await job, mime_type: "image/jpeg" }];
+    const filePath = await job; signal?.throwIfAborted();
+    return [{ type: "image_file", file_path: filePath, mime_type: "image/jpeg" }];
   }
   if (metadata.mimeType === "application/pdf") {
     let cached: PdfExtraction | undefined;
@@ -333,12 +335,12 @@ export async function readUploadModelContent(id: string, userId: string, setting
       if (candidate.pageLimit === settings.pdfPageLimit && candidate.characterLimit === settings.pdfTextCharacterLimit) cached = candidate;
     } catch { /* Rebuild missing or stale extraction cache. */ }
     if (!cached) {
-      cached = await extractPdf(paths.original, settings);
+      cached = await extractPdf(paths.original, settings, signal);
       const cacheTemp = `${paths.extraction}.${randomUUID()}.tmp`;
       try { await fs.writeFile(cacheTemp, JSON.stringify(cached), { encoding: "utf8", mode: 0o600 }); await fs.rename(cacheTemp, paths.extraction); }
       finally { await fs.unlink(cacheTemp).catch(() => undefined); }
     }
-    const processed = await pdfModelContent(paths.original, metadata.name, settings, cached);
+    const processed = await pdfModelContent(paths.original, metadata.name, settings, cached, signal);
     return processed.content;
   }
   throw new Error("Unsupported attachment type.");

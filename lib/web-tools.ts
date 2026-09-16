@@ -120,13 +120,19 @@ async function assertPublicUrl(raw: string) {
   return url;
 }
 
-async function limitedBuffer(response: Response, limit: number, allowTruncation: boolean) {
+function timedSignal(signal: AbortSignal | undefined, milliseconds: number) {
+  const timeout = AbortSignal.timeout(milliseconds);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+async function limitedBuffer(response: Response, limit: number, allowTruncation: boolean, signal?: AbortSignal) {
   const declared = Number(response.headers.get("content-length"));
   if (!allowTruncation && Number.isFinite(declared) && declared > limit) throw new Error(`The file exceeds the configured ${Math.round(limit / 1024 / 1024 * 100) / 100} MB limit.`);
   if (!response.body) return { buffer: Buffer.alloc(0), truncated: false };
   const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
   let truncated = false;
   while (true) {
+    signal?.throwIfAborted();
     const { done, value } = await reader.read(); if (done) break;
     if (size + value.byteLength > limit) {
       if (!allowTruncation) { await reader.cancel(); throw new Error(`The file exceeds the configured ${Math.round(limit / 1024 / 1024 * 100) / 100} MB limit.`); }
@@ -148,7 +154,8 @@ function cleanHtml(html: string, characterLimit: number) {
   return { title: decode(title).replace(/\s+/g, " ").trim(), text: text.slice(0, characterLimit), truncated: text.length > characterLimit };
 }
 
-export async function internetSearch(query: string, maxResults = 5) {
+export async function internetSearch(query: string, maxResults = 5, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const normalized = query.trim().slice(0, 300); if (!normalized) throw new Error("Search query is empty.");
   const virtualEnvPython = path.join(process.cwd(), ".python", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
   const embeddedPython = path.join(process.cwd(), ".python", "python.exe");
@@ -158,17 +165,23 @@ export async function internetSearch(query: string, maxResults = 5) {
   return new Promise((resolve, reject) => {
     const child = spawn(interpreter, [script], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     const stdout: Buffer[] = []; const stderr: Buffer[] = [];
-    const timer = setTimeout(() => { child.kill(); reject(new Error("Internet search timed out.")); }, 25_000);
+    let settled = false;
+    const finish = (error?: unknown, value?: unknown) => { if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener("abort", abort); error ? reject(error) : resolve(value); };
+    const abort = () => { child.kill(); finish(signal?.reason || new DOMException("The operation was aborted.", "AbortError")); };
+    const timer = setTimeout(() => { child.kill(); finish(new Error("Internet search timed out.")); }, 25_000);
     child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk)); child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-    child.on("error", (error) => { clearTimeout(timer); reject(new Error(`Unable to start DDGS. Install Python dependencies from requirements.txt. ${error.message}`)); });
+    child.stdin.on("error", (error) => { if (!settled) finish(new Error(`Unable to send the DDGS request: ${error.message}`)); });
+    child.on("error", (error) => finish(new Error(`Unable to start DDGS. Install Python dependencies from requirements.txt. ${error.message}`)));
     child.on("close", (code) => {
-      clearTimeout(timer);
+      if (settled) return;
       let result: { error?: string; query?: string; results?: unknown[] } = {};
       try { result = JSON.parse(Buffer.concat(stdout).toString("utf8")); }
-      catch { return reject(new Error(Buffer.concat(stderr).toString("utf8") || "DDGS returned an invalid response.")); }
-      if (code !== 0 || result.error) return reject(new Error(result.error || Buffer.concat(stderr).toString("utf8") || "DDGS search failed."));
-      resolve({ query: result.query || normalized, results: result.results || [] });
+      catch { return finish(new Error(Buffer.concat(stderr).toString("utf8") || "DDGS returned an invalid response.")); }
+      if (code !== 0 || result.error) return finish(new Error(result.error || Buffer.concat(stderr).toString("utf8") || "DDGS search failed."));
+      finish(undefined, { query: result.query || normalized, results: result.results || [] });
     });
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
     child.stdin.end(payload);
   });
 }
@@ -180,7 +193,7 @@ function responseFilename(response: Response, url: URL) {
   try { return decodeURIComponent(encoded || plain || path.basename(url.pathname)); } catch { return path.basename(url.pathname); }
 }
 
-async function downloadPdf(response: Response, limit: number) {
+async function downloadPdf(response: Response, limit: number, signal?: AbortSignal) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "neural-chat-download-"));
   const target = path.join(workDir, "document.pdf");
   const declared = Number(response.headers.get("content-length"));
@@ -190,6 +203,7 @@ async function downloadPdf(response: Response, limit: number) {
     if (!response.body) throw new Error("The server returned no PDF body.");
     const reader = response.body.getReader();
     while (true) {
+      signal?.throwIfAborted();
       const { done, value } = await reader.read(); if (done) break;
       size += value.byteLength;
       if (size > limit) { await reader.cancel(); throw new Error(`The PDF exceeds the configured ${Math.round(limit / 1024 / 1024 * 100) / 100} MB limit.`); }
@@ -205,11 +219,12 @@ async function downloadPdf(response: Response, limit: number) {
   return { workDir, target, size };
 }
 
-export async function visitPage(rawUrl: string, settings: ToolSettings): Promise<WebToolExecution> {
+export async function visitPage(rawUrl: string, settings: ToolSettings, signal?: AbortSignal): Promise<WebToolExecution> {
+  signal?.throwIfAborted();
   await cleanupTemporaryDocuments(settings);
   let url = await assertPublicUrl(rawUrl); let response: Response | undefined;
   for (let redirects = 0; redirects <= 4; redirects += 1) {
-    response = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(15_000), headers: pageVisitHeaders() });
+    response = await fetch(url, { redirect: "manual", signal: timedSignal(signal, 15_000), headers: pageVisitHeaders() });
     if (![301, 302, 303, 307, 308].includes(response.status)) break;
     const location = response.headers.get("location"); if (!location) break;
     url = await assertPublicUrl(new URL(location, url).toString());
@@ -220,14 +235,14 @@ export async function visitPage(rawUrl: string, settings: ToolSettings): Promise
   const kind = classifyDocument(contentType, filename);
   if (kind === "archive") throw new Error("Archive files are not opened by the page visit tool.");
   if (kind === "pdf") {
-    const downloaded = await downloadPdf(response, settings.pdfSizeLimitMb * 1024 * 1024);
+    const downloaded = await downloadPdf(response, settings.pdfSizeLimitMb * 1024 * 1024, signal);
     try {
-      const processed = await pdfModelContent(downloaded.target, filename || "document.pdf", settings);
+      const processed = await pdfModelContent(downloaded.target, filename || "document.pdf", settings, undefined, signal);
       return { result: { url: url.toString(), contentType, size: downloaded.size, ...processed.result }, content: processed.content };
     } finally { await fs.rm(downloaded.workDir, { recursive: true, force: true }).catch(() => undefined); }
   }
   if (kind === "image") {
-    const downloaded = await limitedBuffer(response, settings.imageDownloadLimitMb * 1024 * 1024, false);
+    const downloaded = await limitedBuffer(response, settings.imageDownloadLimitMb * 1024 * 1024, false, signal);
     const detectedMimeType = sniffRasterMimeType(downloaded.buffer);
     if (!detectedMimeType) throw new Error("The URL did not return a valid raster image.");
     const mimeType = detectedMimeType;
@@ -236,7 +251,7 @@ export async function visitPage(rawUrl: string, settings: ToolSettings): Promise
       content: [{ type: "text", text: `[Image loaded from ${url.toString()}]` }, { type: "image_url", image_url: { url: `data:${mimeType};base64,${downloaded.buffer.toString("base64")}` } }],
     };
   }
-  const downloaded = await limitedBuffer(response, settings.textDownloadLimitMb * 1024 * 1024, true);
+  const downloaded = await limitedBuffer(response, settings.textDownloadLimitMb * 1024 * 1024, true, signal);
   const sniffed = sniffDocument(downloaded.buffer, contentType, filename);
   if (sniffed !== "text") throw new Error("This URL returned an unsupported binary file.");
   const html = /text\/html|application\/xhtml\+xml/i.test(contentType);
@@ -246,11 +261,12 @@ export async function visitPage(rawUrl: string, settings: ToolSettings): Promise
   return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
 }
 
-export async function executeWebTool(name: string, rawArguments: string, enabled: EnabledWebTools, settings: ToolSettings): Promise<WebToolExecution> {
+export async function executeWebTool(name: string, rawArguments: string, enabled: EnabledWebTools, settings: ToolSettings, signal?: AbortSignal): Promise<WebToolExecution> {
+  signal?.throwIfAborted();
   let args: Record<string, unknown> = {};
   try { args = JSON.parse(rawArguments || "{}"); } catch { throw new Error("Tool arguments were not valid JSON."); }
-  if (name === "internet_search" && enabled.internetSearch) return { result: await internetSearch(String(args.query || ""), Number(args.max_results || 5)) };
-  if (name === "visit_page" && enabled.pageVisit) return visitPage(String(args.url || ""), settings);
+  if (name === "internet_search" && enabled.internetSearch) return { result: await internetSearch(String(args.query || ""), Number(args.max_results || 5), signal) };
+  if (name === "visit_page" && enabled.pageVisit) return visitPage(String(args.url || ""), settings, signal);
   throw new Error(`Tool ${name} is not enabled.`);
 }
 
@@ -267,11 +283,11 @@ export function currentTime(timeZone?: string, locale = "en-US") {
   };
 }
 
-export async function reverseGeocode(latitude: number, longitude: number, accuracy?: number) {
+export async function reverseGeocode(latitude: number, longitude: number, accuracy?: number, signal?: AbortSignal) {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) throw new Error("The browser returned invalid coordinates.");
   const url = new URL("https://nominatim.openstreetmap.org/reverse");
   url.searchParams.set("format", "jsonv2"); url.searchParams.set("lat", String(latitude)); url.searchParams.set("lon", String(longitude)); url.searchParams.set("zoom", "18"); url.searchParams.set("addressdetails", "1");
-  const response = await fetch(url, { signal: AbortSignal.timeout(12_000), headers: { "User-Agent": "NeuralChat/1.3 location-tool", "Accept-Language": "ko,en;q=0.8" } });
+  const response = await fetch(url, { signal: timedSignal(signal, 12_000), headers: { "User-Agent": "NeuralChat/1.3 location-tool", "Accept-Language": "ko,en;q=0.8" } });
   if (!response.ok) throw new Error(`Reverse geocoding failed (${response.status}).`);
   const payload = await response.json() as { display_name?: string; address?: Record<string, string> };
   const address = payload.address || {};

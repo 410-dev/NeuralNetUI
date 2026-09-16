@@ -488,37 +488,60 @@ async function capture(session: BrowserSession, fullPage: boolean, userId?: stri
   };
 }
 
-async function pause(seconds: number) {
-  if (seconds > 0) await new Promise((resolve) => setTimeout(resolve, seconds * 1_000));
+async function pause(seconds: number, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  if (seconds <= 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(finish, seconds * 1_000);
+    const abort = () => finish(signal?.reason instanceof Error ? signal.reason : new DOMException("The operation was aborted.", "AbortError"));
+    function finish(error?: Error) { clearTimeout(timer); signal?.removeEventListener("abort", abort); error ? reject(error) : resolve(); }
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+  });
 }
 
-export async function executeBrowserTool(ownerKey: string, rawArguments: string, settings: ToolSettings, userId?: string): Promise<BrowserToolExecution> {
+function closeSessionOnAbort(session: BrowserSession, signal?: AbortSignal) {
+  if (!signal) return () => undefined;
+  const abort = () => { void closeSession(session); };
+  signal.addEventListener("abort", abort, { once: true });
+  if (signal.aborted) abort();
+  return () => signal.removeEventListener("abort", abort);
+}
+
+export async function executeBrowserTool(ownerKey: string, rawArguments: string, settings: ToolSettings, userId?: string, signal?: AbortSignal): Promise<BrowserToolExecution> {
+  signal?.throwIfAborted();
   let raw: unknown;
   try { raw = JSON.parse(rawArguments || "{}"); } catch { throw new Error("Browser tool arguments were not valid JSON."); }
   const action = normalizeBrowserAction(raw);
   if (action.action === "open") {
     const url = await assertPublicBrowserUrl(action.url);
     const session = await newSession(ownerKey, settings.maxBrowserTabs);
+    const detachAbort = closeSessionOnAbort(session, signal);
     try {
-      const tab = activeTab(session); await tab.page.goto(url.toString(), { waitUntil: "domcontentloaded" });
-      await pause(action.waitSeconds);
+      signal?.throwIfAborted();
+      const tab = activeTab(session); await tab.page.goto(url.toString(), { waitUntil: "domcontentloaded" }); signal?.throwIfAborted();
+      await pause(action.waitSeconds, signal);
       if (action.screenshot) return capture(session, action.fullPage, userId);
       const state = await snapshot(tab.page, settings.textCharacterLimit);
       const result = { sessionId: session.id, tabId: tab.id, maxTabs: session.maxTabs, ...state };
       return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
     } catch (error) { await closeSession(session); throw error; }
+    finally { detachAbort(); }
   }
   const session = ownedSession(ownerKey, action.sessionId);
-  if (action.action === "close") { await closeSession(session); return { result: { sessionId: action.sessionId, closed: true } }; }
-  if (action.action === "list_tabs") return { result: { sessionId: session.id, activeTabId: session.activeTabId, maxTabs: session.maxTabs, tabs: await tabStates(session) } };
-  if (action.action === "new_tab") {
+  const detachAbort = closeSessionOnAbort(session, signal);
+  try {
+    signal?.throwIfAborted();
+    if (action.action === "close") { await closeSession(session); return { result: { sessionId: action.sessionId, closed: true } }; }
+    if (action.action === "list_tabs") return { result: { sessionId: session.id, activeTabId: session.activeTabId, maxTabs: session.maxTabs, tabs: await tabStates(session) } };
+    if (action.action === "new_tab") {
     if (session.tabs.size >= session.maxTabs) throw new Error(`This browser session is limited to ${session.maxTabs} tabs.`);
     const url = action.url ? await assertPublicBrowserUrl(action.url) : undefined;
     const page = await session.context.newPage(); const tab = registerTab(session, page);
     if (!tab) throw new Error(`This browser session is limited to ${session.maxTabs} tabs.`);
     tab.label = action.label; tab.note = action.note;
-    if (url) await page.goto(url.toString(), { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(120);
+    if (url) await page.goto(url.toString(), { waitUntil: "domcontentloaded" }); signal?.throwIfAborted();
+    await pause(.12, signal);
     const state = await snapshot(page, settings.textCharacterLimit); const result = { sessionId: session.id, tabId: tab.id, maxTabs: session.maxTabs, ...state };
     return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
   }
@@ -540,7 +563,7 @@ export async function executeBrowserTool(ownerKey: string, rawArguments: string,
     return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
   }
   const page = activeTab(session).page;
-  if (action.action === "wait") await pause(action.waitSeconds);
+  if (action.action === "wait") await pause(action.waitSeconds, signal);
   if (action.action === "click") await page.locator(targetSelector(action.target)).first().click();
   if (action.action === "type") await page.locator(targetSelector(action.target)).first().fill(action.text);
   if (action.action === "select") await page.locator(targetSelector(action.target)).first().selectOption(action.value);
@@ -549,10 +572,11 @@ export async function executeBrowserTool(ownerKey: string, rawArguments: string,
     else await page.keyboard.press(action.key);
   }
   if (action.action === "scroll") await page.mouse.wheel(0, action.deltaY);
-  if (action.action === "screenshot") { await pause(action.waitSeconds); return capture(session, action.fullPage, userId); }
-  await page.waitForTimeout(250);
+  if (action.action === "screenshot") { await pause(action.waitSeconds, signal); return capture(session, action.fullPage, userId); }
+  signal?.throwIfAborted(); await pause(.25, signal);
   const state = await snapshot(page, settings.textCharacterLimit); const tab = activeTab(session); const result = { sessionId: session.id, tabId: tab.id, ...state };
-  return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
+    return { result, content: [{ type: "text", text: JSON.stringify(result) }] };
+  } finally { detachAbort(); }
 }
 
 export async function closeBrowserSessions(ownerKey: string) {

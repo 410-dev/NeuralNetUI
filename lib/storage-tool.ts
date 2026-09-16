@@ -29,7 +29,8 @@ function summary(file: { id:string;name:string;mimeType:string;size:number;creat
   return { id:file.id, name:file.name, mimeType:file.mimeType, size:file.size, ...(file.createdAt?{createdAt:file.createdAt}:{}) };
 }
 
-export async function executeStorageAccessTool(raw: Record<string, unknown>, userId: string, settings: ToolSettings, model?: Pick<ModelConfig, "visionImageMode" | "visionMaxEdgePixels">): Promise<{result:unknown;content?:ModelContentPart[]}> {
+export async function executeStorageAccessTool(raw: Record<string, unknown>, userId: string, settings: ToolSettings, model?: Pick<ModelConfig, "visionImageMode" | "visionMaxEdgePixels">, signal?: AbortSignal): Promise<{result:unknown;content?:ModelContentPart[]}> {
+  signal?.throwIfAborted();
   const action = String(raw.action || "").toLowerCase();
   const query = String(raw.query || "").trim().slice(0, 200);
   if (action === "search") {
@@ -51,12 +52,12 @@ export async function executeStorageAccessTool(raw: Record<string, unknown>, use
   const { metadata, paths } = await readUpload(fileId, userId);
   const kind = classifyDocument(metadata.mimeType, metadata.name);
   if (kind === "image" || kind === "pdf") {
-    const content = await readUploadModelContent(metadata.id, userId, settings, model);
+    const content = await readUploadModelContent(metadata.id, userId, settings, model, signal);
     return { result:{ file:summary(metadata), kind, loaded:true }, content:[{type:"text",text:`Loaded private storage file: ${metadata.name}`}, ...content] };
   }
   if (kind === "text") {
     if (metadata.size > settings.textDownloadLimitMb * 1024 * 1024) throw new Error(`${metadata.name} exceeds the configured text file limit.`);
-    const decoded = decodeTextDocument(await fs.readFile(paths.original), metadata.mimeType, settings.textCharacterLimit);
+    const decoded = decodeTextDocument(await fs.readFile(paths.original, signal ? { signal } : undefined), metadata.mimeType, settings.textCharacterLimit);
     return { result:{ file:summary(metadata), kind, loaded:true, truncated:decoded.truncated }, content:[{type:"text",text:`[Private storage file: ${metadata.name}]\n\n${decoded.text}`}] };
   }
   throw new Error("This stored file type cannot be loaded into model context.");

@@ -45,6 +45,9 @@
 - Match tool headings to the reasoning heading typography: unboxed icons, regular weight, and the same font sizing.
 - Show localized tool-call markers only in the rendered reasoning view; never mix those markers into stored or upstream reasoning content.
 - In the composer add-menu, group toggles under Internet, Ambient awareness, Agent, and Interaction. Every group is a keyboard-accessible disclosure, and the complete menu is height-bounded with internal scrolling.
+- Keep host-approval explanations inside the card width and preserve authored line breaks while wrapping long paths and commands. Let the explanation grow through six lines, then scroll it vertically. The argument disclosure must end at the card's inner edge and scroll independently in both axes.
+- Keep user-message bubbles within the conversation column. Long URLs and other unbroken text must wrap inside the bubble without creating page-level horizontal overflow.
+- Stopping generation while a tool is active must propagate cancellation to that operation, including long-running host commands and agent waits.
 
 ## Shared browser surface
 

@@ -112,7 +112,8 @@ function pythonInterpreter() {
   return process.env.NEURAL_CHAT_PYTHON || (existsSync(virtualEnvPython) ? virtualEnvPython : existsSync(embeddedPython) ? embeddedPython : process.platform === "win32" ? "python" : "python3");
 }
 
-async function runPdfProcessor(filePath: string, settings: ToolSettings, renderDirectory?: string): Promise<PdfExtraction> {
+async function runPdfProcessor(filePath: string, settings: ToolSettings, renderDirectory?: string, signal?: AbortSignal): Promise<PdfExtraction> {
+  signal?.throwIfAborted();
   const script = path.join(process.cwd(), "scripts", "process-pdf.py");
   const args = [script, filePath, "--max-pages", String(settings.pdfPageLimit), "--max-chars", String(settings.pdfTextCharacterLimit)];
   if (renderDirectory) args.push("--render-dir", renderDirectory, "--max-render-pages", String(settings.pdfVisionPageLimit));
@@ -120,8 +121,9 @@ async function runPdfProcessor(filePath: string, settings: ToolSettings, renderD
     const child = spawn(pythonInterpreter(), args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     const stdout: Buffer[] = []; const stderr: Buffer[] = []; let outputSize = 0; let settled = false;
     const outputLimit = settings.pdfTextCharacterLimit * 4 + 250_000;
+    const abort = () => { child.kill(); finish(signal?.reason instanceof Error ? signal.reason : new DOMException("The operation was aborted.", "AbortError")); };
     const finish = (error?: Error, result?: PdfExtraction) => {
-      if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(result!);
+      if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener("abort", abort); error ? reject(error) : resolve(result!);
     };
     const timer = setTimeout(() => { child.kill(); finish(new Error(`PDF processing exceeded ${settings.pdfProcessingTimeoutSeconds} seconds.`)); }, settings.pdfProcessingTimeoutSeconds * 1_000);
     child.stdout.on("data", (chunk: Buffer) => {
@@ -137,11 +139,13 @@ async function runPdfProcessor(filePath: string, settings: ToolSettings, renderD
       try { finish(undefined, JSON.parse(Buffer.concat(stdout).toString("utf8")) as PdfExtraction); }
       catch { finish(new Error("PDF processor returned invalid output.")); }
     });
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
   });
 }
 
-export async function extractPdf(filePath: string, settings: ToolSettings) {
-  return runPdfProcessor(filePath, settings);
+export async function extractPdf(filePath: string, settings: ToolSettings, signal?: AbortSignal) {
+  return runPdfProcessor(filePath, settings, undefined, signal);
 }
 
 export async function cleanupTemporaryDocuments(settings: ToolSettings) {
@@ -161,19 +165,20 @@ export async function cleanupTemporaryDocuments(settings: ToolSettings) {
   return removed;
 }
 
-export async function pdfModelContent(filePath: string, label: string, settings: ToolSettings, cached?: PdfExtraction): Promise<{ result: Record<string, unknown>; content: ModelContentPart[] }> {
+export async function pdfModelContent(filePath: string, label: string, settings: ToolSettings, cached?: PdfExtraction, signal?: AbortSignal): Promise<{ result: Record<string, unknown>; content: ModelContentPart[] }> {
+  signal?.throwIfAborted();
   await cleanupTemporaryDocuments(settings);
   let workDir: string | undefined;
   try {
-    let extraction = cached || await runPdfProcessor(filePath, settings);
+    let extraction = cached || await runPdfProcessor(filePath, settings, undefined, signal);
     if (!extraction.text.trim() && settings.pdfVisionPageLimit > 0) {
       workDir = await fs.mkdtemp(path.join(os.tmpdir(), "neural-chat-pdf-"));
-      extraction = await runPdfProcessor(filePath, settings, workDir);
+      extraction = await runPdfProcessor(filePath, settings, workDir, signal);
     }
     const description = `[PDF: ${label}; ${extraction.pageCount} page(s); processed ${extraction.processedPages}${extraction.truncated ? "; truncated by configured limits" : ""}]`;
     const content: ModelContentPart[] = [{ type: "text", text: extraction.text.trim() ? `${description}\n\n${extraction.text}` : `${description}\nNo extractable text was found. Review the rendered page images.` }];
     for (const rendered of extraction.renderedPages) {
-      const image = await fs.readFile(rendered.path);
+      const image = await fs.readFile(rendered.path, signal ? { signal } : undefined);
       content.push({ type: "image_url", image_url: { url: `data:${rendered.mimeType};base64,${image.toString("base64")}` } });
     }
     return {
