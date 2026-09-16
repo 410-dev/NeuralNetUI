@@ -83,6 +83,7 @@
 - Put browser-tab and selectable-question caps in an Interactive tools group; schema validation and generated tool schemas must use the same saved limits.
 - Show a bounded percentage as a slider with its current value beside it.
 - Edit long harness prompts in a large separate modal; nested dialogs suspend the parent focus trap.
+- Every long text uses that same modal: harness prompts, a model's system prompt, a reasoning template's additional prompt, and both message edits. Where the saved value belongs on the page, keep the field visible and read-only with one edit action beneath it rather than removing it.
 - Search original history in a dedicated modal, show branch matches with snippets, and open the selected branch directly.
 - Give the sidebar a compact header holding the wordmark and a single icon control: collapse on desktop, close on mobile.
 - Keep per-conversation rename and delete actions in one hover-revealed action group on the same row as the title; coarse pointers show them permanently.
@@ -118,6 +119,18 @@
 - Keep Manage chats pages at ten sessions. Session rows in both Manage chats and the related-chat view are icon-free full pills; in selection mode, clicking the session body toggles selection instead of navigating away.
 - Personal-storage file cards use the shared large corner language and equal top and bottom breathing room around their previews.
 - The creation modal uses the shared pill fields and SelectMenu; Markdown editing provides an explicit rendered-preview tab before saving.
+
+## Messages and questions
+
+- Questions and announcements belong to the application, never to the browser's own dialogs. One message box carries a mark, a title, the question, an optional detail panel and its actions, and it traps focus, closes on Escape and makes the background inert like every other dialog.
+- The tone is the message's kind: danger for what cannot be undone, warning for a recoverable deletion, info for an explanation, success for a completed action. The mark, the detail rule and the confirming action all take that colour.
+- A destructive action that is genuinely two different acts asks which one. Deleting a request that exists in several branches offers this branch or every branch instead of guessing.
+- Actions on a sent message stay out of the way until the pointer comes near. The hover target is the whole conversation row, extended into the gaps above and below, not the bubble alone; coarse pointers keep the actions visible.
+
+## Chat history actions
+
+- Renaming a chat is also where it is copied: the duplicate action sits beside the save and stays disabled until the title actually differs, so a copy always arrives under its own name. A copy carries every branch and takes new identifiers throughout.
+- The download action does not depend on a chat being open. With one open it exports that chat; with none it packages the whole history as one archive holding a file per chat.
 
 ## Composer
 

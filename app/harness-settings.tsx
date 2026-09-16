@@ -8,17 +8,12 @@ import { HOST_PERMISSION_DEFINITIONS, type HostPermissionKey, type HostTrustedPe
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { SectionTitle } from "./section-title";
 import { SelectMenu } from "./select-menu";
+import { TextDialog } from "./text-dialog";
 
 const EFFORT_LABELS: Record<string, [string, string]> = {
   off: ["Off", "사용 안 함"], on: ["Thinking", "사고 사용"], minimal: ["Minimal", "최소"],
   low: ["Low", "낮음"], medium: ["Medium", "보통"], high: ["High", "높음"], xhigh: ["Extra high", "매우 높음"],
 };
-
-export function TextDialog({ title, value, onSave, onClose, multiline = false, help }: { title:string; value:string; onSave:(value:string)=>void; onClose:()=>void; multiline?:boolean; help?:string }) {
-  const [text,setText] = useState(value);
-  const ref = useModalFocus(onClose);
-  return createPortal(<div ref={ref} tabIndex={-1} className="harness-modal-layer" role="dialog" aria-modal="true" aria-label={title}><button className="settings-backdrop" tabIndex={-1} onClick={onClose} aria-label="Close"/><form className="harness-dialog" onSubmit={e=>{e.preventDefault();if(text.trim())onSave(text.trim());}}><header><h2>{title}</h2><button type="button" onClick={onClose} aria-label="Close"><X size={20}/></button></header>{help && <p className="harness-dialog-help">{help}</p>}{multiline ? <textarea aria-label={title} rows={16} maxLength={32000} value={text} onChange={e=>setText(e.target.value)}/> : <input aria-label={title} maxLength={200} value={text} onChange={e=>setText(e.target.value)}/>}<button className="save-button" disabled={!text.trim()}>OK</button></form></div>,document.body);
-}
 
 // Radio cards keep the harness modes and title timings comparable at a glance.
 function OptionCards({ label, options, value, onSelect }: { label:string; options:Array<{ id:string; icon:React.ReactNode; title:string; description:string }>; value:string; onSelect:(id:string)=>void }) {
@@ -173,7 +168,7 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
         <label className="field"><span>{ko?"추론 강도":"Reasoning effort"}</span><SelectMenu label={ko?"추론 강도":"Reasoning effort"} value={h.hostCommandEffort} options={[...new Set(["off",...(draft.models.find(m=>m.id===h.hostCommandModelId)?.reasoningEfforts||["on","minimal","low","medium","high","xhigh"])])].map(value=>({value,label:effortLabel(value)}))} onChange={value=>patch({hostCommandEffort:value})}/></label>
       </div><button type="button" className="subtle-action" onClick={()=>setPrompt("hostCommandAnalysisPrompt")}><Pencil size={16}/>{ko?"위험도 분석 프롬프트 편집":"Edit risk-analysis prompt"}</button></div>
     </section>}
-    {prompt&&<TextDialog title={prompt==="compactPrompt"?(ko?"압축 프롬프트":"Compacting prompt"):prompt==="resumePrompt"?(ko?"재개 프롬프트":"Resume prompt"):prompt==="hostCommandAnalysisPrompt"?(ko?"셸 명령 위험도 분석 프롬프트":"Shell-command risk analysis prompt"):(ko?"제목 생성 프롬프트":"Title prompt")} help={prompt==="resumePrompt"?(ko?"출력을 재개할 때 사용합니다. %COMPRESSED%는 압축된 맥락으로, %USER_PROMPT%는 원래 사용자 메시지로 치환됩니다.":"Used when resuming an interrupted response. %COMPRESSED% is replaced with the compacted context and %USER_PROMPT% with the original user message."):prompt==="hostCommandAnalysisPrompt"?(ko?"채팅 맥락과 분리된 요청의 시스템 프롬프트입니다. JSON 위험도와 투명한 설명을 요구해야 합니다.":"System prompt for the context-isolated request. It must require JSON risk and a transparent explanation."):undefined} value={h[prompt]} multiline onClose={()=>setPrompt(null)} onSave={text=>{patch({[prompt]:text});setPrompt(null);}}/>}
+    {prompt&&<TextDialog title={prompt==="compactPrompt"?(ko?"압축 프롬프트":"Compacting prompt"):prompt==="resumePrompt"?(ko?"재개 프롬프트":"Resume prompt"):prompt==="hostCommandAnalysisPrompt"?(ko?"셸 명령 위험도 분석 프롬프트":"Shell-command risk analysis prompt"):(ko?"제목 생성 프롬프트":"Title prompt")} help={prompt==="resumePrompt"?(ko?"출력을 재개할 때 사용합니다. %COMPRESSED%는 압축된 맥락으로, %USER_PROMPT%는 원래 사용자 메시지로 치환됩니다.":"Used when resuming an interrupted response. %COMPRESSED% is replaced with the compacted context and %USER_PROMPT% with the original user message."):prompt==="hostCommandAnalysisPrompt"?(ko?"채팅 맥락과 분리된 요청의 시스템 프롬프트입니다. JSON 위험도와 투명한 설명을 요구해야 합니다.":"System prompt for the context-isolated request. It must require JSON risk and a transparent explanation."):undefined} value={h[prompt]} multiline ko={ko} onClose={()=>setPrompt(null)} onSave={text=>{patch({[prompt]:text});setPrompt(null);}}/>}
     {permissionMatrix&&<PermissionMatrixDialog ko={ko} initial={h.hostTrustedPermissions} onClose={()=>setPermissionMatrix(false)} onSave={value=>{patch({hostTrustedPermissions:value});setPermissionMatrix(false);}}/>}
   </div>;
 }

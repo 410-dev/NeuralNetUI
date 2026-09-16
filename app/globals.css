@@ -121,10 +121,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .thread { height: 100%; width: min(900px, 100%); margin: 0 auto; overflow-y: auto; overscroll-behavior: contain; padding: 35px 26px 32px; }
 .message-row { margin-bottom: 30px; animation: message-enter .28s cubic-bezier(.22,.8,.28,1) both; }
 @keyframes message-enter { from { opacity: 0; transform: translateY(9px) scale(.992); } to { opacity: 1; transform: none; } }
-.user-message { display: flex; justify-content: flex-end; }
+/* The row is the hover target rather than the bubble: coming near that line from anywhere
+   across the thread reveals the actions, and the block padding widens the band into the
+   gaps above and below without moving the message itself. */
+.user-message { display: flex; justify-content: flex-end; padding-block: 12px; margin-top: -12px; margin-bottom: 18px; }
 .message-bubble { min-width: 0; max-width: 75%; overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; font-size: 17px; line-height: 1.55; padding: 12px 17px; border-radius: 26px 26px 12px 26px; background: #232329; border: 1px solid rgba(255,255,255,.035); }
 .assistant-message { width: 100%; white-space: pre-wrap; line-height: 1.75; color: #e6e8ec; }
-.assistant-message > .chat-wait-status, .assistant-message > .assistant-edit, .assistant-message > .assistant-copy, .assistant-message > .thinking-block, .assistant-message > .transcript-tools, .assistant-message > .assistant-footer { width: min(760px, 92%); }
+.assistant-message > .chat-wait-status, .assistant-message > .assistant-copy, .assistant-message > .thinking-block, .assistant-message > .transcript-tools, .assistant-message > .assistant-footer { width: min(760px, 92%); }
 .assistant-message > .transcript-tools:has(.choice-response-row) { width: 100%; }
 .assistant-message > .transcript-tools > .tool-activity-group { width: min(760px, 92%); }
 .assistant-copy { min-height: 26px; }
@@ -272,11 +275,6 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .revision-navigator button:hover:not(:disabled) { color: var(--text); background: rgba(255,255,255,.05); }
 .revision-navigator button:disabled { opacity: .25; }
 .revision-navigator span { min-width: 34px; text-align: center; }
-.assistant-edit textarea { width: 100%; min-height: 150px; resize: vertical; padding: 13px 14px; color: var(--text); line-height: 1.6; background: #1b1b20; border: 1px solid var(--border-strong); border-radius: 17px; outline: none; }
-.assistant-edit textarea:focus { border-color: rgb(var(--accent-bright-rgb) / .38); }
-.assistant-edit > div { display: flex; justify-content: flex-end; gap: 7px; margin-top: 8px; }
-.assistant-edit button { display: flex; align-items: center; gap: 5px; min-height: 34px; padding: 0 15px; border-radius: var(--radius-pill); color: var(--muted); background: transparent; border: 1px solid var(--border); font-size: 11px; }
-.assistant-edit .save-response { color: white; background: var(--accent); border-color: transparent; }
 .typing { display: flex; gap: 5px; padding-top: 8px; }
 .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s infinite; }
 .typing i:nth-child(2) { animation-delay: .15s; }.typing i:nth-child(3) { animation-delay: .3s; }
@@ -465,6 +463,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .user-message-stack { min-width: 0; display: flex; flex-direction: column; align-items: flex-end; }
 .user-message-stack > .revision-navigator { margin-top: 4px; }
 .user-message-toolbar { flex: 0 0 auto; display: flex; align-items: center; opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .user-message-toolbar { opacity: 0; transform: translateX(5px); pointer-events: none; transition: opacity .16s ease, transform .22s var(--spring); }
+  .user-message:hover .user-message-toolbar, .user-message:focus-within .user-message-toolbar { opacity: 1; transform: none; pointer-events: auto; }
+}
 .user-message-toolbar button { width: 27px; height: 28px; display: grid; place-items: center; border-radius: 14px; color: var(--dim); background: transparent; }
 .user-message-toolbar button:hover { color: var(--text); background: rgba(255,255,255,.05); }
 .user-message-toolbar button.delete:hover { color: #e59690; background: rgba(193,89,84,.12); }
@@ -472,11 +474,6 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .history-row-actions { opacity: 1; }
   .long-press-target { -webkit-touch-callout: none; user-select: none; }
 }
-.message-edit { width: min(600px, 70vw); border: 1px solid rgb(var(--accent-bright-rgb) / .35); border-radius: 22px; background: var(--panel-soft); padding: 10px; }
-.message-edit textarea { width: 100%; min-height: 80px; resize: vertical; border: 0; outline: 0; background: transparent; line-height: 1.5; }
-.message-edit > div { display: flex; justify-content: flex-end; gap: 7px; margin-top: 7px; }
-.message-edit button { height: 32px; padding: 0 14px; border-radius: var(--radius-pill); background: rgba(255,255,255,.05); color: var(--muted); font-size: 11px; }
-.message-edit button:last-child { display: flex; align-items: center; gap: 6px; background: var(--accent); color: white; }
 
 .settings-section.wide { max-width: none; }
 .split-model-editor { height: 440px; min-height: 0; display: grid; grid-template-columns: 190px minmax(0,1fr); border: 1px solid var(--border); border-radius: 22px; overflow: hidden; background: rgba(255,255,255,.012); }
@@ -603,7 +600,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .add-menu-popover { z-index: 12; left: 0; bottom: 41px; width: min(320px, calc(100vw - 36px)); max-height: min(520px, 70dvh); overflow-y: auto; padding: 8px; }
 .chat-idle .add-menu-popover { max-height:min(520px,calc(50dvh - 28px)); }
 .add-menu-popover > p { margin: 7px 10px 5px; padding-top: 9px; border-top: 1px solid var(--border); color: var(--dim); font-size: 9px; letter-spacing: .11em; text-transform: uppercase; }
-.composer-tool-group { border-top:1px solid var(--border); }.composer-tool-group > button { width:100%; height:34px; display:flex; align-items:center; justify-content:space-between; padding:0 10px; color:var(--muted); font-size:9px; letter-spacing:.08em; text-transform:uppercase; }.composer-tool-group > button svg { transition:transform .16s ease; }.composer-tool-group > button[aria-expanded="true"] svg { transform:rotate(180deg); }.composer-tool-group > button:hover { color:var(--text); }.composer-tool-group > div { animation:tool-group-open .14s ease; }@keyframes tool-group-open{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+.composer-tool-group + .composer-tool-group { margin-top:2px; }.composer-tool-group > button { width:100%; height:34px; display:flex; align-items:center; justify-content:space-between; padding:0 10px; color:var(--muted); font-size:9px; letter-spacing:.08em; text-transform:uppercase; }.composer-tool-group > button svg { transition:transform .16s ease; }.composer-tool-group > button[aria-expanded="true"] svg { transform:rotate(180deg); }.composer-tool-group > button:hover { color:var(--text); }.composer-tool-group > div { padding-bottom:9px; animation:tool-group-open .14s ease; }@keyframes tool-group-open{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
 .add-menu-action { width: 100%; min-height: 42px; display: flex; align-items: center; gap: 11px; padding: 0 10px; border-radius: 17px; color: var(--text); background: transparent; text-align: left; }
 .add-menu-action:hover { background: rgba(255,255,255,.055); }
 .add-menu-action svg, .tool-toggle-row > svg { color: var(--text); }
@@ -1154,3 +1151,41 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .activity-hidden .thinking-block,
 .activity-hidden .tool-activity-group,
 .activity-hidden .transcript-tools:not(:has(.choice-response-row)) { display: none; }
+
+/* Message boxes replace the browser's own dialogs. The tone carries the whole difference: the
+   mark, the rule beside it and the confirming action all take the tone's colour, so a permanent
+   deletion never looks like an ordinary question. */
+.message-dialog-layer { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; padding: 20px; --tone: var(--muted); --tone-soft: rgba(255,255,255,.08); }
+.message-dialog-layer.tone-danger { --tone: var(--danger); --tone-soft: rgba(210,123,120,.14); }
+.message-dialog-layer.tone-warning { --tone: #d9b168; --tone-soft: rgba(217,177,104,.14); }
+.message-dialog-layer.tone-info { --tone: var(--accent-bright); --tone-soft: rgb(var(--accent-bright-rgb) / .14); }
+.message-dialog-layer.tone-success { --tone: #7fb98a; --tone-soft: rgba(127,185,138,.14); }
+.message-dialog { position: relative; z-index: 1; width: min(440px, 100%); display: flex; flex-direction: column; gap: 13px; padding: 22px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--panel); box-shadow: 0 24px 90px #0009; animation: message-dialog-in .2s var(--spring) both; }
+@keyframes message-dialog-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
+.message-dialog header { display: flex; align-items: center; gap: 11px; }
+.message-dialog h2 { margin: 0; font-size: 16px; font-weight: 620; word-break: keep-all; }
+.message-dialog-mark { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; color: var(--tone); background: var(--tone-soft); }
+.message-dialog-body { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.65; white-space: pre-line; word-break: keep-all; }
+.message-dialog-detail { margin: 0; padding: 9px 12px; border-left: 2px solid var(--tone); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--muted); background: var(--tone-soft); font-size: 11px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+.message-dialog footer { display: flex; justify-content: flex-end; gap: 8px; }
+.message-dialog-confirm { height: 38px; padding: 0 18px; border-radius: var(--radius-pill); color: white; background: var(--tone); font-size: 12px; transition: filter .16s, transform .2s var(--spring); }
+.message-dialog-layer.tone-warning .message-dialog-confirm, .message-dialog-layer.tone-success .message-dialog-confirm { color: #17171b; }
+.message-dialog-confirm:hover { filter: brightness(1.08); }
+.message-dialog-confirm:active { transform: scale(.97); }
+
+/* Long text is edited in the shared dialog, so the field in place is a readable preview with one
+   edit action under it rather than a textarea nobody can work in. */
+.text-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.text-dialog-actions .save-button { display: flex; align-items: center; gap: 6px; align-self: auto; }
+.locked-field { display: block; margin-bottom: 17px; }
+.locked-field > span { display: block; margin: 0 0 7px 2px; color: #c1c3c9; font-size: 11.5px; }
+.locked-field textarea { width: 100%; padding: 11px 14px; color: var(--muted); line-height: 1.5; background: var(--field); border: 1px solid var(--border-strong); border-radius: var(--radius-md); outline: 0; resize: vertical; cursor: default; }
+.locked-field .subtle-action { height: 32px; margin-top: 8px; padding: 0 13px; }
+.preset-prompt-field { grid-column: 1/-1; margin-bottom: 0; }
+.preset-prompt-field textarea { min-height: 62px; padding: 8px 10px; line-height: 1.45; }
+
+@media (max-width: 560px) {
+  .message-dialog-layer { padding: 14px; }
+  .message-dialog footer { flex-direction: column-reverse; }
+  .message-dialog footer > button { width: 100%; }
+}
