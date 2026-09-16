@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
   agentRules: false,
   allowedDevOrigins: ["127.0.0.1"],
   serverExternalPackages: ["better-sqlite3"],
+  outputFileTracingIncludes: {
+    "/*": ["./node_modules/playwright-core/**/*"],
+  },
   outputFileTracingExcludes: {
     "/*": ["./data/**/*", "./installer/**/*"],
   },
