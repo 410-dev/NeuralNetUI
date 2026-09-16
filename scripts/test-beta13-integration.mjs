@@ -103,6 +103,13 @@ try {
 
   // 3. Sent-message actions stay hidden until the pointer approaches that row.
   assert.equal(await opacityOf(page, ".user-message .user-message-toolbar"), "0");
+  // Rows use content-visibility, so before their first paint they report the 120px intrinsic
+  // placeholder rather than their real height, and the entry animation still moves them. Measure
+  // once the row has rendered and settled, or the pointer can land just outside it.
+  await page.locator(".user-message").first().evaluate(async element => {
+    await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
   const rowBox = await page.locator(".user-message").first().boundingBox();
   const threadBox = await page.locator(".thread").boundingBox();
   // The far left of the row is empty space beside the bubble; the actions still have to appear.
