@@ -92,6 +92,7 @@ export interface AccountInfo {
   displayName: string;
   role: UserRole;
   canAudit: boolean;
+  planId?: string;
 }
 
 export interface UserSummary extends AccountInfo {
@@ -103,6 +104,49 @@ export interface UserSummary extends AccountInfo {
   auditEnabled: boolean;
   storageQuotaUsesDefault: boolean;
   trashQuotaUsesDefault: boolean;
+}
+
+export type TokenScope = "input" | "output" | "both";
+
+export interface PlanTokenLimit {
+  id: string;
+  durationSeconds: number;
+  tokenLimit: number;
+  tokenScope: TokenScope;
+}
+
+export interface UsagePlan {
+  id: string;
+  name: string;
+  servedModelIds: string[];
+  modelWeights: Record<string, number>;
+  tokenLimits: PlanTokenLimit[];
+  storageQuotaBytes: number;
+  userCount?: number;
+}
+
+export interface ResetCredit {
+  id: string;
+  title: string;
+  maxWindowSeconds: number;
+  expiresAt: string;
+  targetType: "user" | "plan";
+  targetId: string;
+}
+
+export interface UsageWindowStatus extends PlanTokenLimit {
+  usedTokens: number;
+  percentage: number;
+  startsAt?: string;
+  resetsAt?: string;
+}
+
+export interface UsageStatus {
+  plan?: Pick<UsagePlan, "id" | "name">;
+  windows: UsageWindowStatus[];
+  nearestPercentage: number;
+  blocked: boolean;
+  credits: ResetCredit[];
 }
 
 export interface UserStorageSettings {

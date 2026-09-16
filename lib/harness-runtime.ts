@@ -9,6 +9,7 @@ import { modelResidency } from "./residency-runtime";
 import { createResidencyAdapter } from "./residency-adapter";
 import { readSsePayload } from "./stream-protocol";
 import type { AppConfig, ModelConfig, ChatWaitPhase } from "./types";
+import { recordTokenUsage } from "./plans";
 
 type Message = { role: string; content: unknown; tool_calls?: unknown };
 type Context = { config: AppConfig; model: ModelConfig; userId: string; signal: AbortSignal; onPhase: (phase: ChatWaitPhase) => void };
@@ -19,12 +20,12 @@ function taskModel(ctx: Context, id: string) {
   return model;
 }
 
-export type HarnessResult = { text: string; reasoning: string };
+export type HarnessResult = { text: string; reasoning: string; inputTokens?:number; outputTokens?:number };
 
 async function readHarnessStream(response: Response, onUpdate: (result: HarnessResult) => void): Promise<HarnessResult> {
   if (!response.body) throw new Error("Harness generation returned no response stream.");
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
-  let text = ""; let reasoning = ""; let finished = false; let finishReason = "";
+  let text = ""; let reasoning = ""; let finished = false; let finishReason = "";let inputTokens:number|undefined;let outputTokens:number|undefined;
   const consume = (record: string) => {
     const data = record.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n").trim();
     if (!data) return;
@@ -32,6 +33,8 @@ async function readHarnessStream(response: Response, onUpdate: (result: HarnessR
     if (payload === "done") { finished = true; return; }
     const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }> : [];
     const delta = choices[0]?.delta || {};
+    const usage=payload.usage as {prompt_tokens?:unknown;input_tokens?:unknown;completion_tokens?:unknown;output_tokens?:unknown}|undefined;
+    if(usage){const input=Number(usage.prompt_tokens??usage.input_tokens),output=Number(usage.completion_tokens??usage.output_tokens);if(Number.isFinite(input)&&input>=0)inputTokens=Math.floor(input);if(Number.isFinite(output)&&output>=0)outputTokens=Math.floor(output);}
     const textDelta = typeof delta.content === "string" ? delta.content : "";
     const reasoningDelta = typeof (delta.reasoning_content ?? delta.reasoning) === "string" ? String(delta.reasoning_content ?? delta.reasoning) : "";
     if (choices[0]?.finish_reason) finishReason = String(choices[0].finish_reason);
@@ -46,11 +49,12 @@ async function readHarnessStream(response: Response, onUpdate: (result: HarnessR
     buffer += decoder.decode(); if (!finished && buffer.trim()) consume(buffer);
   } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
   if (!text.trim() || finishReason === "length") throw new Error("Harness returned an empty or truncated result.");
-  return { text: text.trim(), reasoning: reasoning.trim() };
+  return { text: text.trim(), reasoning: reasoning.trim(),...(inputTokens===undefined?{}:{inputTokens}),...(outputTokens===undefined?{}:{outputTokens}) };
 }
 
 export async function harnessCompletion(ctx: Context, id: string, effortValue: string, prompt: string, content: string, maxTokens: number, onUpdate?: (result: HarnessResult) => void): Promise<HarnessResult> {
   const model = taskModel(ctx, id);
+  const chargeModelId=model.isAlias?(ctx.config.models.find(item=>!item.isAlias&&(item.id===model.sourceModel||item.sourceModel===model.sourceModel))?.id||model.sourceModel):model.id;
   const connection = connectionForModel(ctx.config.connections, model);
   if (!connection) throw new Error("Harness connection is unavailable.");
   const headers = connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "");
@@ -68,13 +72,14 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
     const response = await fetch(chatEndpoint(connection.driver, connection.baseUrl), { method: "POST", headers, signal,
       body: JSON.stringify({ model: model.sourceModel, stream: Boolean(onUpdate), ...(onUpdate ? { stream_options: { include_usage: true } } : {}), messages: [{role:"system", content:prompt}, {role:"user", content}], max_tokens:maxTokens, ...(effort ? {reasoning_effort:effort} : {}) }) });
     if (!response.ok) throw new Error(`Harness generation failed (${response.status}).`);
-    if (onUpdate) return readHarnessStream(response, onUpdate);
+    if (onUpdate){const streamed=await readHarnessStream(response,onUpdate);recordTokenUsage(ctx.userId,chargeModelId,streamed.inputTokens||0,streamed.outputTokens||0);return streamed;}
     const result = await response.json();
     const choice = result.choices?.[0];
     const text = choice?.message?.content;
     if (typeof text !== "string" || !text.trim() || choice?.finish_reason === "length") throw new Error("Harness returned an empty or truncated result.");
     const thought = choice?.message?.reasoning_content ?? choice?.message?.reasoning;
-    return { text: text.trim(), reasoning: typeof thought === "string" ? thought.trim() : "" };
+    const usage=result.usage||{},inputTokens=Number(usage.prompt_tokens??usage.input_tokens),outputTokens=Number(usage.completion_tokens??usage.output_tokens);recordTokenUsage(ctx.userId,chargeModelId,Number.isFinite(inputTokens)?inputTokens:0,Number.isFinite(outputTokens)?outputTokens:0);
+    return { text: text.trim(), reasoning: typeof thought === "string" ? thought.trim() : "",...(Number.isFinite(inputTokens)?{inputTokens:Math.floor(inputTokens)}:{}),...(Number.isFinite(outputTokens)?{outputTokens:Math.floor(outputTokens)}:{}) };
   } finally { release(); }
 }
 

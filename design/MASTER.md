@@ -101,6 +101,11 @@
 
 ## Storage and user administration
 
+- Personal backup and restore belongs in Account settings. Administrative global, credential, and per-user images belong in a separate Data management tab; the per-user surface is paginated rather than allowed to grow inside settings.
+- Restore mode is always explicit. Merge is quiet; Replace uses the danger treatment and an in-product confirmation before the file is submitted.
+- Plan editing uses a stable plan list beside one editor on desktop and a horizontally scrollable list above the editor on mobile. Token windows remain repeatable rows rather than separate submenus.
+- The sidebar plan donut sits immediately left of Settings and shows only percentages. Its popover may name windows and reset times but never reveals token counts to the user.
+
 - Put Storage manager immediately below Search in the expanded sidebar and retain it as an icon action in the collapsed rail. Storage is personal: every preview, download, list, and deletion request must enforce the signed-in owner on the server.
 - Display screenshots and large chat images through authenticated file URLs. Never persist base64 image strings in messages or tool results when an owned file can represent the same media.
 - Show used versus allocated capacity together, with a proportional meter and clear units. Files referenced by saved chats stay visibly protected from deletion.

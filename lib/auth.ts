@@ -22,6 +22,7 @@ type UserRow = {
   storage_quota_uses_default: number;
   trash_quota_uses_default: number;
   audit_enabled: number;
+  plan_id: string | null;
   created_at: string;
 };
 
@@ -34,7 +35,7 @@ export class AuthError extends Error {
 function accountFrom(row: UserRow): AuthUser {
   let preferences: Record<string, unknown> = {};
   try { preferences = JSON.parse(row.preferences || "{}"); } catch { /* use defaults */ }
-  return { id: row.id, username: row.username, displayName: row.display_name, role: row.role, canAudit: row.role === "superadmin" || row.role === "admin" && row.audit_enabled === 1, preferences };
+  return { id: row.id, username: row.username, displayName: row.display_name, role: row.role, canAudit: row.role === "superadmin" || row.role === "admin" && row.audit_enabled === 1, preferences, ...(row.plan_id ? { planId: row.plan_id } : {}) };
 }
 
 function cookieValue(request: Request, name: string) {
@@ -98,7 +99,9 @@ export function requireAuditor(request: Request) {
 
 export function authErrorResponse(error: unknown) {
   if (error instanceof AuthError) return Response.json({ error: error.message }, { status: error.status });
-  return Response.json({ error: error instanceof Error ? error.message : "요청을 처리하지 못했습니다." }, { status: 500 });
+  const status=(error as {name?:unknown})?.name==="ZodError"?400:typeof (error as {status?:unknown})?.status==="number"?Math.max(400,Math.min(599,Number((error as {status:number}).status))):500;
+  const message=(error as {name?:unknown;issues?:Array<{message?:string}>})?.name==="ZodError"?(error as {issues?:Array<{message?:string}>}).issues?.[0]?.message:error instanceof Error?error.message:"요청을 처리하지 못했습니다.";
+  return Response.json({ error: message||"입력값을 확인해 주세요." }, { status });
 }
 
 export function createSession(userId: string, request: Request) {
@@ -129,10 +132,11 @@ export async function createFirstUser(
   if (!displayName || displayName.length > 80) throw new AuthError("표시 이름을 확인해 주세요.", 400);
   const passwordHash = await hashPassword(String(input.password || ""));
   const id = randomUUID(); const stamp = new Date().toISOString();
+  const defaultPlan=(db.prepare("SELECT id,storage_quota_bytes AS storage FROM plans ORDER BY created_at LIMIT 1").get() as {id:string;storage:number}|undefined);
   db.transaction(() => {
     if (!setupRequired()) throw new AuthError("Initial setup is already complete.", 409);
-    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, storage_quota_bytes, trash_quota_bytes, storage_quota_uses_default, trash_quota_uses_default, created_at, updated_at) VALUES (?, ?, ?, ?, 'superadmin', '{}', ?, ?, 1, 1, ?, ?)")
-      .run(id, username, displayName, passwordHash, defaults.storage, defaults.trash, stamp, stamp);
+    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, storage_quota_bytes, trash_quota_bytes, storage_quota_uses_default, trash_quota_uses_default, plan_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'superadmin', '{}', ?, ?, 0, 1, ?, ?, ?)")
+      .run(id, username, displayName, passwordHash, defaultPlan?.storage||defaults.storage, defaults.trash,defaultPlan?.id||null, stamp, stamp);
     db.prepare("UPDATE conversations SET user_id = ? WHERE user_id IS NULL").run(id);
     db.prepare("UPDATE uploads SET user_id = ? WHERE user_id IS NULL").run(id);
     const storedConfig = db.prepare("SELECT value FROM app_config WHERE id = 1").get() as { value: string } | undefined;
@@ -159,13 +163,13 @@ export async function authenticate(username: string, password: string) {
 
 export function listUsers(): UserSummary[] {
   return (db.prepare(`
-    SELECT u.id, u.username, u.display_name, u.role, u.created_at, u.storage_quota_bytes, u.trash_quota_bytes, u.audit_enabled, u.storage_quota_uses_default, u.trash_quota_uses_default,
+    SELECT u.id, u.username, u.display_name, u.role, u.created_at, u.storage_quota_bytes, u.trash_quota_bytes, u.audit_enabled, u.storage_quota_uses_default, u.trash_quota_uses_default, u.plan_id,
            COALESCE(SUM(CASE WHEN up.deleted_at IS NULL THEN up.size ELSE 0 END), 0) AS storage_used_bytes,
            COALESCE(SUM(CASE WHEN up.deleted_at IS NOT NULL THEN up.size ELSE 0 END), 0) AS trash_used_bytes
     FROM users u LEFT JOIN uploads up ON up.user_id = u.id
     GROUP BY u.id ORDER BY u.created_at
-  `).all() as Array<Pick<UserRow, "id" | "username" | "display_name" | "role" | "created_at" | "storage_quota_bytes" | "trash_quota_bytes" | "audit_enabled" | "storage_quota_uses_default" | "trash_quota_uses_default"> & { storage_used_bytes: number; trash_used_bytes: number }>)
-    .map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, role: row.role, canAudit: row.role === "superadmin" || row.role === "admin" && row.audit_enabled === 1, auditEnabled: row.audit_enabled === 1, createdAt: row.created_at, storageQuotaBytes: row.storage_quota_bytes, storageUsedBytes: row.storage_used_bytes, trashQuotaBytes: row.trash_quota_bytes, trashUsedBytes: row.trash_used_bytes, storageQuotaUsesDefault:row.storage_quota_uses_default===1, trashQuotaUsesDefault:row.trash_quota_uses_default===1 }));
+  `).all() as Array<Pick<UserRow, "id" | "username" | "display_name" | "role" | "created_at" | "storage_quota_bytes" | "trash_quota_bytes" | "audit_enabled" | "storage_quota_uses_default" | "trash_quota_uses_default" | "plan_id"> & { storage_used_bytes: number; trash_used_bytes: number }>)
+    .map((row) => ({ id: row.id, username: row.username, displayName: row.display_name, role: row.role, canAudit: row.role === "superadmin" || row.role === "admin" && row.audit_enabled === 1, auditEnabled: row.audit_enabled === 1, createdAt: row.created_at, storageQuotaBytes: row.storage_quota_bytes, storageUsedBytes: row.storage_used_bytes, trashQuotaBytes: row.trash_quota_bytes, trashUsedBytes: row.trash_used_bytes, storageQuotaUsesDefault:row.storage_quota_uses_default===1, trashQuotaUsesDefault:row.trash_quota_uses_default===1, ...(row.plan_id ? { planId: row.plan_id } : {}) }));
 }
 
 export async function createUser(input: { username?: string; displayName?: string; password?: string; role?: string }, defaults = {storage:512*1024**2,trash:1024*1024**2}) {
@@ -174,18 +178,19 @@ export async function createUser(input: { username?: string; displayName?: strin
   if (!displayName || displayName.length > 80) throw new AuthError("표시 이름을 확인해 주세요.", 400);
   const role: UserRole = input.role === "admin" ? "admin" : "user";
   const passwordHash = await hashPassword(String(input.password || "")); const stamp = new Date().toISOString();
+  const defaultPlan=(db.prepare("SELECT id,storage_quota_bytes AS storage FROM plans ORDER BY created_at LIMIT 1").get() as {id:string;storage:number}|undefined);
   try {
-    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, storage_quota_bytes, trash_quota_bytes, storage_quota_uses_default, trash_quota_uses_default, audit_enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '{}', ?, ?, 1, 1, 0, ?, ?)")
-      .run(randomUUID(), username, displayName, passwordHash, role, defaults.storage, defaults.trash, stamp, stamp);
+    db.prepare("INSERT INTO users(id, username, display_name, password_hash, role, preferences, storage_quota_bytes, trash_quota_bytes, storage_quota_uses_default, trash_quota_uses_default, audit_enabled, plan_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '{}', ?, ?, 0, 1, 0, ?, ?, ?)")
+      .run(randomUUID(), username, displayName, passwordHash, role, defaultPlan?.storage||defaults.storage, defaults.trash,defaultPlan?.id||null, stamp, stamp);
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new AuthError("이미 사용 중인 사용자 이름입니다.", 409);
     throw error;
   }
 }
 
-export function updateManagedUser(actor: AuthUser, userId: string, input: { displayName?: string; role?: string; storageQuotaBytes?: number; trashQuotaBytes?: number; auditEnabled?: boolean }, defaults:{storage:number;trash:number}) {
+export function updateManagedUser(actor: AuthUser, userId: string, input: { displayName?: string; role?: string; storageQuotaBytes?: number; trashQuotaBytes?: number; auditEnabled?: boolean; planId?: string }, defaults:{storage:number;trash:number}) {
   if (actor.id === userId && (input.displayName !== undefined || input.role !== undefined)) throw new AuthError("현재 로그인한 계정의 이름이나 권한은 여기에서 변경할 수 없습니다.", 409);
-  const target = db.prepare("SELECT display_name, role, storage_quota_bytes, trash_quota_bytes, storage_quota_uses_default, trash_quota_uses_default, audit_enabled FROM users WHERE id = ?").get(userId) as { display_name: string; role: UserRole; storage_quota_bytes: number; trash_quota_bytes:number; storage_quota_uses_default:number; trash_quota_uses_default:number; audit_enabled:number } | undefined;
+  const target = db.prepare("SELECT display_name, role, storage_quota_bytes, trash_quota_bytes, storage_quota_uses_default, trash_quota_uses_default, audit_enabled, plan_id FROM users WHERE id = ?").get(userId) as { display_name: string; role: UserRole; storage_quota_bytes: number; trash_quota_bytes:number; storage_quota_uses_default:number; trash_quota_uses_default:number; audit_enabled:number; plan_id:string|null } | undefined;
   if (!target) throw new AuthError("사용자를 찾을 수 없습니다.", 404);
   const displayName = input.displayName === undefined ? target.display_name : String(input.displayName).trim();
   if (!displayName || displayName.length > 80) throw new AuthError("표시 이름을 확인해 주세요.", 400);
@@ -204,16 +209,21 @@ export function updateManagedUser(actor: AuthUser, userId: string, input: { disp
   if (input.auditEnabled !== undefined && actor.role !== "superadmin") throw new AuthError("최고 관리자만 감사 권한을 변경할 수 있습니다.", 403);
   if (actor.role !== "superadmin" && target.audit_enabled === 1 && (input.role !== undefined || input.displayName !== undefined)) throw new AuthError("감사 권한이 있는 관리자는 최고 관리자만 변경할 수 있습니다.", 403);
   const auditEnabled = role === "admin" && (input.auditEnabled === undefined ? target.audit_enabled === 1 : input.auditEnabled === true);
+  let planId=input.planId===undefined?target.plan_id:String(input.planId||"");
+  if(planId&&!db.prepare("SELECT 1 FROM plans WHERE id=?").get(planId))throw new AuthError("플랜을 찾을 수 없습니다.",404);
+  if(!planId)planId=null;
   db.transaction(() => {
     // Serialize the usage check with upload quota reservations so an upload
     // cannot commit between this check and a quota reduction.
     const used = (db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ? AND deleted_at IS NULL").get(userId) as { bytes: number }).bytes;
     if (quota < used) throw new AuthError("현재 사용 중인 용량보다 할당량을 작게 설정할 수 없습니다.", 409);
-    const result = db.prepare("UPDATE users SET display_name = ?, role = ?, storage_quota_bytes = ?, trash_quota_bytes = ?, storage_quota_uses_default=?, trash_quota_uses_default=?, audit_enabled = ?, updated_at = ? WHERE id = ?")
-      .run(displayName, role, quota, trashQuota,Number(storageUsesDefault),Number(trashUsesDefault), Number(auditEnabled), new Date().toISOString(), userId);
+    let assignedQuota=quota;
+    if(input.planId!==undefined&&planId){const plan=db.prepare("SELECT storage_quota_bytes AS bytes FROM plans WHERE id=?").get(planId) as {bytes:number};if(plan.bytes<used)throw new AuthError("플랜 저장소 용량이 현재 사용량보다 작습니다.",409);assignedQuota=plan.bytes;}
+    const result = db.prepare("UPDATE users SET display_name = ?, role = ?, storage_quota_bytes = ?, trash_quota_bytes = ?, storage_quota_uses_default=?, trash_quota_uses_default=?, audit_enabled = ?, plan_id=?, updated_at = ? WHERE id = ?")
+      .run(displayName, role, assignedQuota, trashQuota,input.planId!==undefined&&planId?0:Number(storageUsesDefault),Number(trashUsesDefault), Number(auditEnabled),planId, new Date().toISOString(), userId);
     if (!result.changes) throw new AuthError("사용자를 찾을 수 없습니다.", 404);
   })();
-  logAdminAudit(actor.id, userId, "user.settings.update", JSON.stringify({ role, storageQuotaBytes: quota, trashQuotaBytes: trashQuota,storageUsesDefault,trashUsesDefault,auditEnabled }));
+  logAdminAudit(actor.id, userId, "user.settings.update", JSON.stringify({ role, storageQuotaBytes: quota, trashQuotaBytes: trashQuota,storageUsesDefault,trashUsesDefault,auditEnabled,planId }));
 }
 
 export function logAdminAudit(actorUserId: string, targetUserId: string, action: string, detail?: string) {

@@ -337,6 +337,78 @@ function openDatabase() {
     `);
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(15, new Date().toISOString());
   })();
+  const plansVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (plansVersion.version < 16) connection.transaction(() => {
+    const stamp = new Date().toISOString();
+    const defaultPlanId = "default-free";
+    connection.exec(`
+      CREATE TABLE plans (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        storage_quota_bytes INTEGER NOT NULL CHECK (storage_quota_bytes >= 1048576 AND storage_quota_bytes <= 10995116277760),
+        served_model_ids TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(served_model_ids)),
+        model_weights TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(model_weights)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE plan_token_limits (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+        duration_seconds INTEGER NOT NULL CHECK (duration_seconds BETWEEN 3600 AND 31536000),
+        token_limit INTEGER NOT NULL CHECK (token_limit > 0),
+        token_scope TEXT NOT NULL CHECK (token_scope IN ('input', 'output', 'both')),
+        position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0)
+      );
+      CREATE INDEX plan_token_limits_plan_idx ON plan_token_limits(plan_id, position);
+      ALTER TABLE users ADD COLUMN plan_id TEXT REFERENCES plans(id) ON DELETE SET NULL;
+      CREATE INDEX users_plan_idx ON users(plan_id);
+      CREATE TABLE token_usage_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        model_id TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+        output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX token_usage_events_user_time_idx ON token_usage_events(user_id, created_at);
+      CREATE TABLE token_usage_resets (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        max_window_seconds INTEGER NOT NULL CHECK (max_window_seconds >= 3600),
+        reset_at TEXT NOT NULL
+      );
+      CREATE INDEX token_usage_resets_user_time_idx ON token_usage_resets(user_id, reset_at DESC);
+      CREATE TABLE reset_credits (
+        id TEXT PRIMARY KEY,
+        target_type TEXT NOT NULL CHECK (target_type IN ('user', 'plan')),
+        target_id TEXT NOT NULL,
+        max_window_seconds INTEGER NOT NULL CHECK (max_window_seconds >= 3600),
+        expires_at TEXT NOT NULL,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        created_by TEXT REFERENCES users(id) ON DELETE SET NULL
+      );
+      CREATE INDEX reset_credits_target_idx ON reset_credits(target_type, target_id, expires_at);
+      CREATE TABLE reset_credit_redemptions (
+        credit_id TEXT NOT NULL REFERENCES reset_credits(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        redeemed_at TEXT NOT NULL,
+        PRIMARY KEY (credit_id, user_id)
+      );
+    `);
+    connection.prepare("INSERT INTO plans(id,name,storage_quota_bytes,served_model_ids,model_weights,created_at,updated_at) VALUES (?,?,536870912,'[]','{}',?,?)")
+      .run(defaultPlanId, "Free", stamp, stamp);
+    connection.prepare("UPDATE users SET plan_id=? WHERE plan_id IS NULL").run(defaultPlanId);
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(16, stamp);
+  })();
+  const usageAdmissionVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (usageAdmissionVersion.version < 17) connection.transaction(() => {
+    connection.exec(`CREATE TABLE token_usage_admissions (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      started_at TEXT NOT NULL
+    );`);
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(17, new Date().toISOString());
+  })();
   return connection;
 }
 

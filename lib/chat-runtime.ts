@@ -24,6 +24,7 @@ import { executeStorageAccessTool, storageAccessToolDefinition } from "./storage
 import type { ChatWaitPhase, Conversation, HarnessSettings, MessageStep, ModelConfig, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
 import type { ModelContentPart } from "./document-processing";
 import { promises as fs } from "node:fs";
+import { acquirePlanAdmission, assertPlanAccess, recordTokenUsage, releasePlanAdmission, remainingPlanOutputTokens } from "./plans";
 
 type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
 type UpstreamMessage = { role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string };
@@ -447,6 +448,7 @@ async function run(job: ChatJob) {
     if (job.input.messages.some((message) => (message.attachments?.length || 0) > config.toolSettings.maxAttachmentsPerMessage)) throw new Error(`A message exceeds the configured ${config.toolSettings.maxAttachmentsPerMessage}-attachment limit.`);
     const model = config.models.find((item) => item.id === job.input.modelId);
     if (!model || !canUseModel(model, { id: job.userId } as never)) throw new Error("The selected model is unavailable.");
+    const chargeModelId=model.isAlias?(config.models.find(item=>!item.isAlias&&(item.id===model.sourceModel||item.sourceModel===model.sourceModel))?.id||model.sourceModel):model.id;
     const connection = connectionForModel(config.connections, model);
     if (!connection) throw new Error("The selected model's connection is unavailable.");
     const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId && (item.kind === "builtin" || !item.ownerId || item.ownerId === job.userId));
@@ -558,9 +560,13 @@ async function run(job: ChatJob) {
       if (contextWindow && projectedInput > contextWindow * .95) throw overflowError({ promptTokens: projectedInput, contextWindow });
       job.message.contextTokens = projectedInput;
       const remainingTokens = contextWindow ? Math.max(1, contextWindow - projectedInput - 32) : 0;
-      const outputLimit = harness.maxOutputTokens > 0
+      assertPlanAccess(job.userId,model.id,model.sourceModel);
+      const planOutputLimit=remainingPlanOutputTokens(job.userId,chargeModelId);
+      const configuredOutputLimit = harness.maxOutputTokens > 0
         ? (remainingTokens ? Math.min(harness.maxOutputTokens, remainingTokens) : harness.maxOutputTokens)
         : remainingTokens;
+      const outputLimit=planOutputLimit===undefined?configuredOutputLimit:configuredOutputLimit?Math.min(configuredOutputLimit,planOutputLimit):planOutputLimit;
+      if(outputLimit!==undefined&&outputLimit<=0)throw new Error("토큰 출력 한도에 도달했습니다.");
       if (!releaseModel) releaseModel = await acquireModel();
       const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(outputLimit ? { max_tokens: outputLimit } : {}), stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
       let result: Awaited<ReturnType<typeof streamTurn>>;
@@ -602,6 +608,7 @@ async function run(job: ChatJob) {
         throw overflowError(overflow);
       }
       reasoningSeconds += result.reasoningDurationSeconds;
+      recordTokenUsage(job.userId,chargeModelId,result.usage.inputTokens||0,result.usage.outputTokens||0);
       const serverMeasuredInput = result.usage.inputTokens ? result.usage.inputTokens + (result.usage.outputTokens || 0) : undefined;
       if (result.compact) {
         job.controller.signal.throwIfAborted();
@@ -661,6 +668,7 @@ async function run(job: ChatJob) {
     if (job.message.reasoning) job.message.reasoningDurationSeconds ||= Math.max(1, reasoningSeconds);
     await persist(job).catch(() => undefined); broadcast(job, true); finishSubscribers(job);
   } finally {
+    releasePlanAdmission(job.userId);
     releaseModel?.();
     job.waiting.clear();
     job.input = { ...job.input, messages: [] };
@@ -682,6 +690,8 @@ export async function startChatJob(input: StartChatJobInput, userId: string, use
   if (!conversation.branches.some((branch) => branch.id === input.branchId)) throw new Error("Conversation branch not found.");
   existing = jobs.get(input.conversationId);
   if (existing && existing.userId === userId && ["running", "waiting"].includes(existing.status)) return snapshot(existing);
+  const config=await readConfig();const selected=config.models.find(model=>model.id===input.modelId);if(!selected||!canUseModel(selected,{id:userId} as never))throw new Error("The selected model is unavailable.");
+  acquirePlanAdmission(userId,selected.id,selected.sourceModel);
   const job: ChatJob = {
     userId, userRole, input, conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
     message: { id: input.assistantMessageId, revisionGroupId: input.revisionGroupId, role: "assistant", content: "", reasoning: "", toolEvents: [], createdAt: new Date().toISOString() },
