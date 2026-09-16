@@ -3,7 +3,7 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright-core";
@@ -193,6 +193,28 @@ try {
   await page.locator(".harness-dialog p[role=status]").first().waitFor();
   await page.keyboard.press("Escape");
   await page.locator(".harness-dialog").waitFor({ state: "detached" });
+
+  // Optional: capture the surfaces this release changed, for a visual read alongside the asserts.
+  // BETA14_SHOTS=<directory> node scripts/test-beta14-integration.mjs
+  if (process.env.BETA14_SHOTS) {
+    const shots = path.resolve(process.env.BETA14_SHOTS);
+    await mkdir(shots, { recursive: true });
+    await page.screenshot({ path: path.join(shots, "01-thread.png") });
+    await page.locator(".pill-button", { hasText: "검색" }).first().click();
+    await page.locator(".harness-dialog input").first().waitFor();
+    await page.screenshot({ path: path.join(shots, "02-search-dialog.png") });
+    await page.keyboard.press("Escape");
+    await page.locator(".harness-dialog").waitFor({ state: "detached" });
+    await page.locator(".profile-card").click();
+    await page.getByRole("dialog").waitFor();
+    await page.screenshot({ path: path.join(shots, "03-settings.png") });
+    await page.keyboard.press("Escape");
+    await page.setViewportSize({ width: 420, height: 820 });
+    await delay(400);
+    await page.screenshot({ path: path.join(shots, "04-phone.png") });
+    await page.setViewportSize({ width: 1180, height: 900 });
+    await delay(300);
+  }
 
   // ---- 9. No native dialog, and no page error, at any point. ----
   assert.deepEqual(nativeDialogs, [], `A native browser dialog was opened: ${nativeDialogs.join(" | ")}`);
