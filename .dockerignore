@@ -1,6 +1,7 @@
 .git
 .next
 node_modules
+.python
 data
 .env
 .env.*

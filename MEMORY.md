@@ -1,6 +1,7 @@
 # Project Memory
 
 - NeuralNetUI is a Next.js 16 TypeScript chat application with SQLite-backed authentication, settings, conversations, uploads, and tool-event persistence.
+- Docker builds exclude the host `.python` virtual environment because Linux virtualenv interpreter symlinks point outside the build root and cause Turbopack tracing to fail.
 - The UI supports English and Korean. Technical tool events use a collapsed message-level group with active tool names or completed/failure totals, nested per-call rows, and display-only localized call markers in reasoning.
 - Selectable questions appear one at a time above the composer, support model-chosen single/multiple/ranked modes, and render persisted tool answers as user-style question/answer bubbles.
 - Deleting a user message also deletes the immediately connected assistant response from that branch.
