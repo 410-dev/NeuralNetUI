@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { chromium } from "playwright-core";
 import { decryptBackup, encryptBackup } from "../lib/backup-crypto.ts";
 
-// Beta 18: reset credits zero covered windows in place, personal backups carry model settings and
+// Beta 18: reset credits empty covered windows until the next use, personal backups carry model settings and
 // restore them best-effort across accounts and image variants, and delete prompts use the red tone.
 const shots = process.env.BETA18_SCREENSHOTS;
 const require = createRequire(import.meta.url);
@@ -78,7 +78,7 @@ try {
   const login = async username => { const response = await request("/api/auth/login", "POST", { username, password }, ""); assert.ok(response.ok); return response.headers.get("set-cookie").split(";")[0]; };
   const memberCookie = await login("beta18user"), peerCookie = await login("beta18peer");
 
-  // ---- Reset credits zero the covered windows without moving them --------------------------------
+  // ---- Reset credits empty covered windows; they restart at the next use --------------------------------
   const plan = (await json("/api/plans", "POST", { name: "Reset QA", storageQuotaBytes: 1024 ** 3, servedModelIds: [], modelWeights: {}, tokenLimits: [{ durationSeconds: 3 * 3600, tokenLimit: 100, tokenScope: "both" }, { durationSeconds: 5 * 3600, tokenLimit: 200, tokenScope: "both" }, { durationSeconds: 10 * 3600, tokenLimit: 500, tokenScope: "both" }] })).plan;
   await json(`/api/users/${member.id}`, "PATCH", { planId: plan.id });
   const usageDb = new Database(dbPath);
@@ -91,11 +91,17 @@ try {
   const after = await json("/api/usage", "POST", { creditId: credit.id }, memberCookie);
   assert.deepEqual(after.windows.map(item => Math.round(item.percentage)), [0, 0, 20], "3h and 5h reset; 10h keeps its usage");
   assert.equal(after.blocked, false);
-  assert.deepEqual(after.windows.map(item => [item.startsAt, item.resetsAt]), before.windows.map(item => [item.startsAt, item.resetsAt]), "windows keep their timing");
+  assert.equal(after.windows[0].startsAt, undefined, "a reset window waits for the next use");
+  assert.equal(after.windows[1].startsAt, undefined);
+  assert.deepEqual([after.windows[2].startsAt, after.windows[2].resetsAt], [before.windows[2].startsAt, before.windows[2].resetsAt], "the 10h window keeps its timing");
   await delay(20);
-  usageDb.prepare("INSERT INTO token_usage_events(user_id,model_id,input_tokens,output_tokens,created_at) VALUES(?,?,?,?,?)").run(member.id, "qa-model", 10, 0, new Date().toISOString());
+  const nextUse = new Date().toISOString();
+  usageDb.prepare("INSERT INTO token_usage_events(user_id,model_id,input_tokens,output_tokens,created_at) VALUES(?,?,?,?,?)").run(member.id, "qa-model", 10, 0, nextUse);
   usageDb.close();
-  assert.deepEqual((await json("/api/usage", "GET", undefined, memberCookie)).windows.map(item => item.usedTokens), [10, 10, 110], "new usage counts in every window");
+  const resumed = await json("/api/usage", "GET", undefined, memberCookie);
+  assert.deepEqual(resumed.windows.map(item => item.usedTokens), [10, 10, 110], "new usage counts in every window");
+  assert.deepEqual(resumed.windows.slice(0, 2).map(item => [item.startsAt, item.resetsAt]), [[nextUse, new Date(Date.parse(nextUse) + 3 * 3600_000).toISOString()], [nextUse, new Date(Date.parse(nextUse) + 5 * 3600_000).toISOString()]], "reset windows start at the first use after the reset");
+  assert.deepEqual([resumed.windows[2].startsAt, resumed.windows[2].resetsAt], [before.windows[2].startsAt, before.windows[2].resetsAt]);
 
   // ---- Personal backups carry model settings -----------------------------------------------------
   const adminConfig = await json("/api/config");
