@@ -384,6 +384,16 @@ export default function Home() {
     queued.forEach((prompt) => prompt.attachments.filter(attachment=>!attachment.fromStorage).forEach((attachment) => fetch(`/api/uploads/${attachment.id}`, { method: "DELETE" }).catch(() => undefined)));
   }
 
+  // A focused number field would otherwise step its value while the wheel scrolls the page past it.
+  useEffect(() => {
+    const guard = (event: globalThis.WheelEvent) => {
+      const field = document.activeElement;
+      if (field instanceof HTMLInputElement && field.type === "number" && event.target === field) field.blur();
+    };
+    document.addEventListener("wheel", guard, { passive: true, capture: true });
+    return () => document.removeEventListener("wheel", guard, { capture: true });
+  }, []);
+
   useEffect(() => { fetch("/api/auth/status").then((response) => response.json()).then(setAuth).catch(() => setAuth({ setupRequired: false, authenticated: false, user: null })); }, []);
 
   useEffect(() => {

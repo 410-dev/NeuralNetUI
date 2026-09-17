@@ -144,6 +144,20 @@ try {
   const savedSettings = page.waitForResponse(response => response.url().endsWith("/api/config") && response.request().method() === "PUT" && response.ok());
   await page.locator(".settings-panel .save-button").last().click(); await savedSettings;
   assert.equal((await json("/api/config")).showModelWeights, true);
+  // Scrolling past a focused weight field must not step its value.
+  await page.locator(".settings-body nav button", { hasText: "플랜" }).click();
+  await page.locator(".plan-list button", { hasText: "Weighted QA" }).click();
+  const weightField = page.locator(".plan-models input[type=number]").first();
+  await weightField.click({ clickCount: 3 }); await page.keyboard.type("1.35", { delay: 30 });
+  await weightField.hover(); for (let tick = 0; tick < 24; tick++) await page.mouse.wheel(0, 100);
+  assert.equal(await weightField.inputValue(), "1.35");
+  const savedPlan = page.waitForResponse(response => response.url().endsWith(`/api/plans/${plan.id}`) && response.request().method() === "PUT" && response.ok());
+  await page.getByRole("button", { name: "플랜 저장" }).click(); await savedPlan;
+  assert.equal((await json("/api/plans")).plans.find(item => item.id === plan.id).modelWeights["qa-model"], 1.35);
+  await weightField.click({ clickCount: 3 }); await page.keyboard.type("1.75", { delay: 30 }); await page.keyboard.press("ArrowUp"); await page.keyboard.press("ArrowDown");
+  const restoredPlan = page.waitForResponse(response => response.url().endsWith(`/api/plans/${plan.id}`) && response.request().method() === "PUT" && response.ok());
+  await page.getByRole("button", { name: "플랜 저장" }).click(); await restoredPlan;
+  assert.equal((await json("/api/plans")).plans.find(item => item.id === plan.id).modelWeights["qa-model"], 1.75);
   assert.deepEqual((await json("/api/config")).modelWeights, { "qa-model": 1.75 }, "the enabling administrator sees badges");
   assert.deepEqual((await json("/api/config", "GET", undefined, memberCookie)).modelWeights, { "qa-model": 1.75 }, "standard accounts see badges too");
   await page.reload({ waitUntil: "domcontentloaded" });
