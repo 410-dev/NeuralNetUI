@@ -15,3 +15,5 @@ export function formatModelWeight(value:number){return String(Number(normalizeMo
 /** Streamed usage that has not yet been written as an event; it counts toward a live status request. */
 export type LiveTokenUsage=TokenUsageEvent&{startedAt:number};
 export function firstUseAt(recordedAt:number|undefined,live:LiveTokenUsage[],resetAt?:number){const starts=live.map(item=>item.startedAt).filter(value=>resetAt===undefined||value>resetAt);if(recordedAt!==undefined)starts.push(recordedAt);return starts.length?Math.min(...starts):undefined;}
+/** Where a window starts counting: its own start, or just after a reset credit redeemed inside it. */
+export function countedAfter(windowStartMs:number,resetAtMs?:number){return resetAtMs!==undefined&&resetAtMs>=windowStartMs?{after:resetAtMs,inclusive:false}:{after:windowStartMs,inclusive:true};}

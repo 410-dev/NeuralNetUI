@@ -144,7 +144,7 @@ export async function writeConfigForUser(input: unknown, user: AuthUser): Promis
   if (!admin) {
     // Served models, including their reasoning templates, are an administrator's to shape. A
     // standard account only owns its aliases, so everything else is carried over untouched.
-    const aliases = current.models.filter((model) => model.isAlias && model.ownerId !== user.id).concat(incoming.models.filter((model) => model.isAlias && (!model.ownerId || model.ownerId === user.id)).map((model) => ({ ...model, ownerId: user.id })));
+    const aliases = current.models.filter((model) => model.isAlias && model.ownerId !== user.id).concat(incoming.models.filter((model) => model.isAlias && (!model.ownerId || model.ownerId === user.id)).map((model) => ({ ...model, ownerId: user.id, reasoningPresets: model.reasoningPresets.map((preset) => preset.kind === "custom" ? { ...preset, ownerId: user.id } : preset) })));
     return writeConfig({ ...current, models: aliases });
   }
   const existing = new Map(current.connections.map((connection) => [connection.id, connection]));

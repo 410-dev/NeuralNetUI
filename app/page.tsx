@@ -746,7 +746,7 @@ export default function Home() {
   }
 
   async function deleteHistory(id: string) {
-    if (!await askConfirm({ tone: "warning", title: c.deleteChat, message: c.confirmDeleteChat, confirmLabel: c.confirmDelete })) return;
+    if (!await askConfirm({ tone: "danger", title: c.deleteChat, message: c.confirmDeleteChat, confirmLabel: c.confirmDelete })) return;
     try {
       if (id === conversation?.id) { await fetch(`/api/chat/${id}`, { method: "DELETE" }).catch(() => undefined); newChat(); }
       const response = await fetch(`/api/conversations/${id}`, { method: "DELETE" });
@@ -1038,8 +1038,8 @@ export default function Home() {
     const groupId = revisionGroupOf(conversation, messageId);
     const shared = branchesHoldingRevision(conversation, groupId).length > 1;
     const scope = shared
-      ? await choose({ tone: "warning", title: c.deleteMessage, message: c.confirmDeleteMessage, detail: c.deleteScopeHelp, choices: [{ id: "branch", label: c.deleteThisBranch, quiet: true }, { id: "all", label: c.deleteEveryBranch }] })
-      : await askConfirm({ tone: "warning", title: c.deleteMessage, message: c.confirmDeleteMessage, confirmLabel: c.confirmDelete }) ? "branch" : "";
+      ? await choose({ tone: "danger", title: c.deleteMessage, message: c.confirmDeleteMessage, detail: c.deleteScopeHelp, choices: [{ id: "branch", label: c.deleteThisBranch, quiet: true }, { id: "all", label: c.deleteEveryBranch }] })
+      : await askConfirm({ tone: "danger", title: c.deleteMessage, message: c.confirmDeleteMessage, confirmLabel: c.confirmDelete }) ? "branch" : "";
     if (!scope) return;
     const stamp = now();
     const next = scope === "all" ? deleteMessageEverywhere(conversation, groupId, stamp) : deleteMessageFromBranch(conversation, source.id, messageId, stamp);
