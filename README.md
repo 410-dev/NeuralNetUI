@@ -4,7 +4,7 @@
 
 ![NeuralNetUI](neuralnetui.png)
 
-`3.0.0-beta.15` · Node.js 22+ · Next.js 16 · SQLite
+`3.0.0-beta.16` · Node.js 22+ · Next.js 16 · SQLite
 
 ## 주요 기능
 
@@ -115,3 +115,11 @@ deploy/     systemd 유닛 예시
 docs/       문서와 릴리스 감사 기록
 design/     디자인 언어 규칙
 ```
+
+### Beta 16 encrypted backups
+
+Backup creates an authenticated AES-256-GCM `.nnbak` image containing a high-compression 7z payload. A random salt and scrypt derive its key from the owner's username and password; neither a server secret nor the source instance is required to restore. Personal/per-user backups require the data owner's current login credentials; global/account backups require the exporting administrator's credentials. Restore requires the credentials used **when that image was created**, even after a subsequent password change.
+
+Sign in on the destination, select the backup scope and merge/replace mode, then supply the original image credentials. Personal and per-user images are interchangeable and migrate IDs and attachment links to the destination owner. Account restore requires a superadmin, matches existing usernames to local IDs, and retains the executing destination superadmin. Restore still respects destination storage limits. Beta 15 plaintext `.7z` files must be recreated as encrypted images on the source installation.
+
+Validation: `npm test`, `npx tsc --noEmit`, `npm run build`, and `node --experimental-strip-types scripts/test-beta16-backup-integration.mjs`. The integration covers every scope/mode, ciphertext tampering, wrong credentials, rollback, and a separate fresh destination. Set `BACKUP_QA_APP_DIR` and `BACKUP_QA_NODE` to verify the packaged standalone runtime. No standalone lint command is configured in this repository.
