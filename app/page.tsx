@@ -13,6 +13,9 @@ import { StorageUsageMeter } from "./storage-usage-meter";
 import { AccountBackupSettings, DataManagementSettings } from "./backup-settings";
 import { PlanSettings } from "./plan-settings";
 import { UsageDonut } from "./usage-donut";
+import { USAGE_REFRESH_EVENT } from "@/lib/usage-popover";
+import { formatModelWeight } from "@/lib/plan-usage";
+import { DEFAULT_ENABLED_TOOLS } from "@/lib/enabled-tools";
 import { SectionTitle } from "./section-title";
 import { SelectMenu, usePopoverPresence } from "./select-menu";
 import { NeuralMark } from "./neural-mark";
@@ -90,7 +93,7 @@ const translations = {
   en: {
     newChat: "New Chat", search: "Search", storageManager: "Storage manager", searchChats: "Search chats…", histories: "Chat histories", exportChat: "Export chat", deleteChat: "Delete chat", deleteAllChats: "Delete all chats", confirmDeleteChat: "Delete this chat?", confirmDeleteAllChats: "Delete all chat histories?",
     historyEmpty: "Your conversations will appear here.", settingsConnections: "Settings & connections", selectModel: "Select a model",
-    availableModels: "Available models", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
+    availableModels: "Available models", checkingModelServers: "Checking model servers", noOnlineModels: "No model server is online.", modelWeightHint: "Uses tokens {weight}x faster", showModelWeights: "Show model weights", showModelWeightsDesc: "Show a weight badge on models whose plan weight is not 1. Only administrators see it.", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
     messagePlaceholder: "Message to send", reasoningPreset: "Reasoning preset", native: "Native", template: "Template", default: "default",
     sendPriorReasoning: "Remember its train of thought", sendPriorReasoningDesc: "Send the earlier reasoning back with the next request",
     disclaimer: "Responses may be inaccurate. Verify important information.", stop: "Stop generating", send: "Send message", addToQueue: "Add to queue", queuedMessages: "Queued messages", removeQueuedMessage: "Remove queued message",
@@ -141,7 +144,7 @@ const translations = {
   ko: {
     newChat: "새 채팅", search: "검색", storageManager: "저장소 관리", searchChats: "채팅 검색…", histories: "채팅 기록", exportChat: "채팅 내보내기", deleteChat: "대화 삭제", deleteAllChats: "전체 대화 삭제", confirmDeleteChat: "이 대화를 삭제할까요?", confirmDeleteAllChats: "모든 대화 기록을 삭제할까요?",
     historyEmpty: "대화를 시작하면 여기에 표시됩니다.", settingsConnections: "설정 및 연결", selectModel: "모델 선택",
-    availableModels: "사용 가능한 모델", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
+    availableModels: "사용 가능한 모델", checkingModelServers: "모델 서버 확인 중", noOnlineModels: "온라인 상태인 모델 서버가 없습니다.", modelWeightHint: "토큰을 {weight}배 더 빨리 소모합니다", showModelWeights: "모델 가중치 표시", showModelWeightsDesc: "플랜 가중치가 1이 아닌 모델에 가중치 딱지를 표시합니다. 관리자에게만 보입니다.", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
     messagePlaceholder: "보낼 메시지", reasoningPreset: "Reasoning 프리셋", native: "내장", template: "템플릿", default: "기본값",
     sendPriorReasoning: "생각 기록 기억하기", sendPriorReasoningDesc: "다음 요청에 이전 생각 기록을 함께 보냅니다",
     disclaimer: "응답이 부정확할 수 있습니다. 중요한 정보는 확인해 주세요.", stop: "생성 중단", send: "메시지 전송", addToQueue: "대기열에 추가", queuedMessages: "대기 중인 메시지", removeQueuedMessage: "대기열에서 제거",
@@ -277,6 +280,20 @@ export default function Home() {
   const [draft, setDraft] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [offlineConnectionIds, setOfflineConnectionIds] = useState<string[]>([]);
+  const [checkingModelServers, setCheckingModelServers] = useState(false);
+  // Opening the picker re-checks every model server; models on an unreachable server are hidden.
+  useEffect(() => {
+    if (!modelMenuOpen) return;
+    const controller = new AbortController();
+    setCheckingModelServers(true);
+    fetch("/api/models/status", { cache: "no-store", signal: controller.signal })
+      .then((response) => response.ok ? response.json() : undefined)
+      .then((body: { offlineConnectionIds?: string[] } | undefined) => { if (body) setOfflineConnectionIds(body.offlineConnectionIds || []); })
+      .catch(() => undefined)
+      .finally(() => { if (!controller.signal.aborted) setCheckingModelServers(false); });
+    return () => controller.abort();
+  }, [modelMenuOpen]);
   const [unloadingModel, setUnloadingModel] = useState(false);
   const [modelControlNotice, setModelControlNotice] = useState<{ message: string; error: boolean } | null>(null);
   const [applyingDefault, setApplyingDefault] = useState<"" | "model" | "reasoning">("");
@@ -325,6 +342,18 @@ export default function Home() {
   const [currentTimeEnabled, setCurrentTimeEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [multipleChoiceEnabled, setMultipleChoiceEnabled] = useState(true);
+  const pendingToolsRef = useRef<Partial<EnabledTools>>({});
+  const toolSaveTimerRef = useRef<number | undefined>(undefined);
+  /** Composer tool switches are account preferences: apply locally, then save the batched change. */
+  const persistedTool = (key: keyof EnabledTools, set: (value: boolean) => void) => (value: boolean) => {
+    set(value);
+    pendingToolsRef.current = { ...pendingToolsRef.current, [key]: value };
+    window.clearTimeout(toolSaveTimerRef.current);
+    toolSaveTimerRef.current = window.setTimeout(() => {
+      const patch = pendingToolsRef.current; pendingToolsRef.current = {};
+      void fetch("/api/preferences/tools", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }).catch(() => undefined);
+    }, 250);
+  };
   const [renderedMessageCount, setRenderedMessageCount] = useState(60);
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const abortRef = useRef<AbortController | null>(null);
@@ -362,6 +391,9 @@ export default function Home() {
     Promise.all([fetch("/api/config").then((r) => r.json()), fetch(`/api/conversations${openedId ? `?keepTemporary=${encodeURIComponent(openedId)}` : ""}`).then((r) => r.json())])
       .then(async ([next, stored]: [PublicConfig, { conversations: ConversationSummary[] }]) => {
         setConfig(next); setSendReasoning(next.preferences.sendReasoningToModel);
+        const tools = { ...DEFAULT_ENABLED_TOOLS, ...next.preferences.enabledTools };
+        setInternetSearchEnabled(tools.internetSearch); setPageVisitEnabled(tools.pageVisit); setBrowserEnabled(tools.browser); setHostComputerEnabled(tools.hostComputer);
+        setStorageAccessEnabled(tools.storageAccess); setCurrentTimeEnabled(tools.currentTime); setLocationEnabled(tools.location); setMultipleChoiceEnabled(tools.multipleChoice);
         setHistories(stored.conversations || []);
         const visible = next.models.filter((model) => model.visible !== false);
         const first = visible.find((model) => model.id === next.preferences.defaultModelId) || visible[0];
@@ -456,9 +488,11 @@ export default function Home() {
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   const { dialog: messageDialog, confirm: askConfirm, choose, notify } = useMessageDialog(locale === "ko");
   const visibleModels = config.models.filter((model) => model.visible !== false);
+  const pickerModels = visibleModels.filter((model) => !model.connectionId || !offlineConnectionIds.includes(model.connectionId));
   const selectedModel = visibleModels.find((model) => model.id === selectedModelId) || visibleModels[0];
   const selectedPreset = selectedModel?.reasoningPresets.find((preset) => preset.id === selectedPresetId) || selectedModel?.reasoningPresets[0];
   const isAdmin = config.account?.role === "admin" || config.account?.role === "superadmin";
+  const showModelWeights = isAdmin && appearance.showModelWeights === true;
   const canManageInference = isAdmin;
   const activeBranch = conversation?.branches.find((branch) => branch.id === conversation.activeBranchId);
   const pendingChoice = pendingMultipleChoiceEvent(messages);
@@ -828,6 +862,7 @@ export default function Home() {
         }
       }
       if (!terminal) return null;
+      window.dispatchEvent(new Event(USAGE_REFRESH_EVENT));
       if (terminal.error) setError(terminal.error);
       const response = await fetch(`/api/conversations/${working.id}`, { cache: "no-store" });
       if (!response.ok) return working;
@@ -1087,7 +1122,7 @@ export default function Home() {
         <div className="ambient-glow" />
         <div className="model-switcher">
           <button className="model-trigger" onClick={() => { if (!modelMenuOpen) setModelControlNotice(null); setModelMenuOpen((value) => !value); }}><span>{selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
-          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span><small>{visibleModels.length}</small></div>{visibleModels.map((model) => <button className="model-option" key={model.id} onClick={() => chooseModel(model)}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{model.isAlias && <b>ALIAS</b>}</button>)}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{isAdmin && <button className="default-choice-action" disabled={!selectedModel || applyingDefault === "model"} onClick={() => void applyDefaultToEveryone("model")}>{applyingDefault === "model" ? <LoaderCircle className="spin" size={14} /> : <Users size={14} />}{applyingDefault === "model" ? c.applyingToEveryone : c.applyToEveryone}</button>}{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
+          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span>{checkingModelServers ? <LoaderCircle className="spin" size={13} aria-label={c.checkingModelServers} /> : <small>{pickerModels.length}</small>}</div>{!checkingModelServers && !pickerModels.length && <p className="model-popover-empty">{c.noOnlineModels}</p>}{pickerModels.map((model) => { const weight = showModelWeights ? config.modelWeights?.[model.id] : undefined; const weightHint = weight ? c.modelWeightHint.replace("{weight}", formatModelWeight(weight)) : ""; return <button className="model-option" key={model.id} onClick={() => chooseModel(model)}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{(model.isAlias || weight) && <span className="model-option-badges">{model.isAlias && <b>ALIAS</b>}{weight && <b className="model-weight-badge" data-tooltip={weightHint} aria-label={weightHint}>x{formatModelWeight(weight)}</b>}</span>}</button>; })}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{isAdmin && <button className="default-choice-action" disabled={!selectedModel || applyingDefault === "model"} onClick={() => void applyDefaultToEveryone("model")}>{applyingDefault === "model" ? <LoaderCircle className="spin" size={14} /> : <Users size={14} />}{applyingDefault === "model" ? c.applyingToEveryone : c.applyToEveryone}</button>}{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
         </div>
 
         <div className="surface-actions">
@@ -1101,7 +1136,7 @@ export default function Home() {
         </div>
 
         <div className="conversation-stage">
-          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} admin={isAdmin} applyingReasoningDefault={applyingDefault === "reasoning"} applyReasoningToEveryone={() => void applyDefaultToEveryone("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} hostComputerToolAvailable={hostComputerToolAvailable} hostComputerEnabled={hostComputerEnabled} setHostComputerEnabled={setHostComputerEnabled} storageAccessEnabled={storageAccessEnabled} setStorageAccessEnabled={setStorageAccessEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} /></div> : <>
+          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} admin={isAdmin} applyingReasoningDefault={applyingDefault === "reasoning"} applyReasoningToEveryone={() => void applyDefaultToEveryone("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={persistedTool("internetSearch", setInternetSearchEnabled)} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={persistedTool("pageVisit", setPageVisitEnabled)} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={persistedTool("browser", setBrowserEnabled)} hostComputerToolAvailable={hostComputerToolAvailable} hostComputerEnabled={hostComputerEnabled} setHostComputerEnabled={persistedTool("hostComputer", setHostComputerEnabled)} storageAccessEnabled={storageAccessEnabled} setStorageAccessEnabled={persistedTool("storageAccess", setStorageAccessEnabled)} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={persistedTool("currentTime", setCurrentTimeEnabled)} locationEnabled={locationEnabled} setLocationEnabled={persistedTool("location", setLocationEnabled)} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={persistedTool("multipleChoice", setMultipleChoiceEnabled)} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} /></div> : <>
             <div className="thread-shell">
               <div className={`thread ${activityHidden ? "activity-hidden" : ""}`} ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
                 {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
@@ -1109,7 +1144,7 @@ export default function Home() {
               </div>
               {!threadAutoFollow && <button type="button" className="scroll-resume thread-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeThreadAutoFollow}><ArrowDown size={18} /></button>}
             </div>
-            <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} admin={isAdmin} applyingReasoningDefault={applyingDefault === "reasoning"} applyReasoningToEveryone={() => void applyDefaultToEveryone("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={setInternetSearchEnabled} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={setPageVisitEnabled} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={setBrowserEnabled} hostComputerToolAvailable={hostComputerToolAvailable} hostComputerEnabled={hostComputerEnabled} setHostComputerEnabled={setHostComputerEnabled} storageAccessEnabled={storageAccessEnabled} setStorageAccessEnabled={setStorageAccessEnabled} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={setCurrentTimeEnabled} locationEnabled={locationEnabled} setLocationEnabled={setLocationEnabled} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={setMultipleChoiceEnabled} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} />
+            <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} admin={isAdmin} applyingReasoningDefault={applyingDefault === "reasoning"} applyReasoningToEveryone={() => void applyDefaultToEveryone("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={persistedTool("internetSearch", setInternetSearchEnabled)} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={persistedTool("pageVisit", setPageVisitEnabled)} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={persistedTool("browser", setBrowserEnabled)} hostComputerToolAvailable={hostComputerToolAvailable} hostComputerEnabled={hostComputerEnabled} setHostComputerEnabled={persistedTool("hostComputer", setHostComputerEnabled)} storageAccessEnabled={storageAccessEnabled} setStorageAccessEnabled={persistedTool("storageAccess", setStorageAccessEnabled)} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={persistedTool("currentTime", setCurrentTimeEnabled)} locationEnabled={locationEnabled} setLocationEnabled={persistedTool("location", setLocationEnabled)} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={persistedTool("multipleChoice", setMultipleChoiceEnabled)} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} />
           </>}
         </div>
       </section>
@@ -1913,6 +1948,7 @@ function AppearanceSettings({ c, draft, setDraft, admin }: { c: CopySet; draft: 
     <SectionTitle icon={<Palette size={19} />} title={c.appearanceTitle} description={c.appearanceDesc} />
     <div className="general-setting-card general-toggle-card"><div><strong>{c.showModelIdentifiers}</strong><small>{c.showModelIdentifiersHelp}</small></div><button role="switch" aria-checked={draft.preferences.showModelIdentifiers !== false} aria-label={c.showModelIdentifiers} className={`toggle ${draft.preferences.showModelIdentifiers !== false ? "on" : ""}`} onClick={() => togglePreference("showModelIdentifiers")}><i /></button></div>
     <div className="general-setting-card general-toggle-card"><div><strong>{c.renderStrikethrough}</strong><small>{c.renderStrikethroughHelp}</small></div><button role="switch" aria-checked={draft.preferences.renderStrikethrough !== false} aria-label={c.renderStrikethrough} className={`toggle ${draft.preferences.renderStrikethrough !== false ? "on" : ""}`} onClick={() => togglePreference("renderStrikethrough")}><i /></button></div>
+    {admin && <div className="general-setting-card general-toggle-card"><div><strong>{c.showModelWeights}</strong><small>{c.showModelWeightsDesc}</small></div><button role="switch" aria-checked={appearance.showModelWeights === true} aria-label={c.showModelWeights} className={`toggle ${appearance.showModelWeights ? "on" : ""}`} onClick={() => patch({ showModelWeights: !appearance.showModelWeights })}><i /></button></div>}
     <AccentPicker c={c} label={c.accentTitle} help={c.accentHelp} palette={appearance.accentPalette} color={appearance.accentColor} onChange={patch} />
     {admin && <AccentPicker c={c} label={c.loginAccentTitle} help={c.loginAccentHelp} palette={loginAppearance.accentPalette} color={loginAppearance.accentColor} onChange={patchLogin} />}
     <div className="general-setting-card greeting-settings">

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { usagePopoverPlacement } from "./usage-popover.ts";
+import { usageLevel, usagePopoverPlacement } from "./usage-popover.ts";
 
 test("usage popover remains inside a narrow viewport", () => {
   const placement = usagePopoverPlacement(
@@ -29,4 +29,13 @@ test("usage popover width contracts for phone viewports", () => {
     width: 216,
     maxHeight: 226,
   });
+});
+
+test("usage meter turns yellow at 80% and red at 90%", () => {
+  assert.equal(usageLevel(0), "normal");
+  assert.equal(usageLevel(79.9), "normal");
+  assert.equal(usageLevel(80), "warning");
+  assert.equal(usageLevel(89.9), "warning");
+  assert.equal(usageLevel(90), "critical");
+  assert.equal(usageLevel(100), "critical");
 });

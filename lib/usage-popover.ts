@@ -24,3 +24,13 @@ export function usagePopoverPlacement(
   const maxHeight = Math.max(1, viewport.height - bottom - margin);
   return { left, bottom, width, maxHeight };
 }
+
+export type UsageLevel = "normal" | "warning" | "critical";
+
+/** White below 80%, yellow from 80% and red from 90%. */
+export function usageLevel(percentage: number): UsageLevel {
+  return percentage >= 90 ? "critical" : percentage >= 80 ? "warning" : "normal";
+}
+
+/** Dispatched on `window` when a response finishes so the plan usage meter reloads at once. */
+export const USAGE_REFRESH_EVENT = "neural-usage-refresh";

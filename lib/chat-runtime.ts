@@ -24,7 +24,7 @@ import { executeStorageAccessTool, storageAccessToolDefinition } from "./storage
 import type { ChatWaitPhase, Conversation, HarnessSettings, MessageStep, ModelConfig, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
 import type { ModelContentPart } from "./document-processing";
 import { promises as fs } from "node:fs";
-import { acquirePlanAdmission, assertPlanAccess, recordTokenUsage, releasePlanAdmission, remainingPlanOutputTokens } from "./plans";
+import { acquirePlanAdmission, assertPlanAccess, clearLiveTokenUsage, recordTokenUsage, releasePlanAdmission, remainingPlanOutputTokens, setLiveTokenUsage } from "./plans";
 
 type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
 type UpstreamMessage = { role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string };
@@ -246,7 +246,7 @@ async function materializeImageFiles(body: Record<string, unknown>) {
   return { ...body, messages:converted };
 }
 
-async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false, threshold?: number, baseInput?: number) {
+async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false, threshold?: number, baseInput?: number, chargeModelId?: string) {
   const turnController = new AbortController();
   const signal = AbortSignal.any([job.controller.signal, turnController.signal]);
   setWaitPhase(job, "preparing-response");
@@ -264,6 +264,8 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   let compact = false;
   const inputEstimate = projectedInputTokens(estimateTokens(body.messages) + estimateTokens(body.tools || []), baseInput);
   let terminated = false; let sawPayload = false; let finishReason = false;
+  // Servers that omit usage are charged the local estimate; a live copy feeds manual usage refreshes.
+  let chargedUsage = { inputTokens: 0, outputTokens: 0 };
   const readPayload = (payload: Record<string, unknown>) => {
     sawPayload = true;
     const progress = allowProgress ? progressEvent(payload) : undefined;
@@ -297,9 +299,10 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
         function: { name: `${previous.function.name}${typeof fn?.name === "string" ? fn.name : ""}`, arguments: `${previous.function.arguments}${typeof fn?.arguments === "string" ? fn.arguments : ""}` },
       });
     }
-    const used = Math.max(inputEstimate, usage.inputTokens ?? 0) + Math.max(
-      estimateTokens(content) + estimateTokens(reasoning) + estimateTokens([...calls.values()]),
-      usage.outputTokens ?? 0, usage.reasoningTokens ?? 0);
+    const outputEstimate = estimateTokens(content) + estimateTokens(reasoning) + estimateTokens([...calls.values()]);
+    const used = Math.max(inputEstimate, usage.inputTokens ?? 0) + Math.max(outputEstimate, usage.outputTokens ?? 0, usage.reasoningTokens ?? 0);
+    chargedUsage = { inputTokens: usage.inputTokens ?? inputEstimate, outputTokens: usage.outputTokens ?? outputEstimate };
+    if (chargeModelId) setLiveTokenUsage(job.userId, job.message.id, chargeModelId, chargedUsage.inputTokens, chargedUsage.outputTokens);
     job.message.contextTokens = used;
     if (threshold && used >= threshold) { compact = true; terminated = true; turnController.abort(); }
   };
@@ -322,13 +325,16 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   } catch (error) {
     if (error instanceof Error && contextOverflowDetails(error) && Boolean(content || reasoning || calls.size))
       Object.assign(error, { neuralPartialOutput: true });
+    // A stopped or failed stream still consumed the tokens the server already produced.
+    if (chargeModelId && sawPayload) recordTokenUsage(job.userId, chargeModelId, chargedUsage.inputTokens, chargedUsage.outputTokens);
     throw error;
   } finally {
+    if (chargeModelId) clearLiveTokenUsage(job.userId, job.message.id);
     setWaitPhase(job, undefined);
     await reader.cancel().catch(() => undefined); reader.releaseLock();
   }
   return {
-    content, reasoning, calls: [...calls.values()], usage, compact,
+    content, reasoning, calls: [...calls.values()], usage, chargedUsage, compact,
     visibleDurationSeconds: visibleStarted === undefined ? undefined : Math.max(.001, ((visibleEnded || performance.now()) - visibleStarted) / 1000),
     reasoningDurationSeconds: reasoningStarted === undefined ? 0 : Math.max(.001, ((reasoningEnded || performance.now()) - reasoningStarted) / 1000),
   };
@@ -573,7 +579,7 @@ async function run(job: ChatJob) {
       try {
         const configuredThreshold = contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined;
         const streamThreshold = configuredThreshold && projectedInput >= configuredThreshold && contextWindow ? Math.floor(contextWindow * .95) : configuredThreshold;
-        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled, harness.contextMode === "compacting" ? streamThreshold : undefined, projectedInput);
+        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled, harness.contextMode === "compacting" ? streamThreshold : undefined, projectedInput, chargeModelId);
       } catch (error) {
         const overflow = contextOverflowDetails(error);
         if (!overflow) throw error;
@@ -608,7 +614,7 @@ async function run(job: ChatJob) {
         throw overflowError(overflow);
       }
       reasoningSeconds += result.reasoningDurationSeconds;
-      recordTokenUsage(job.userId,chargeModelId,result.usage.inputTokens||0,result.usage.outputTokens||0);
+      recordTokenUsage(job.userId,chargeModelId,result.chargedUsage.inputTokens,result.chargedUsage.outputTokens);
       const serverMeasuredInput = result.usage.inputTokens ? result.usage.inputTokens + (result.usage.outputTokens || 0) : undefined;
       if (result.compact) {
         job.controller.signal.throwIfAborted();

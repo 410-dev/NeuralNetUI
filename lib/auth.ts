@@ -309,7 +309,23 @@ export function overwriteUserPreference(key: "defaultModelId" | "defaultReasonin
   })();
 }
 
+/** Replaces the settings-form preferences while keeping values saved elsewhere, such as composer tool switches. */
 export function updateUserPreferences(userId: string, displayName: string, preferences: Record<string, unknown>) {
+  const row = db.prepare("SELECT preferences FROM users WHERE id = ?").get(userId) as { preferences: string } | undefined;
+  let existing: Record<string, unknown> = {};
+  try { existing = JSON.parse(row?.preferences || "{}"); } catch { /* unreadable preferences start again */ }
+  const kept = "enabledTools" in existing ? { enabledTools: existing.enabledTools } : {};
   db.prepare("UPDATE users SET display_name = ?, preferences = ?, updated_at = ? WHERE id = ?")
-    .run(displayName, JSON.stringify(preferences), new Date().toISOString(), userId);
+    .run(displayName, JSON.stringify({ ...kept, ...preferences }), new Date().toISOString(), userId);
+}
+
+/** Merges one preference key into an account without touching the others. */
+export function mergeUserPreference(userId: string, key: string, value: unknown) {
+  db.transaction(() => {
+    const row = db.prepare("SELECT preferences FROM users WHERE id = ?").get(userId) as { preferences: string } | undefined;
+    if (!row) throw new AuthError("사용자를 찾을 수 없습니다.", 404);
+    let preferences: Record<string, unknown> = {};
+    try { preferences = JSON.parse(row.preferences || "{}"); } catch { /* unreadable preferences start again */ }
+    db.prepare("UPDATE users SET preferences = ?, updated_at = ? WHERE id = ?").run(JSON.stringify({ ...preferences, [key]: value }), new Date().toISOString(), userId);
+  })();
 }
