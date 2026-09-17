@@ -23,8 +23,6 @@ export interface AppearancePreferences {
   streamChunkSize: number;
   /** Show each reasoning choice's description in the chat picker. */
   showReasoningNotes: boolean;
-  /** Administrators only: show each model's plan weight badge in the chat picker. */
-  showModelWeights: boolean;
   /** Per-effort description overrides. An absent key falls back to the built-in wording. */
   reasoningNotes: Record<string, string>;
   greetings: GreetingOverrides;
@@ -182,6 +180,8 @@ export interface AppConfig {
   };
   /** Workspace-wide, never overridden per account. */
   loginAppearance: LoginAppearance;
+  /** Workspace-wide: every account sees its plan's model weight badges in the chat picker. */
+  showModelWeights: boolean;
   userStorageSettings: UserStorageSettings;
   harnessSettings?: HarnessSettings;
   toolSettings: ToolSettings;
@@ -364,6 +364,6 @@ export type PublicConfig = Omit<AppConfig, "connections"> & {
   account?: AccountInfo;
   /** Runtime capability, computed by the server and never persisted. */
   hostComputerAvailable?: boolean;
-  /** Administrators only: plan weights other than 1, keyed by picker model id. */
+  /** Present while weight badges are enabled: the account's plan weights other than 1, keyed by picker model id. */
   modelWeights?: Record<string, number>;
 };

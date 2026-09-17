@@ -80,6 +80,7 @@ const emptyConfig: PublicConfig = {
   profile: { name: "" },
   preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE },
   loginAppearance: DEFAULT_LOGIN_APPEARANCE,
+  showModelWeights: false,
   userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024, defaultTrashQuotaBytes: 1024 * 1024 * 1024, trashRetentionDays: 60 },
   toolSettings: { maxToolRounds: 8, maxBrowserTabs: 8, maxMultipleChoiceQuestions: 3, maxAttachmentsPerMessage: 12, textDownloadLimitMb: 1, textCharacterLimit: 24_000, imageDownloadLimitMb: 10, imageUploadLimitMb: 20, pdfSizeLimitMb: 25, pdfPageLimit: 100, pdfTextCharacterLimit: 100_000, pdfVisionPageLimit: 6, pdfProcessingTimeoutSeconds: 30, temporaryFileTtlMinutes: 60, orphanUploadTtlHours: 24 },
   experimental: { browserTool: false, hostComputerTool: false },
@@ -93,7 +94,7 @@ const translations = {
   en: {
     newChat: "New Chat", search: "Search", storageManager: "Storage manager", searchChats: "Search chats…", histories: "Chat histories", exportChat: "Export chat", deleteChat: "Delete chat", deleteAllChats: "Delete all chats", confirmDeleteChat: "Delete this chat?", confirmDeleteAllChats: "Delete all chat histories?",
     historyEmpty: "Your conversations will appear here.", settingsConnections: "Settings & connections", selectModel: "Select a model",
-    availableModels: "Available models", checkingModelServers: "Checking model servers", noOnlineModels: "No model server is online.", modelWeightHint: "Uses tokens {weight}x faster", showModelWeights: "Show model weights", showModelWeightsDesc: "Show a weight badge on models whose plan weight is not 1. Only administrators see it.", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
+    availableModels: "Available models", checkingModelServers: "Checking model servers", noOnlineModels: "No model server is online.", modelWeightHint: "Uses tokens {weight}x faster", showModelWeights: "Show model weights", showModelWeightsDesc: "Show every account, including administrators, a weight badge on models whose plan weight is not 1. This is a workspace setting.", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
     messagePlaceholder: "Message to send", reasoningPreset: "Reasoning preset", native: "Native", template: "Template", default: "default",
     sendPriorReasoning: "Remember its train of thought", sendPriorReasoningDesc: "Send the earlier reasoning back with the next request",
     disclaimer: "Responses may be inaccurate. Verify important information.", stop: "Stop generating", send: "Send message", addToQueue: "Add to queue", queuedMessages: "Queued messages", removeQueuedMessage: "Remove queued message",
@@ -144,7 +145,7 @@ const translations = {
   ko: {
     newChat: "새 채팅", search: "검색", storageManager: "저장소 관리", searchChats: "채팅 검색…", histories: "채팅 기록", exportChat: "채팅 내보내기", deleteChat: "대화 삭제", deleteAllChats: "전체 대화 삭제", confirmDeleteChat: "이 대화를 삭제할까요?", confirmDeleteAllChats: "모든 대화 기록을 삭제할까요?",
     historyEmpty: "대화를 시작하면 여기에 표시됩니다.", settingsConnections: "설정 및 연결", selectModel: "모델 선택",
-    availableModels: "사용 가능한 모델", checkingModelServers: "모델 서버 확인 중", noOnlineModels: "온라인 상태인 모델 서버가 없습니다.", modelWeightHint: "토큰을 {weight}배 더 빨리 소모합니다", showModelWeights: "모델 가중치 표시", showModelWeightsDesc: "플랜 가중치가 1이 아닌 모델에 가중치 딱지를 표시합니다. 관리자에게만 보입니다.", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
+    availableModels: "사용 가능한 모델", checkingModelServers: "모델 서버 확인 중", noOnlineModels: "온라인 상태인 모델 서버가 없습니다.", modelWeightHint: "토큰을 {weight}배 더 빨리 소모합니다", showModelWeights: "모델 가중치 표시", showModelWeightsDesc: "플랜 가중치가 1이 아닌 모델에 가중치 딱지를 표시합니다. 전역 설정이며 관리자를 포함한 모든 사용자에게 적용됩니다.", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
     messagePlaceholder: "보낼 메시지", reasoningPreset: "Reasoning 프리셋", native: "내장", template: "템플릿", default: "기본값",
     sendPriorReasoning: "생각 기록 기억하기", sendPriorReasoningDesc: "다음 요청에 이전 생각 기록을 함께 보냅니다",
     disclaimer: "응답이 부정확할 수 있습니다. 중요한 정보는 확인해 주세요.", stop: "생성 중단", send: "메시지 전송", addToQueue: "대기열에 추가", queuedMessages: "대기 중인 메시지", removeQueuedMessage: "대기열에서 제거",
@@ -492,7 +493,7 @@ export default function Home() {
   const selectedModel = visibleModels.find((model) => model.id === selectedModelId) || visibleModels[0];
   const selectedPreset = selectedModel?.reasoningPresets.find((preset) => preset.id === selectedPresetId) || selectedModel?.reasoningPresets[0];
   const isAdmin = config.account?.role === "admin" || config.account?.role === "superadmin";
-  const showModelWeights = isAdmin && appearance.showModelWeights === true;
+  const showModelWeights = config.showModelWeights === true;
   const canManageInference = isAdmin;
   const activeBranch = conversation?.branches.find((branch) => branch.id === conversation.activeBranchId);
   const pendingChoice = pendingMultipleChoiceEvent(messages);
@@ -1948,7 +1949,7 @@ function AppearanceSettings({ c, draft, setDraft, admin }: { c: CopySet; draft: 
     <SectionTitle icon={<Palette size={19} />} title={c.appearanceTitle} description={c.appearanceDesc} />
     <div className="general-setting-card general-toggle-card"><div><strong>{c.showModelIdentifiers}</strong><small>{c.showModelIdentifiersHelp}</small></div><button role="switch" aria-checked={draft.preferences.showModelIdentifiers !== false} aria-label={c.showModelIdentifiers} className={`toggle ${draft.preferences.showModelIdentifiers !== false ? "on" : ""}`} onClick={() => togglePreference("showModelIdentifiers")}><i /></button></div>
     <div className="general-setting-card general-toggle-card"><div><strong>{c.renderStrikethrough}</strong><small>{c.renderStrikethroughHelp}</small></div><button role="switch" aria-checked={draft.preferences.renderStrikethrough !== false} aria-label={c.renderStrikethrough} className={`toggle ${draft.preferences.renderStrikethrough !== false ? "on" : ""}`} onClick={() => togglePreference("renderStrikethrough")}><i /></button></div>
-    {admin && <div className="general-setting-card general-toggle-card"><div><strong>{c.showModelWeights}</strong><small>{c.showModelWeightsDesc}</small></div><button role="switch" aria-checked={appearance.showModelWeights === true} aria-label={c.showModelWeights} className={`toggle ${appearance.showModelWeights ? "on" : ""}`} onClick={() => patch({ showModelWeights: !appearance.showModelWeights })}><i /></button></div>}
+    {admin && <div className="general-setting-card general-toggle-card"><div><strong>{c.showModelWeights}</strong><small>{c.showModelWeightsDesc}</small></div><button role="switch" aria-checked={draft.showModelWeights === true} aria-label={c.showModelWeights} className={`toggle ${draft.showModelWeights ? "on" : ""}`} onClick={() => setDraft((current) => ({ ...current, showModelWeights: !current.showModelWeights }))}><i /></button></div>}
     <AccentPicker c={c} label={c.accentTitle} help={c.accentHelp} palette={appearance.accentPalette} color={appearance.accentColor} onChange={patch} />
     {admin && <AccentPicker c={c} label={c.loginAccentTitle} help={c.loginAccentHelp} palette={loginAppearance.accentPalette} color={loginAppearance.accentColor} onChange={patchLogin} />}
     <div className="general-setting-card greeting-settings">

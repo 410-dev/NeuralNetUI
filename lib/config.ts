@@ -31,7 +31,6 @@ const appearanceSchema = z.object({
   streamPacing: z.enum(["immediate", "chunked"]).default("immediate"),
   streamChunkSize: z.number().int().min(1).max(24).default(DEFAULT_APPEARANCE.streamChunkSize),
   showReasoningNotes: z.boolean().default(true),
-  showModelWeights: z.boolean().default(false),
   greetings: z.object({
     ko: z.partialRecord(z.enum(["earlyDawn", "morning", "midday", "afternoon", "evening", "night", "lateNight"]), z.array(z.string().max(200)).max(5)).optional(),
     en: z.partialRecord(z.enum(["earlyDawn", "morning", "midday", "afternoon", "evening", "night", "lateNight"]), z.array(z.string().max(200)).max(5)).optional(),
@@ -67,9 +66,9 @@ const loginAppearanceSchema = z.object({
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default(DEFAULT_LOGIN_APPEARANCE.accentColor),
 }).default(DEFAULT_LOGIN_APPEARANCE);
 const userStorageSettingsSchema = z.object({ defaultQuotaBytes: z.number().int().min(1024 * 1024).max(10 * 1024 ** 4).default(512 * 1024 * 1024), defaultTrashQuotaBytes: z.number().int().min(1024 * 1024).max(20 * 1024 ** 4).default(1024 * 1024 * 1024), trashRetentionDays: z.number().int().min(1).max(60).default(60) }).default({ defaultQuotaBytes: 512 * 1024 * 1024, defaultTrashQuotaBytes: 1024 * 1024 * 1024, trashRetentionDays: 60 });
-export const configSchema = z.object({ connections: z.array(connectionSchema).min(1).max(32), profile: z.object({ name: z.string().min(1) }), preferences: preferencesSchema, loginAppearance: loginAppearanceSchema, userStorageSettings: userStorageSettingsSchema, toolSettings: toolSettingsSchema, harnessSettings: harnessSettingsSchema, experimental: experimentalSchema, models: z.array(modelSchema) });
+export const configSchema = z.object({ connections: z.array(connectionSchema).min(1).max(32), profile: z.object({ name: z.string().min(1) }), preferences: preferencesSchema, loginAppearance: loginAppearanceSchema, showModelWeights: z.boolean().default(false), userStorageSettings: userStorageSettingsSchema, toolSettings: toolSettingsSchema, harnessSettings: harnessSettingsSchema, experimental: experimentalSchema, models: z.array(modelSchema) });
 
-const defaults: AppConfig = { connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", models: [] }], profile: { name: "User" }, preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE }, loginAppearance: DEFAULT_LOGIN_APPEARANCE, userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024, defaultTrashQuotaBytes: 1024 * 1024 * 1024, trashRetentionDays: 60 }, toolSettings: DEFAULT_TOOL_SETTINGS, experimental: DEFAULT_EXPERIMENTAL, models: [] };
+const defaults: AppConfig = { connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", models: [] }], profile: { name: "User" }, preferences: { sendReasoningToModel: false, exportReasoning: true, language: "en", onDemand: false, showModelIdentifiers: true, renderStrikethrough: true, appearance: DEFAULT_APPEARANCE }, loginAppearance: DEFAULT_LOGIN_APPEARANCE, showModelWeights: false, userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024, defaultTrashQuotaBytes: 1024 * 1024 * 1024, trashRetentionDays: 60 }, toolSettings: DEFAULT_TOOL_SETTINGS, experimental: DEFAULT_EXPERIMENTAL, models: [] };
 const configPath = path.join(dataDir, "config.json");
 
 function normalizeConfig(config: AppConfig): AppConfig {
@@ -84,7 +83,7 @@ function migrateConfig(input: unknown): AppConfig {
   if (!legacy.success) throw current.error;
   const connection: ConnectionConfig = { id: "openai-default", name: "OpenAI API", driver: "openai", ...legacy.data.server, models: legacy.data.models.filter((model) => !model.isAlias).map((model) => ({ ...model, connectionId: "openai-default" })) };
   const aliases = legacy.data.models.filter((model) => model.isAlias).map((model) => ({ ...model, connectionId: "openai-default" }));
-  return normalizeConfig({ connections: [connection], profile: legacy.data.profile, preferences: legacy.data.preferences, loginAppearance: DEFAULT_LOGIN_APPEARANCE, userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024, defaultTrashQuotaBytes: 1024 * 1024 * 1024, trashRetentionDays: 60 }, toolSettings: legacy.data.toolSettings, harnessSettings: legacy.data.harnessSettings, experimental: DEFAULT_EXPERIMENTAL, models: aliases });
+  return normalizeConfig({ connections: [connection], profile: legacy.data.profile, preferences: legacy.data.preferences, loginAppearance: DEFAULT_LOGIN_APPEARANCE, showModelWeights: false, userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024, defaultTrashQuotaBytes: 1024 * 1024 * 1024, trashRetentionDays: 60 }, toolSettings: legacy.data.toolSettings, harnessSettings: legacy.data.harnessSettings, experimental: DEFAULT_EXPERIMENTAL, models: aliases });
 }
 
 function claimLegacyCustomizations(config: AppConfig) {
@@ -130,10 +129,11 @@ export function publicConfig(config: AppConfig, user: AuthUser): PublicConfig {
     hostTrustedPermissions: DEFAULT_HARNESS_SETTINGS.hostTrustedPermissions,
     hostCommandModelId: "", hostCommandEffort: "off", hostCommandAnalysisPrompt: DEFAULT_HARNESS_SETTINGS.hostCommandAnalysisPrompt,
   } };
-  // Weight badges are an administrator aid; ordinary accounts never receive their plan's weights.
-  const weights = isAdmin(user) ? planModelWeights(user.id) : {};
+  // Weight badges are a workspace switch; while it is off no account receives plan weights.
+  const badges = config.showModelWeights === true;
+  const weights = badges ? planModelWeights(user.id) : {};
   const chargeId = (model: ModelConfig) => model.isAlias ? config.models.find(item => !item.isAlias && (item.id === model.sourceModel || item.sourceModel === model.sourceModel))?.id || model.sourceModel : model.id;
-  const modelWeights = isAdmin(user) ? Object.fromEntries(config.models.map(model => [model.id, weights[chargeId(model)] || 1]).filter(([, weight]) => weight !== 1)) : undefined;
+  const modelWeights = badges ? Object.fromEntries(config.models.map(model => [model.id, weights[chargeId(model)] || 1]).filter(([, weight]) => weight !== 1)) : undefined;
   return { ...config, ...(modelWeights ? { modelWeights } : {}), harnessSettings, experimental: { ...config.experimental, hostComputerTool: superadmin && config.experimental.hostComputerTool }, hostComputerAvailable: superadmin && isHostComputerAvailable(), loginAppearance: normalizeLoginAppearance(config.loginAppearance), profile: { name: user.displayName }, preferences, models: config.models.filter((model) => canUseModel(model, user)&&planAllows(model)).map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), connections: config.connections.map((connection) => ({ ...connection, models: connection.models.filter(planAllows).map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), apiKey: "", hasApiKey: Boolean(!connection.clearApiKey && (connection.apiKey || (connection.driver === "openai" && process.env.OPENAI_API_KEY))) })), account: { id: user.id, username: user.username, displayName: user.displayName, role: user.role, canAudit:user.canAudit, ...(user.planId ? { planId:user.planId } : {}) } };
 }
 

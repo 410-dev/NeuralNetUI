@@ -19,7 +19,6 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   streamPacing: "immediate",
   streamChunkSize: 3,
   showReasoningNotes: true,
-  showModelWeights: false,
   reasoningNotes: {},
   greetings: {},
 };
@@ -154,7 +153,6 @@ export function normalizeAppearance(input: Partial<AppearancePreferences> | unde
     streamPacing: input?.streamPacing === "chunked" ? "chunked" : "immediate",
     streamChunkSize: clamp(Math.floor(Number(input?.streamChunkSize) || DEFAULT_APPEARANCE.streamChunkSize), 1, 24),
     showReasoningNotes: input?.showReasoningNotes !== false,
-    showModelWeights: input?.showModelWeights === true,
     reasoningNotes: normalizeReasoningNotes(input?.reasoningNotes),
     greetings: normalizeGreetings(input?.greetings),
   };

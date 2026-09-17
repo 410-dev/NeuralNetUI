@@ -9,7 +9,7 @@ import path from "node:path";
 import { chromium } from "playwright-core";
 
 // Beta 17: live/weighted plan usage, usage colours and manual refresh, offline model servers,
-// account-saved tool switches, two-decimal weights and administrator weight badges.
+// account-saved tool switches, two-decimal weights and workspace-wide weight badges.
 const shots = process.env.BETA17_SCREENSHOTS;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const inference = http.createServer(async (request, response) => {
@@ -65,8 +65,9 @@ try {
   const self = (await json("/api/users?q=beta17qa")).users[0];
   await json(`/api/users/${self.id}`, "PATCH", { planId: plan.id });
 
-  // Administrators receive their plan's non-default weights; ordinary accounts never do.
-  assert.deepEqual((await json("/api/config")).modelWeights, { "qa-model": 1.75 });
+  // While the workspace switch is off, no account receives plan weights.
+  assert.equal((await json("/api/config")).showModelWeights, false);
+  assert.equal((await json("/api/config")).modelWeights, undefined);
   assert.equal((await request("/api/users", "POST", { username: "beta17user", displayName: "Beta 17 User", password })).status, 201);
   const member = (await json("/api/users?q=beta17user")).users[0];
   await json(`/api/users/${member.id}`, "PATCH", { planId: plan.id });
@@ -74,9 +75,9 @@ try {
   assert.ok(login.ok); const memberCookie = login.headers.get("set-cookie").split(";")[0];
   const memberConfig = await json("/api/config", "GET", undefined, memberCookie);
   assert.equal(memberConfig.modelWeights, undefined);
-  memberConfig.preferences.appearance.showModelWeights = true;
+  memberConfig.showModelWeights = true;
   await json("/api/config", "PUT", memberConfig, memberCookie);
-  assert.equal((await json("/api/config", "GET", undefined, memberCookie)).modelWeights, undefined, "the appearance switch cannot reveal weights to a standard account");
+  assert.equal((await json("/api/config", "GET", undefined, memberCookie)).showModelWeights, false, "a standard account cannot change the workspace switch");
 
   // Tool switches are saved on the account and survive a settings save.
   const saved = await json("/api/preferences/tools", "PUT", { internetSearch: true, storageAccess: false, bogus: true });
@@ -127,17 +128,30 @@ try {
   if (shots) await page.screenshot({ path: path.join(shots, "usage-popover.png") });
   await actions.nth(1).click(); await popover.waitFor({ state: "detached" });
 
-  // Offline models are hidden; weight badges stay hidden until the administrator enables them.
+  // Offline models are hidden; weight badges stay hidden until an administrator enables them.
   await page.locator(".model-trigger").click();
   const picker = page.locator(".model-popover"); await picker.waitFor();
   await picker.locator(".popover-heading small").waitFor();
   assert.deepEqual(await picker.locator(".model-option strong").allTextContents(), ["QA model"]);
   assert.equal(await picker.locator(".model-weight-badge").count(), 0);
-  const adminConfig = await json("/api/config"); adminConfig.preferences.appearance.showModelWeights = true; await json("/api/config", "PUT", adminConfig);
+  await page.keyboard.press("Escape");
+  await page.locator(".profile-settings-button").click();
+  await page.locator(".settings-panel").waitFor();
+  await page.locator(".settings-body nav button", { hasText: "모양" }).click();
+  const weightSwitch = page.getByRole("switch", { name: "모델 가중치 표시" });
+  assert.equal(await weightSwitch.getAttribute("aria-checked"), "false");
+  await weightSwitch.click();
+  const savedSettings = page.waitForResponse(response => response.url().endsWith("/api/config") && response.request().method() === "PUT" && response.ok());
+  await page.locator(".settings-panel .save-button").last().click(); await savedSettings;
+  assert.equal((await json("/api/config")).showModelWeights, true);
+  assert.deepEqual((await json("/api/config")).modelWeights, { "qa-model": 1.75 }, "the enabling administrator sees badges");
+  assert.deepEqual((await json("/api/config", "GET", undefined, memberCookie)).modelWeights, { "qa-model": 1.75 }, "standard accounts see badges too");
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator(".model-trigger").click(); await picker.locator(".popover-heading small").waitFor();
   const badge = picker.locator(".model-weight-badge");
   assert.equal(await badge.textContent(), "x1.75");
+  const layout = await badge.evaluate(element => { const option = element.closest(".model-option").getBoundingClientRect(), box = element.getBoundingClientRect(); return { color: getComputedStyle(element).color, offset: Math.abs((box.top + box.bottom) / 2 - (option.top + option.bottom) / 2) }; });
+  assert.equal(layout.color, "rgb(139, 142, 149)"); assert.ok(layout.offset <= 1, `badge is vertically centred (${layout.offset}px)`);
   await badge.hover(); await delay(250);
   if (shots) await page.screenshot({ path: path.join(shots, "model-picker.png") });
   const tooltip = await badge.evaluate(element => { const style = getComputedStyle(element, "::after"); return { content: style.content, opacity: style.opacity }; });
@@ -155,6 +169,15 @@ try {
   await page.locator("button[title='추가']").first().click();
   await page.waitForFunction(() => document.querySelector("[role='switch'][aria-label='인터넷 검색']")?.getAttribute("aria-checked") === "true");
   assert.equal((await json("/api/config")).preferences.enabledTools.internetSearch, true);
+  // A standard account sees the same badge in its own picker.
+  const memberContext = await browser.newContext({ viewport: { width: 1180, height: 900 }, extraHTTPHeaders: { cookie: memberCookie } });
+  const memberPage = await memberContext.newPage();
+  memberPage.on("pageerror", error => errors.push(error.message));
+  await memberPage.goto(root, { waitUntil: "domcontentloaded" });
+  await memberPage.locator(".model-trigger").click();
+  await memberPage.locator(".model-popover .popover-heading small").waitFor();
+  assert.equal(await memberPage.locator(".model-popover .model-weight-badge").textContent(), "x1.75");
+  if (shots) await memberPage.screenshot({ path: path.join(shots, "member-picker.png") });
   assert.deepEqual(errors, []);
   console.log("Beta 17 integration passed.");
 } finally {
