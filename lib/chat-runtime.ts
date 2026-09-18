@@ -457,6 +457,7 @@ async function run(job: ChatJob) {
     const chargeModelId=model.isAlias?(config.models.find(item=>!item.isAlias&&(item.id===model.sourceModel||item.sourceModel===model.sourceModel))?.id||model.sourceModel):model.id;
     const connection = connectionForModel(config.connections, model);
     if (!connection) throw new Error("The selected model's connection is unavailable.");
+    if (connection.disabled) throw new Error("The selected model's server is disabled.");
     const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId && (item.kind === "builtin" || !item.ownerId || item.ownerId === job.userId));
     const effort = reasoningEffort(model, preset);
     const modelPrompt = model.systemPrompt?.trim() || ""; const presetPrompt = preset?.kind === "custom" ? preset.systemPrompt?.trim() || "" : "";

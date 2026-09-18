@@ -78,6 +78,8 @@ export interface ConnectionConfig {
   apiKey: string;
   /** Explicitly disable saved and environment credentials until a replacement is entered. */
   clearApiKey?: boolean;
+  /** An administrator switched the server off: its models leave the picker and chat requests are refused. */
+  disabled?: boolean;
   /** Zero or absent means unlimited. A positive limit enables managed loading. */
   maxResidentModels?: number;
   modelWaitPolicy?: ModelWaitPolicy;

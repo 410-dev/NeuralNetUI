@@ -54,7 +54,7 @@ try {
   config.models = [online, offline]; config.harnessSettings.titleEnabled = false;
   await json("/api/config", "PUT", config);
 
-  // Offline servers are reported so the picker hides their models.
+  // Offline servers are reported so the picker can grey out their models (beta 19; beta 17 hid them).
   assert.deepEqual((await json("/api/models/status")).offlineConnectionIds, ["down"]);
 
   // Weights accept two decimal places and reject a third.
@@ -128,11 +128,12 @@ try {
   if (shots) await page.screenshot({ path: path.join(shots, "usage-popover.png") });
   await actions.nth(1).click(); await popover.waitFor({ state: "detached" });
 
-  // Offline models are hidden; weight badges stay hidden until an administrator enables them.
+  // Offline models are greyed out; weight badges stay hidden until an administrator enables them.
   await page.locator(".model-trigger").click();
   const picker = page.locator(".model-popover"); await picker.waitFor();
   await picker.locator(".popover-heading small").waitFor();
-  assert.deepEqual(await picker.locator(".model-option strong").allTextContents(), ["QA model"]);
+  assert.deepEqual(await picker.locator(".model-option:not(.offline) strong").allTextContents(), ["QA model"]);
+  assert.deepEqual(await picker.locator(".model-option.offline strong").allTextContents(), ["Down model"]);
   assert.equal(await picker.locator(".model-weight-badge").count(), 0);
   await page.keyboard.press("Escape");
   await page.locator(".profile-settings-button").click();

@@ -156,6 +156,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .popover-heading small { background: rgba(255,255,255,.06); padding: 1px 7px; border-radius: var(--radius-pill); }
 .model-option { width: 100%; display: grid; grid-template-columns: 18px minmax(0,1fr) auto; gap: 7px; align-items: start; text-align: left; background: transparent; padding: 9px 8px; border-radius: var(--radius-sm); }
 .model-option:hover { background: rgba(255,255,255,.06); }
+.model-option.offline { position: relative; cursor: not-allowed; }
+.model-option.offline:hover { background: transparent; }
+.model-option.offline strong, .model-option.offline small, .model-option.offline em, .model-option.offline b { color: var(--dim); opacity: .6; }
+.model-option.offline::after { content: attr(data-tooltip); position: absolute; right: 8px; top: 50%; transform: translate(0, calc(-50% + 4px)); max-width: calc(100% - 16px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; opacity: 0; padding: 5px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: #111114; color: var(--text); font-size: 11px; font-weight: 500; box-shadow: 0 8px 24px rgba(0,0,0,.35); transition: opacity .12s ease, transform .12s ease; z-index: 2; }
+.model-option.offline:hover::after { opacity: 1; transform: translate(0, -50%); }
 .model-option strong, .model-option small, .model-option em { display: block; }
 .model-option strong { font-size: 15px; font-weight: 570; }
 .model-option small { color: var(--muted); margin-top: 2px; font-size: 11px; }
@@ -457,9 +462,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .connection-card-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .connection-card-head strong { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .connection-card-head em { color: var(--muted); background: rgba(255,255,255,.06); border-radius: var(--radius-pill); padding: 4px 10px; font-size: 9px; font-style: normal; text-transform: uppercase; letter-spacing: .04em; }
-.connection-card-head button { display: grid; place-items: center; width: 30px; height: 30px; color: var(--dim); border-radius: var(--radius-xs); }
-.connection-card-head button:hover:not(:disabled) { color: var(--danger-text); background: var(--danger-soft); }
-.connection-card-head button:disabled { opacity: .3; }
+.connection-card-head .connection-remove { display: grid; place-items: center; width: 30px; height: 30px; color: var(--dim); border-radius: var(--radius-xs); }
+.connection-card-head .connection-remove:hover:not(:disabled) { color: var(--danger-text); background: var(--danger-soft); }
+.connection-card-head .connection-remove:disabled { opacity: .3; }
 .connection-grip { display: grid; place-items: center; color: var(--dim); cursor: grab; touch-action: none; }
 .connection-card:active .connection-grip { cursor: grabbing; }
 .spin { animation: spin 1s linear infinite; } @keyframes spin { to{ transform:rotate(360deg) } }
@@ -555,6 +560,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .model-column-list > button[draggable="true"] { cursor: grab; }
 .model-column-list > button[draggable="true"]:active { cursor: grabbing; }
 .model-type-icon { width: 26px; height: 26px; display: grid; place-items: center; color: var(--muted); background: transparent; }
+.model-type-icon { position: relative; }
+.server-status-dot { position: absolute; right: 0; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: #71717a; }
+.server-status-dot.online { background: #22c55e; }
+.server-status-dot.offline { background: #ef4444; }
+.server-status-dot.disabled { background: #71717a; }
 .model-column-list strong, .model-column-list small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-column-list strong { font-size: 11px; font-weight: 560; }
 .model-column-list small { margin-top: 4px; color: var(--dim); font-size: 9px; }
@@ -1471,7 +1481,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .history-row-actions > .history-delete:hover,
 .history-heading > div > button:last-child:hover,
 .user-message-toolbar button.delete:hover,
-.connection-card-head button:hover:not(:disabled),
+.connection-card-head .connection-remove:hover:not(:disabled),
 .preset-editor-head > button:hover,
 .managed-user-actions .delete-user:hover:not(:disabled),
 .storage-file-grid article > span .storage-delete-file:hover:not(:disabled),
@@ -1498,7 +1508,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .audit-list a,
 .harness-dialog header button,
 .mobile-message-action-sheet header > button,
-.connection-card-head button,
+.connection-card-head .connection-remove,
 .preset-editor-head > button,
 .managed-user-actions button,
 .queued-prompts > div button {

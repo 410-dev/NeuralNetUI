@@ -1,5 +1,5 @@
-import { modelsEndpoint } from "./connection-drivers.ts";
-import type { ConnectionDriver } from "./types.ts";
+import { connectionHeaders, modelsEndpoint } from "./connection-drivers.ts";
+import type { ConnectionConfig, ConnectionDriver } from "./types.ts";
 
 type Probe = { driver: ConnectionDriver; baseUrl: string; headers: Record<string, string> };
 
@@ -24,4 +24,18 @@ export function connectionOnline(key: string, probe: Probe, maxAgeMs = 5_000, fe
   const pending = probeConnection(probe, fetcher).then(online => { cache.set(key, { online, checkedAt: Date.now() }); return online; });
   cache.set(key, { online: cached?.online ?? true, checkedAt: cached?.checkedAt ?? 0, pending });
   return pending;
+}
+
+export type ConnectionState = "online" | "offline" | "disabled";
+type StatusTarget = Pick<ConnectionConfig, "id" | "driver" | "baseUrl" | "apiKey" | "clearApiKey" | "disabled">;
+
+/** Disabled servers are reported without a probe; every other server is checked through the shared cache. */
+export async function connectionStates(connections: StatusTarget[], envKey = "", fetcher: typeof fetch = fetch): Promise<Record<string, ConnectionState>> {
+  const entries = await Promise.all(connections.map(async (connection): Promise<[string, ConnectionState]> => {
+    if (connection.disabled) return [connection.id, "disabled"];
+    const headers = connectionHeaders(connection, connection.driver === "openai" ? envKey : "");
+    const key = `${connection.id}\0${connection.driver}\0${connection.baseUrl}\0${headers.Authorization || ""}`;
+    return [connection.id, await connectionOnline(key, { driver: connection.driver, baseUrl: connection.baseUrl, headers }, 5_000, fetcher) ? "online" : "offline"];
+  }));
+  return Object.fromEntries(entries);
 }

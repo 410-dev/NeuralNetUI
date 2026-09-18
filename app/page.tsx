@@ -57,6 +57,7 @@ import { literalStrikethroughSource } from "@/lib/markdown-rendering";
 import { saveConversationRequest } from "@/lib/client-persistence";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { resolveConnectionModels, reconcileConnectionEdits } from "@/lib/connection-drivers";
+import { modelServerState, onlineReplacement, type ServerState } from "@/lib/model-availability";
 import { moveItemById, nudgeItemById } from "@/lib/ordered-list";
 import { duplicateConversation } from "@/lib/conversation-duplicate";
 import { branchesHoldingRevision, deleteMessageEverywhere, deleteMessageFromBranch, revisionGroupOf } from "@/lib/branch-deletion";
@@ -94,7 +95,7 @@ const translations = {
   en: {
     newChat: "New Chat", search: "Search", storageManager: "Storage manager", searchChats: "Search chats…", histories: "Chat histories", exportChat: "Export chat", deleteChat: "Delete chat", deleteAllChats: "Delete all chats", confirmDeleteChat: "Delete this chat?", confirmDeleteAllChats: "Delete all chat histories?",
     historyEmpty: "Your conversations will appear here.", settingsConnections: "Settings & connections", selectModel: "Select a model",
-    availableModels: "Available models", checkingModelServers: "Checking model servers", noOnlineModels: "No model server is online.", modelWeightHint: "Uses tokens {weight}x faster", showModelWeights: "Show model weights", showModelWeightsDesc: "Show every account, including administrators, a weight badge on models whose plan weight is not 1. This is a workspace setting.", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
+    availableModels: "Available models", checkingModelServers: "Checking model servers", noOnlineModels: "No model server is online.", modelServerOffline: "The server serving this model is offline", serverOffline: "Server offline", modelWeightHint: "Uses tokens {weight}x faster", showModelWeights: "Show model weights", showModelWeightsDesc: "Show every account, including administrators, a weight badge on models whose plan weight is not 1. This is a workspace setting.", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
     messagePlaceholder: "Message to send", reasoningPreset: "Reasoning preset", native: "Native", template: "Template", default: "default",
     sendPriorReasoning: "Remember its train of thought", sendPriorReasoningDesc: "Send the earlier reasoning back with the next request",
     disclaimer: "Responses may be inaccurate. Verify important information.", stop: "Stop generating", send: "Send message", addToQueue: "Add to queue", queuedMessages: "Queued messages", removeQueuedMessage: "Remove queued message",
@@ -106,7 +107,7 @@ const translations = {
     deleteThisBranch: "This branch only", deleteEveryBranch: "Every branch", deleteScopeHelp: "This request also exists in another branch. Delete only the version in the branch you are reading, or every version of it.",
     includeReasoning: "Include reasoning", includeReasoningDesc: "Include model reasoning content in the export.", allBranches: "all branches",
     workspace: "Workspace", settings: "Settings", connection: "Connection", models: "Models", reasoningLevel: "Reasoning level", saveChanges: "Save changes", saving: "Saving…",
-    serverTitle: "Model connections", serverDesc: "Add servers and drag them into priority order. The first server wins duplicate model identifiers.", baseUrl: "Base URL", connectionName: "Connection name", driver: "Driver", addConnection: "Add connection", removeConnection: "Remove connection", priorityHelp: "Highest priority", moveUp: "Move up", moveDown: "Move down",
+    serverTitle: "Model connections", serverDesc: "Add servers and drag them into priority order. The first server wins duplicate model identifiers.", baseUrl: "Base URL", connectionName: "Connection name", driver: "Driver", addConnection: "Add connection", removeConnection: "Remove connection", confirmRemoveConnection: "Remove this connection?", removeConnectionDetail: "Its models leave the picker once the settings are saved.", connectionEnabled: "Use this connection", serverStateOnline: "Online", serverStateOffline: "Offline", serverStateDisabled: "Disabled", priorityHelp: "Highest priority", moveUp: "Move up", moveDown: "Move down",
     baseUrlHelp: "Include the API version path, usually /v1.", apiKey: "API key", savedKey: "Saved key ••••••••", requiredKey: "Required by the current server",
     apiKeyHelp: "The key is stored only on this server and is never returned to the browser.", displayName: "Display name",
     discover: "Discover models & capabilities", discoverDesc: "Calls GET /models and keeps every model returned by the server.", detecting: "Detecting…", detectModels: "Detect models",
@@ -145,7 +146,7 @@ const translations = {
   ko: {
     newChat: "새 채팅", search: "검색", storageManager: "저장소 관리", searchChats: "채팅 검색…", histories: "채팅 기록", exportChat: "채팅 내보내기", deleteChat: "대화 삭제", deleteAllChats: "전체 대화 삭제", confirmDeleteChat: "이 대화를 삭제할까요?", confirmDeleteAllChats: "모든 대화 기록을 삭제할까요?",
     historyEmpty: "대화를 시작하면 여기에 표시됩니다.", settingsConnections: "설정 및 연결", selectModel: "모델 선택",
-    availableModels: "사용 가능한 모델", checkingModelServers: "모델 서버 확인 중", noOnlineModels: "온라인 상태인 모델 서버가 없습니다.", modelWeightHint: "토큰을 {weight}배 더 빨리 소모합니다", showModelWeights: "모델 가중치 표시", showModelWeightsDesc: "플랜 가중치가 1이 아닌 모델에 가중치 딱지를 표시합니다. 전역 설정이며 관리자를 포함한 모든 사용자에게 적용됩니다.", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
+    availableModels: "사용 가능한 모델", checkingModelServers: "모델 서버 확인 중", noOnlineModels: "온라인 상태인 모델 서버가 없습니다.", modelServerOffline: "모델을 서빙하는 서버가 오프라인입니다", serverOffline: "서버 오프라인", modelWeightHint: "토큰을 {weight}배 더 빨리 소모합니다", showModelWeights: "모델 가중치 표시", showModelWeightsDesc: "플랜 가중치가 1이 아닌 모델에 가중치 딱지를 표시합니다. 전역 설정이며 관리자를 포함한 모든 사용자에게 적용됩니다.", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
     messagePlaceholder: "보낼 메시지", reasoningPreset: "Reasoning 프리셋", native: "내장", template: "템플릿", default: "기본값",
     sendPriorReasoning: "생각 기록 기억하기", sendPriorReasoningDesc: "다음 요청에 이전 생각 기록을 함께 보냅니다",
     disclaimer: "응답이 부정확할 수 있습니다. 중요한 정보는 확인해 주세요.", stop: "생성 중단", send: "메시지 전송", addToQueue: "대기열에 추가", queuedMessages: "대기 중인 메시지", removeQueuedMessage: "대기열에서 제거",
@@ -157,7 +158,7 @@ const translations = {
     deleteThisBranch: "이 분기만", deleteEveryBranch: "모든 분기", deleteScopeHelp: "이 요청은 다른 분기에도 있습니다. 지금 보고 있는 분기의 내용만 지울지, 모든 분기의 같은 요청을 지울지 선택하세요.",
     includeReasoning: "Reasoning 포함", includeReasoningDesc: "내보내기에 모델의 reasoning 내용을 포함합니다.", allBranches: "모든 브랜치",
     workspace: "워크스페이스", settings: "설정", connection: "연결", models: "모델", reasoningLevel: "추론 수준", saveChanges: "변경사항 저장", saving: "저장 중…",
-    serverTitle: "모델 서버 연결", serverDesc: "서버를 추가하고 드래그해 우선순위를 정합니다. 중복 모델 identifier는 가장 위 서버를 사용합니다.", baseUrl: "기본 URL", connectionName: "연결 이름", driver: "드라이버", addConnection: "연결 추가", removeConnection: "연결 삭제", priorityHelp: "최우선", moveUp: "위로 이동", moveDown: "아래로 이동",
+    serverTitle: "모델 서버 연결", serverDesc: "서버를 추가하고 드래그해 우선순위를 정합니다. 중복 모델 identifier는 가장 위 서버를 사용합니다.", baseUrl: "기본 URL", connectionName: "연결 이름", driver: "드라이버", addConnection: "연결 추가", removeConnection: "연결 삭제", confirmRemoveConnection: "이 연결을 삭제할까요?", removeConnectionDetail: "설정을 저장하면 이 서버의 모델이 모델 선택 메뉴에서 사라집니다.", connectionEnabled: "연결 사용", serverStateOnline: "온라인", serverStateOffline: "오프라인", serverStateDisabled: "비활성화", priorityHelp: "최우선", moveUp: "위로 이동", moveDown: "아래로 이동",
     baseUrlHelp: "일반적으로 /v1을 포함한 API 버전 경로를 입력합니다.", apiKey: "API 키", savedKey: "저장된 키 ••••••••", requiredKey: "현재 서버에 API 키가 필요합니다",
     apiKeyHelp: "키는 이 서버에만 저장되며 브라우저로 다시 전송되지 않습니다.", displayName: "표시 이름",
     discover: "모델 및 기능 감지", discoverDesc: "GET /models를 호출하고 서버가 반환한 모든 모델을 보존합니다.", detecting: "감지 중…", detectModels: "모델 감지",
@@ -281,20 +282,28 @@ export default function Home() {
   const [draft, setDraft] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [offlineConnectionIds, setOfflineConnectionIds] = useState<string[]>([]);
+  const [serverStates, setServerStates] = useState<Record<string, ServerState>>({});
+  const [serverStatesChecked, setServerStatesChecked] = useState(false);
   const [checkingModelServers, setCheckingModelServers] = useState(false);
-  // Opening the picker re-checks every model server; models on an unreachable server are hidden.
+  const [serverCheckTick, setServerCheckTick] = useState(0);
+  // Model servers are checked when the workspace loads, whenever the picker opens and every 30 seconds,
+  // so an offline selection can move to a usable model before the next message is sent.
   useEffect(() => {
-    if (!modelMenuOpen) return;
+    if (!auth?.authenticated) return;
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") setServerCheckTick((tick) => tick + 1); }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [auth?.authenticated]);
+  useEffect(() => {
+    if (!auth?.authenticated || !config.connections.length) return;
     const controller = new AbortController();
-    setCheckingModelServers(true);
+    if (modelMenuOpen) setCheckingModelServers(true);
     fetch("/api/models/status", { cache: "no-store", signal: controller.signal })
       .then((response) => response.ok ? response.json() : undefined)
-      .then((body: { offlineConnectionIds?: string[] } | undefined) => { if (body) setOfflineConnectionIds(body.offlineConnectionIds || []); })
+      .then((body: { statuses?: Record<string, ServerState> } | undefined) => { if (body) { setServerStates(body.statuses || {}); setServerStatesChecked(true); } })
       .catch(() => undefined)
       .finally(() => { if (!controller.signal.aborted) setCheckingModelServers(false); });
     return () => controller.abort();
-  }, [modelMenuOpen]);
+  }, [modelMenuOpen, serverCheckTick, auth?.authenticated, config.connections]);
   const [unloadingModel, setUnloadingModel] = useState(false);
   const [modelControlNotice, setModelControlNotice] = useState<{ message: string; error: boolean } | null>(null);
   const [applyingDefault, setApplyingDefault] = useState<"" | "model" | "reasoning">("");
@@ -499,8 +508,18 @@ export default function Home() {
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   const { dialog: messageDialog, confirm: askConfirm, choose, notify } = useMessageDialog(locale === "ko");
   const visibleModels = config.models.filter((model) => model.visible !== false);
-  const pickerModels = visibleModels.filter((model) => !model.connectionId || !offlineConnectionIds.includes(model.connectionId));
-  const selectedModel = visibleModels.find((model) => model.id === selectedModelId) || visibleModels[0];
+  // Models on a server an administrator switched off leave the picker; models on an offline server stay, greyed out.
+  const pickerModels = visibleModels.filter((model) => modelServerState(model, config.connections, serverStates) !== "disabled");
+  const onlineModels = pickerModels.filter((model) => modelServerState(model, config.connections, serverStates) === "online");
+  const serversOffline = serverStatesChecked && config.connections.length > 0 && !onlineModels.length;
+  const selectedModel = pickerModels.find((model) => model.id === selectedModelId) || pickerModels[0];
+  // A selection whose server is offline or switched off moves to the default model, or else the first online one.
+  const replacementModel = selectedModelId ? onlineReplacement(selectedModelId, onlineModels, config.preferences.defaultModelId) : undefined;
+  useEffect(() => {
+    if (!replacementModel) return;
+    selectedModelIdRef.current = replacementModel.id; setSelectedModelId(replacementModel.id);
+    setSelectedPresetId((current) => replacementModel.reasoningPresets.some((preset) => preset.id === current) ? current : replacementModel.reasoningPresets.find((preset) => preset.id === config.preferences.defaultReasoningPresetId)?.id || replacementModel.reasoningPresets[0]?.id || "");
+  }, [replacementModel, config.preferences.defaultReasoningPresetId]);
   const selectedPreset = selectedModel?.reasoningPresets.find((preset) => preset.id === selectedPresetId) || selectedModel?.reasoningPresets[0];
   const isAdmin = config.account?.role === "admin" || config.account?.role === "superadmin";
   const showModelWeights = config.showModelWeights === true;
@@ -1132,8 +1151,8 @@ export default function Home() {
       <section className="chat-surface">
         <div className="ambient-glow" />
         <div className="model-switcher">
-          <button className="model-trigger" onClick={() => { if (!modelMenuOpen) setModelControlNotice(null); setModelMenuOpen((value) => !value); }}><span>{selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
-          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span>{checkingModelServers ? <LoaderCircle className="spin" size={13} aria-label={c.checkingModelServers} /> : <small>{pickerModels.length}</small>}</div>{!checkingModelServers && !pickerModels.length && <p className="model-popover-empty">{c.noOnlineModels}</p>}{pickerModels.map((model) => { const weight = showModelWeights ? config.modelWeights?.[model.id] : undefined; const weightHint = weight ? c.modelWeightHint.replace("{weight}", formatModelWeight(weight)) : ""; return <button className="model-option" key={model.id} onClick={() => chooseModel(model)}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{(model.isAlias || weight) && <span className="model-option-badges">{model.isAlias && <b>ALIAS</b>}{weight && <b className="model-weight-badge" data-tooltip={weightHint} aria-label={weightHint}>x{formatModelWeight(weight)}</b>}</span>}</button>; })}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{isAdmin && <button className="default-choice-action" disabled={!selectedModel || applyingDefault === "model"} onClick={() => void applyDefaultToEveryone("model")}>{applyingDefault === "model" ? <LoaderCircle className="spin" size={14} /> : <Users size={14} />}{applyingDefault === "model" ? c.applyingToEveryone : c.applyToEveryone}</button>}{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
+          <button className="model-trigger" onClick={() => { if (!modelMenuOpen) setModelControlNotice(null); setModelMenuOpen((value) => !value); }}><span>{serversOffline ? c.serverOffline : selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
+          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span>{checkingModelServers ? <LoaderCircle className="spin" size={13} aria-label={c.checkingModelServers} /> : <small>{onlineModels.length}</small>}</div>{!checkingModelServers && serversOffline && <p className="model-popover-empty">{c.noOnlineModels}</p>}{pickerModels.map((model) => { const weight = showModelWeights ? config.modelWeights?.[model.id] : undefined; const weightHint = weight ? c.modelWeightHint.replace("{weight}", formatModelWeight(weight)) : ""; const offline = modelServerState(model, config.connections, serverStates) === "offline"; return <button className={`model-option ${offline ? "offline" : ""}`} key={model.id} aria-disabled={offline || undefined} data-tooltip={offline ? c.modelServerOffline : undefined} aria-description={offline ? c.modelServerOffline : undefined} onClick={() => { if (!offline) chooseModel(model); }}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{(model.isAlias || weight) && <span className="model-option-badges">{model.isAlias && <b>ALIAS</b>}{weight && <b className="model-weight-badge" data-tooltip={weightHint} aria-label={weightHint}>x{formatModelWeight(weight)}</b>}</span>}</button>; })}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{isAdmin && <button className="default-choice-action" disabled={!selectedModel || applyingDefault === "model"} onClick={() => void applyDefaultToEveryone("model")}>{applyingDefault === "model" ? <LoaderCircle className="spin" size={14} /> : <Users size={14} />}{applyingDefault === "model" ? c.applyingToEveryone : c.applyToEveryone}</button>}{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
         </div>
 
         <div className="surface-actions">
@@ -2027,6 +2046,28 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
   function replaceConnections(connections: PublicConfig["connections"]) { setDraft(current => { const merged = reconcileConnectionEdits(connections, current.models); return { ...current, connections: merged, models: resolveConnectionModels(merged, current.models.filter(model => model.isAlias), current.models.map(model => model.id)) }; }); }
   function patchConnection(id: string, patch: Partial<PublicConfig["connections"][number]>) { replaceConnections(draft.connections.map((connection) => connection.id === id ? { ...connection, ...patch } : connection)); }
   function addConnection() { const connection = { id: uid("connection"), name: "LM Studio", driver: "lmstudio" as const, baseUrl: "http://localhost:1234", apiKey: "", hasApiKey: false, models: [] }; replaceConnections([...draft.connections, connection]); setActiveConnectionId(connection.id); }
+  const { dialog: messageDialog, confirm: askConfirm } = useMessageDialog(draft.preferences.language === "ko");
+  const [serverStates, setServerStates] = useState<Record<string, ServerState>>({});
+  const [statusTick, setStatusTick] = useState(0);
+  // Probe what the draft describes, so an edited address or a new server shows its state before saving.
+  const probeKey = JSON.stringify(draft.connections.map(({ id, driver, baseUrl, apiKey, clearApiKey, disabled }) => ({ id, driver, baseUrl, apiKey, clearApiKey, disabled })));
+  useEffect(() => { const timer = window.setInterval(() => setStatusTick((tick) => tick + 1), 15_000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      fetch("/api/models/status", { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ connections: JSON.parse(probeKey) }), signal: controller.signal })
+        .then((response) => response.ok ? response.json() : undefined)
+        .then((body: { statuses?: Record<string, ServerState> } | undefined) => { if (body?.statuses) setServerStates(body.statuses); })
+        .catch(() => undefined);
+    }, 500);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [probeKey, statusTick]);
+  const stateOf = (connection: PublicConfig["connections"][number]): ServerState | undefined => connection.disabled ? "disabled" : serverStates[connection.id] === "disabled" ? undefined : serverStates[connection.id];
+  const stateLabel = (state?: ServerState) => state === "online" ? c.serverStateOnline : state === "offline" ? c.serverStateOffline : state === "disabled" ? c.serverStateDisabled : undefined;
+  async function confirmRemoveConnection(connection: PublicConfig["connections"][number]) {
+    if (draft.connections.length < 2) return;
+    if (await askConfirm({ tone: "danger", title: c.removeConnection, message: c.confirmRemoveConnection, detail: `${connection.name} · ${c.removeConnectionDetail}`, confirmLabel: c.confirmDelete })) removeConnection(connection.id);
+  }
   function removeConnection(id: string) { if (draft.connections.length < 2) return; const index = draft.connections.findIndex((connection) => connection.id === id); const next = draft.connections.filter((connection) => connection.id !== id); replaceConnections(next); setActiveConnectionId(next[Math.min(Math.max(index, 0), next.length - 1)]?.id || ""); }
   function moveConnection(sourceId: string, targetId: string) { replaceConnections(moveItemById(draft.connections, sourceId, targetId)); setActiveConnectionId(sourceId); }
   function nudgeConnection(offset: -1 | 1) { if (!activeConnection) return; replaceConnections(nudgeItemById(draft.connections, activeConnection.id, offset)); }
@@ -2039,9 +2080,9 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
   });
   return <div className="settings-section wide"><SectionTitle icon={<Server size={19} />} title={c.serverTitle} description={c.serverDesc} />
     <div className="split-model-editor connection-editor">
-      <ModelColumn c={c} label={c.connection} items={draft.connections.map((connection) => ({ id: connection.id, name: connection.name, detail: `${connection.models.length} ${c.models}`, icon: <Server size={13} /> }))} active={activeConnection?.id || ""} onChange={setActiveConnectionId} onMove={moveConnection} action={actions} />
+      <ModelColumn c={c} label={c.connection} items={draft.connections.map((connection) => { const state = stateOf(connection); return { id: connection.id, name: connection.name, detail: `${connection.models.length} ${c.models}`, icon: <Server size={13} />, status: state, statusLabel: stateLabel(state) }; })} active={activeConnection?.id || ""} onChange={setActiveConnectionId} onMove={moveConnection} action={actions} />
       <div className="model-editor-pane">{activeConnection ? <div className="editor-card connection-card">{(() => { const detecting = detectingConnectionId === activeConnection.id; return <>
-        <div className="connection-card-head"><strong>{activeIndex + 1}. {activeConnection.name}</strong>{activeIndex === 0 && <em>{c.priorityHelp}</em>}<button aria-label={c.removeConnection} title={c.removeConnection} disabled={draft.connections.length < 2} onClick={() => removeConnection(activeConnection.id)}><Trash2 size={15} /></button></div>
+        <div className="connection-card-head"><strong>{activeIndex + 1}. {activeConnection.name}</strong>{activeIndex === 0 && <em>{c.priorityHelp}</em>}<button role="switch" aria-checked={!activeConnection.disabled} aria-label={c.connectionEnabled} title={c.connectionEnabled} className={`toggle ${activeConnection.disabled ? "" : "on"}`} onClick={() => patchConnection(activeConnection.id, { disabled: !activeConnection.disabled })}><i /></button><button className="connection-remove" aria-label={c.removeConnection} title={c.removeConnection} disabled={draft.connections.length < 2} onClick={() => void confirmRemoveConnection(activeConnection)}><Trash2 size={15} /></button></div>
         <div className="form-grid"><label className="field"><span>{c.connectionName}</span><input value={activeConnection.name} onChange={(event) => patchConnection(activeConnection.id, { name: event.target.value })} /></label><label className="field"><span>{c.driver}</span><SelectMenu label={c.driver} value={activeConnection.driver} options={driverOptions} onChange={(value) => { const driver = value as "openai" | "lmstudio"; patchConnection(activeConnection.id, { driver, baseUrl: driver === "lmstudio" && activeConnection.baseUrl === "http://localhost:8888/v1" ? "http://localhost:1234" : activeConnection.baseUrl }); }} /></label></div>
         <label className="field"><span>{c.baseUrl}</span><input value={activeConnection.baseUrl} onChange={(event) => patchConnection(activeConnection.id, { baseUrl: event.target.value })} placeholder={activeConnection.driver === "lmstudio" ? "http://localhost:1234" : "http://localhost:8888/v1"} /><small>{activeConnection.driver === "lmstudio" ? "LM Studio REST API /api/v1" : c.baseUrlHelp}</small></label>
         <label className="field"><span>{draft.preferences.language === "ko" ? "최대 모델 상주 한도" : "Maximum resident models"}</span><input type="number" min={0} max={128} step={1} inputMode="numeric" value={activeConnection.maxResidentModels || 0} onChange={(event) => patchConnection(activeConnection.id, { maxResidentModels: Math.min(128, Math.max(0, Math.floor(Number(event.target.value) || 0))) })} /><small>{draft.preferences.language === "ko" ? "0은 제한 없음입니다. 한도를 설정하면 필요할 때 모델을 로드하고, 사용 중이지 않은 모델 중 사용 횟수가 가장 적은 모델부터 교체합니다. 모델 관리 API가 필요합니다." : "0 means unlimited. A positive limit loads models as needed and replaces the least-used idle model. Requires a model-management API."}</small></label>
@@ -2051,15 +2092,16 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
         <div className="connection-test"><div><strong>{c.discover}</strong><small>{activeConnection.models.length} {c.models} · {c.discoverDesc}</small></div><button onClick={() => onDetect(activeConnection.id)} disabled={Boolean(detectingConnectionId)}><RefreshCw size={16} className={detecting ? "spin" : ""} />{detecting ? c.detecting : c.detectModels}</button></div>
       </>; })()}</div> : <EmptyState text={c.noModel} />}</div>
     </div>
+    {messageDialog}
   </div>;
 }
 
 type ModelEditorProps = { draft: PublicConfig; activeModelId: string; setActiveModelId: (id: string) => void; activeModel?: ModelConfig };
-type ColumnItem = { id: string; name: string; detail?: string; icon: React.ReactNode; hidden?: boolean };
+type ColumnItem = { id: string; name: string; detail?: string; icon: React.ReactNode; hidden?: boolean; status?: ServerState; statusLabel?: string };
 function OrderActions({ c, onAdd, addLabel, disableAdd, onUp, onDown, disableUp, disableDown }: { c: CopySet; onAdd?: () => void; addLabel?: string; disableAdd?: boolean; onUp: () => void; onDown: () => void; disableUp: boolean; disableDown: boolean }) { return <span className="order-actions">{onAdd && <button onClick={onAdd} disabled={disableAdd} title={addLabel} aria-label={addLabel}><Plus size={15} /></button>}<button onClick={onUp} title={c.moveUp} aria-label={c.moveUp} disabled={disableUp}><ChevronUp size={15} /></button><button onClick={onDown} title={c.moveDown} aria-label={c.moveDown} disabled={disableDown}><ChevronDown size={15} /></button></span>; }
 function ModelColumn({ c, models, items, label, active, onChange, showIdentifiers = false, onMove, action }: { c: CopySet; models?: ModelConfig[]; items?: ColumnItem[]; label?: string; active: string; onChange: (id: string) => void; showIdentifiers?: boolean; onMove?: (sourceId: string, targetId: string) => void; action?: React.ReactNode }) {
   const rows: ColumnItem[] = items || (models || []).map((model) => ({ id: model.id, name: model.name, detail: showIdentifiers ? model.sourceModel : undefined, icon: model.isAlias ? <Pencil size={14} /> : <NeuralMark size={17} />, hidden: model.visible === false }));
-  return <aside className="model-column"><div className="model-column-head"><span>{label || c.models}</span>{action}</div><div className="model-column-list">{rows.map((item) => <button key={item.id} draggable={Boolean(onMove)} className={item.id === active ? "active" : ""} onClick={() => onChange(item.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", item.id); }} onDragOver={(event) => { if (onMove) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }} onDrop={(event) => { if (!onMove) return; event.preventDefault(); onMove(event.dataTransfer.getData("text/plain"), item.id); }}><span className="model-type-icon">{item.icon}</span><span><strong>{item.name}</strong>{item.detail && <small>{item.detail}</small>}</span>{item.hidden && <i className="hidden-model-dot" />}</button>)}</div></aside>;
+  return <aside className="model-column"><div className="model-column-head"><span>{label || c.models}</span>{action}</div><div className="model-column-list">{rows.map((item) => <button key={item.id} draggable={Boolean(onMove)} className={item.id === active ? "active" : ""} onClick={() => onChange(item.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", item.id); }} onDragOver={(event) => { if (onMove) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }} onDrop={(event) => { if (!onMove) return; event.preventDefault(); onMove(event.dataTransfer.getData("text/plain"), item.id); }}><span className="model-type-icon">{item.icon}{item.status && <i className={`server-status-dot ${item.status}`} role="img" aria-label={item.statusLabel} title={item.statusLabel} />}</span><span><strong>{item.name}</strong>{item.detail && <small>{item.detail}</small>}</span>{item.hidden && <i className="hidden-model-dot" />}</button>)}</div></aside>;
 }
 
 function ModelSettings({ c, draft, setDraft, activeModelId, setActiveModelId, activeModel, updateModel, addAlias, account }: ModelEditorProps & { c: CopySet; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; updateModel: (patch: Partial<ModelConfig>) => void; addAlias: () => void; account?: AccountInfo }) {
