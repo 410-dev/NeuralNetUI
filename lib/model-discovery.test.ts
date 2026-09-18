@@ -15,3 +15,12 @@ test("generic OpenAI servers survive absent native API; native discovery exclude
   const native: typeof fetch = async () => Response.json({ models: [null, { key: 'embed', type: 'embedding' }, { key: 'chat', type: 'llm' }] });
   assert.deepEqual(await discoverModelRecords('lmstudio', 'http://host', '', native), [{ key: 'chat', type: 'llm' }]);
 });
+test("discovery failures carry a code the settings screen can explain", async () => {
+  const codeOf = async (fetcher: typeof fetch, driver: 'openai' | 'lmstudio' = 'openai') => { try { await discoverModelRecords(driver, 'http://host/v1', 'key', fetcher); return 'ok'; } catch (error) { return (error as { failure?: { code: string } }).failure?.code; } };
+  assert.equal(await codeOf(async () => new Response('{"error":"bad key"}', { status: 401 })), 'unauthorized');
+  assert.equal(await codeOf(async () => new Response('<html>login</html>', { status: 200, headers: { 'content-type': 'text/html' } })), 'invalid-json');
+  assert.equal(await codeOf(async () => Response.json({ object: 'list' })), 'invalid-shape');
+  assert.equal(await codeOf(async () => new Response('', { status: 500 })), 'server');
+  assert.equal(await codeOf(async () => { throw new TypeError('fetch failed'); }), 'unreachable');
+  assert.equal(await codeOf(async () => Response.json({ data: [] })), 'ok');
+});

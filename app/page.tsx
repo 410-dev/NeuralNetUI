@@ -33,7 +33,7 @@ import {
   LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload, HardDrive, ShieldAlert,
   Palette, PanelLeftClose, PanelLeftOpen, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge,
 } from "lucide-react";
-import { FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -57,7 +57,9 @@ import { literalStrikethroughSource } from "@/lib/markdown-rendering";
 import { saveConversationRequest } from "@/lib/client-persistence";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { resolveConnectionModels, reconcileConnectionEdits } from "@/lib/connection-drivers";
-import { modelServerState, onlineReplacement, type ServerState } from "@/lib/model-availability";
+import { modelServerState, onlineReplacement, selectableState, type ServerState } from "@/lib/model-availability";
+import { useKeyboardReturn } from "@/lib/use-keyboard-return";
+import { describeConnectionFailure, isConnectionFailureCode } from "@/lib/connection-errors";
 import { moveItemById, nudgeItemById } from "@/lib/ordered-list";
 import { duplicateConversation } from "@/lib/conversation-duplicate";
 import { branchesHoldingRevision, deleteMessageEverywhere, deleteMessageFromBranch, revisionGroupOf } from "@/lib/branch-deletion";
@@ -95,7 +97,7 @@ const translations = {
   en: {
     newChat: "New Chat", search: "Search", storageManager: "Storage manager", searchChats: "Search chats…", histories: "Chat histories", exportChat: "Export chat", deleteChat: "Delete chat", deleteAllChats: "Delete all chats", confirmDeleteChat: "Delete this chat?", confirmDeleteAllChats: "Delete all chat histories?",
     historyEmpty: "Your conversations will appear here.", settingsConnections: "Settings & connections", selectModel: "Select a model",
-    availableModels: "Available models", checkingModelServers: "Checking model servers", noOnlineModels: "No model server is online.", modelServerOffline: "The server serving this model is offline", serverOffline: "Server offline", modelWeightHint: "Uses tokens {weight}x faster", showModelWeights: "Show model weights", showModelWeightsDesc: "Show every account, including administrators, a weight badge on models whose plan weight is not 1. This is a workspace setting.", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
+    availableModels: "Available models", checkingModelServers: "Checking model servers", noOnlineModels: "No model server is online.", modelServerOffline: "The server serving this model is offline", modelServerError: "The server serving this model is answering with an error", serverOffline: "Server offline", modelWeightHint: "Uses tokens {weight}x faster", showModelWeights: "Show model weights", showModelWeightsDesc: "Show every account, including administrators, a weight badge on models whose plan weight is not 1. This is a workspace setting.", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
     messagePlaceholder: "Message to send", reasoningPreset: "Reasoning preset", native: "Native", template: "Template", default: "default",
     sendPriorReasoning: "Remember its train of thought", sendPriorReasoningDesc: "Send the earlier reasoning back with the next request",
     disclaimer: "Responses may be inaccurate. Verify important information.", stop: "Stop generating", send: "Send message", addToQueue: "Add to queue", queuedMessages: "Queued messages", removeQueuedMessage: "Remove queued message",
@@ -107,7 +109,7 @@ const translations = {
     deleteThisBranch: "This branch only", deleteEveryBranch: "Every branch", deleteScopeHelp: "This request also exists in another branch. Delete only the version in the branch you are reading, or every version of it.",
     includeReasoning: "Include reasoning", includeReasoningDesc: "Include model reasoning content in the export.", allBranches: "all branches",
     workspace: "Workspace", settings: "Settings", connection: "Connection", models: "Models", reasoningLevel: "Reasoning level", saveChanges: "Save changes", saving: "Saving…",
-    serverTitle: "Model connections", serverDesc: "Add servers and drag them into priority order. The first server wins duplicate model identifiers.", baseUrl: "Base URL", connectionName: "Connection name", driver: "Driver", addConnection: "Add connection", removeConnection: "Remove connection", confirmRemoveConnection: "Remove this connection?", removeConnectionDetail: "Its models leave the picker once the settings are saved.", connectionEnabled: "Use this connection", serverStateOnline: "Online", serverStateOffline: "Offline", serverStateDisabled: "Disabled", priorityHelp: "Highest priority", moveUp: "Move up", moveDown: "Move down",
+    serverTitle: "Model connections", serverDesc: "Add servers and drag them into priority order. The first server wins duplicate model identifiers.", baseUrl: "Base URL", connectionName: "Connection name", driver: "Driver", addConnection: "Add connection", removeConnection: "Remove connection", confirmRemoveConnection: "Remove this connection?", removeConnectionDetail: "Its models leave the picker once the settings are saved.", connectionEnabled: "Use this connection", serverStateOnline: "Online", serverStateOffline: "Offline", serverStateError: "Online, but answering with an error", serverStateDisabled: "Disabled", detectFailedTitle: "Model detection failed", detectFailedNotice: "Model detection failed.", detectFailedDetail: "Server response", priorityHelp: "Highest priority", moveUp: "Move up", moveDown: "Move down",
     baseUrlHelp: "Include the API version path, usually /v1.", apiKey: "API key", savedKey: "Saved key ••••••••", requiredKey: "Required by the current server",
     apiKeyHelp: "The key is stored only on this server and is never returned to the browser.", displayName: "Display name",
     discover: "Discover models & capabilities", discoverDesc: "Calls GET /models and keeps every model returned by the server.", detecting: "Detecting…", detectModels: "Detect models",
@@ -146,7 +148,7 @@ const translations = {
   ko: {
     newChat: "새 채팅", search: "검색", storageManager: "저장소 관리", searchChats: "채팅 검색…", histories: "채팅 기록", exportChat: "채팅 내보내기", deleteChat: "대화 삭제", deleteAllChats: "전체 대화 삭제", confirmDeleteChat: "이 대화를 삭제할까요?", confirmDeleteAllChats: "모든 대화 기록을 삭제할까요?",
     historyEmpty: "대화를 시작하면 여기에 표시됩니다.", settingsConnections: "설정 및 연결", selectModel: "모델 선택",
-    availableModels: "사용 가능한 모델", checkingModelServers: "모델 서버 확인 중", noOnlineModels: "온라인 상태인 모델 서버가 없습니다.", modelServerOffline: "모델을 서빙하는 서버가 오프라인입니다", serverOffline: "서버 오프라인", modelWeightHint: "토큰을 {weight}배 더 빨리 소모합니다", showModelWeights: "모델 가중치 표시", showModelWeightsDesc: "플랜 가중치가 1이 아닌 모델에 가중치 딱지를 표시합니다. 전역 설정이며 관리자를 포함한 모든 사용자에게 적용됩니다.", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
+    availableModels: "사용 가능한 모델", checkingModelServers: "모델 서버 확인 중", noOnlineModels: "온라인 상태인 모델 서버가 없습니다.", modelServerOffline: "모델을 서빙하는 서버가 오프라인입니다", modelServerError: "모델을 서빙하는 서버에서 오류가 발생했습니다", serverOffline: "서버 오프라인", modelWeightHint: "토큰을 {weight}배 더 빨리 소모합니다", showModelWeights: "모델 가중치 표시", showModelWeightsDesc: "플랜 가중치가 1이 아닌 모델에 가중치 딱지를 표시합니다. 전역 설정이며 관리자를 포함한 모든 사용자에게 적용됩니다.", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
     messagePlaceholder: "보낼 메시지", reasoningPreset: "Reasoning 프리셋", native: "내장", template: "템플릿", default: "기본값",
     sendPriorReasoning: "생각 기록 기억하기", sendPriorReasoningDesc: "다음 요청에 이전 생각 기록을 함께 보냅니다",
     disclaimer: "응답이 부정확할 수 있습니다. 중요한 정보는 확인해 주세요.", stop: "생성 중단", send: "메시지 전송", addToQueue: "대기열에 추가", queuedMessages: "대기 중인 메시지", removeQueuedMessage: "대기열에서 제거",
@@ -158,7 +160,7 @@ const translations = {
     deleteThisBranch: "이 분기만", deleteEveryBranch: "모든 분기", deleteScopeHelp: "이 요청은 다른 분기에도 있습니다. 지금 보고 있는 분기의 내용만 지울지, 모든 분기의 같은 요청을 지울지 선택하세요.",
     includeReasoning: "Reasoning 포함", includeReasoningDesc: "내보내기에 모델의 reasoning 내용을 포함합니다.", allBranches: "모든 브랜치",
     workspace: "워크스페이스", settings: "설정", connection: "연결", models: "모델", reasoningLevel: "추론 수준", saveChanges: "변경사항 저장", saving: "저장 중…",
-    serverTitle: "모델 서버 연결", serverDesc: "서버를 추가하고 드래그해 우선순위를 정합니다. 중복 모델 identifier는 가장 위 서버를 사용합니다.", baseUrl: "기본 URL", connectionName: "연결 이름", driver: "드라이버", addConnection: "연결 추가", removeConnection: "연결 삭제", confirmRemoveConnection: "이 연결을 삭제할까요?", removeConnectionDetail: "설정을 저장하면 이 서버의 모델이 모델 선택 메뉴에서 사라집니다.", connectionEnabled: "연결 사용", serverStateOnline: "온라인", serverStateOffline: "오프라인", serverStateDisabled: "비활성화", priorityHelp: "최우선", moveUp: "위로 이동", moveDown: "아래로 이동",
+    serverTitle: "모델 서버 연결", serverDesc: "서버를 추가하고 드래그해 우선순위를 정합니다. 중복 모델 identifier는 가장 위 서버를 사용합니다.", baseUrl: "기본 URL", connectionName: "연결 이름", driver: "드라이버", addConnection: "연결 추가", removeConnection: "연결 삭제", confirmRemoveConnection: "이 연결을 삭제할까요?", removeConnectionDetail: "설정을 저장하면 이 서버의 모델이 모델 선택 메뉴에서 사라집니다.", connectionEnabled: "연결 사용", serverStateOnline: "온라인", serverStateOffline: "오프라인", serverStateError: "온라인이지만 오류 발생", serverStateDisabled: "비활성화", detectFailedTitle: "모델 감지 실패", detectFailedNotice: "모델 감지에 실패했습니다.", detectFailedDetail: "서버 응답", priorityHelp: "최우선", moveUp: "위로 이동", moveDown: "아래로 이동",
     baseUrlHelp: "일반적으로 /v1을 포함한 API 버전 경로를 입력합니다.", apiKey: "API 키", savedKey: "저장된 키 ••••••••", requiredKey: "현재 서버에 API 키가 필요합니다",
     apiKeyHelp: "키는 이 서버에만 저장되며 브라우저로 다시 전송되지 않습니다.", displayName: "표시 이름",
     discover: "모델 및 기능 감지", discoverDesc: "GET /models를 호출하고 서버가 반환한 모든 모델을 보존합니다.", detecting: "감지 중…", detectModels: "모델 감지",
@@ -286,24 +288,24 @@ export default function Home() {
   const [serverStatesChecked, setServerStatesChecked] = useState(false);
   const [checkingModelServers, setCheckingModelServers] = useState(false);
   const [serverCheckTick, setServerCheckTick] = useState(0);
-  // Model servers are checked when the workspace loads, whenever the picker opens and every 30 seconds,
-  // so an offline selection can move to a usable model before the next message is sent.
+  // Model servers are checked only when the workspace loads, when the picker opens and when typing resumes
+  // after a minute without keyboard input, so an idle tab never polls the servers' model listings.
+  const bumpServerCheck = useCallback(() => setServerCheckTick((tick) => tick + 1), []);
+  useKeyboardReturn(60_000, bumpServerCheck, Boolean(auth?.authenticated));
+  useEffect(() => { if (modelMenuOpen) { setCheckingModelServers(true); bumpServerCheck(); } }, [modelMenuOpen, bumpServerCheck]);
+  // Keyed on what the connections are rather than the config object, which is replaced on every refresh; the
+  // placeholder config shown before the workspace loads (it has no account) is never checked.
+  const serverCheckKey = config.account ? JSON.stringify(config.connections.map(({ id, driver, baseUrl, disabled }) => [id, driver, baseUrl, disabled === true])) : "[]";
   useEffect(() => {
-    if (!auth?.authenticated) return;
-    const timer = window.setInterval(() => { if (document.visibilityState === "visible") setServerCheckTick((tick) => tick + 1); }, 30_000);
-    return () => window.clearInterval(timer);
-  }, [auth?.authenticated]);
-  useEffect(() => {
-    if (!auth?.authenticated || !config.connections.length) return;
+    if (!auth?.authenticated || serverCheckKey === "[]") return;
     const controller = new AbortController();
-    if (modelMenuOpen) setCheckingModelServers(true);
     fetch("/api/models/status", { cache: "no-store", signal: controller.signal })
       .then((response) => response.ok ? response.json() : undefined)
       .then((body: { statuses?: Record<string, ServerState> } | undefined) => { if (body) { setServerStates(body.statuses || {}); setServerStatesChecked(true); } })
       .catch(() => undefined)
       .finally(() => { if (!controller.signal.aborted) setCheckingModelServers(false); });
     return () => controller.abort();
-  }, [modelMenuOpen, serverCheckTick, auth?.authenticated, config.connections]);
+  }, [serverCheckTick, auth?.authenticated, serverCheckKey]);
   const [unloadingModel, setUnloadingModel] = useState(false);
   const [modelControlNotice, setModelControlNotice] = useState<{ message: string; error: boolean } | null>(null);
   const [applyingDefault, setApplyingDefault] = useState<"" | "model" | "reasoning">("");
@@ -510,7 +512,8 @@ export default function Home() {
   const visibleModels = config.models.filter((model) => model.visible !== false);
   // Models on a server an administrator switched off leave the picker; models on an offline server stay, greyed out.
   const pickerModels = visibleModels.filter((model) => modelServerState(model, config.connections, serverStates) !== "disabled");
-  const onlineModels = pickerModels.filter((model) => modelServerState(model, config.connections, serverStates) === "online");
+  // A server answering with an error still counts: its models stay selectable and only carry a warning hint.
+  const onlineModels = pickerModels.filter((model) => selectableState(modelServerState(model, config.connections, serverStates)));
   const serversOffline = serverStatesChecked && config.connections.length > 0 && !onlineModels.length;
   const selectedModel = pickerModels.find((model) => model.id === selectedModelId) || pickerModels[0];
   // A selection whose server is offline or switched off moves to the default model, or else the first online one.
@@ -1152,7 +1155,7 @@ export default function Home() {
         <div className="ambient-glow" />
         <div className="model-switcher">
           <button className="model-trigger" onClick={() => { if (!modelMenuOpen) setModelControlNotice(null); setModelMenuOpen((value) => !value); }}><span>{serversOffline ? c.serverOffline : selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
-          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span>{checkingModelServers ? <LoaderCircle className="spin" size={13} aria-label={c.checkingModelServers} /> : <small>{onlineModels.length}</small>}</div>{!checkingModelServers && serversOffline && <p className="model-popover-empty">{c.noOnlineModels}</p>}{pickerModels.map((model) => { const weight = showModelWeights ? config.modelWeights?.[model.id] : undefined; const weightHint = weight ? c.modelWeightHint.replace("{weight}", formatModelWeight(weight)) : ""; const offline = modelServerState(model, config.connections, serverStates) === "offline"; return <button className={`model-option ${offline ? "offline" : ""}`} key={model.id} aria-disabled={offline || undefined} data-tooltip={offline ? c.modelServerOffline : undefined} aria-description={offline ? c.modelServerOffline : undefined} onClick={() => { if (!offline) chooseModel(model); }}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{(model.isAlias || weight) && <span className="model-option-badges">{model.isAlias && <b>ALIAS</b>}{weight && <b className="model-weight-badge" data-tooltip={weightHint} aria-label={weightHint}>x{formatModelWeight(weight)}</b>}</span>}</button>; })}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{isAdmin && <button className="default-choice-action" disabled={!selectedModel || applyingDefault === "model"} onClick={() => void applyDefaultToEveryone("model")}>{applyingDefault === "model" ? <LoaderCircle className="spin" size={14} /> : <Users size={14} />}{applyingDefault === "model" ? c.applyingToEveryone : c.applyToEveryone}</button>}{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
+          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span>{checkingModelServers ? <LoaderCircle className="spin" size={13} aria-label={c.checkingModelServers} /> : <small>{onlineModels.length}</small>}</div>{!checkingModelServers && serversOffline && <p className="model-popover-empty">{c.noOnlineModels}</p>}{pickerModels.map((model) => { const weight = showModelWeights ? config.modelWeights?.[model.id] : undefined; const weightHint = weight ? c.modelWeightHint.replace("{weight}", formatModelWeight(weight)) : ""; const state = modelServerState(model, config.connections, serverStates); const offline = state === "offline"; const stateHint = offline ? c.modelServerOffline : state === "error" ? c.modelServerError : undefined; return <button className={`model-option ${offline ? "offline" : state === "error" ? "server-error" : ""}`} key={model.id} aria-disabled={offline || undefined} data-tooltip={stateHint} aria-description={stateHint} onClick={() => { if (!offline) chooseModel(model); }}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{(model.isAlias || weight) && <span className="model-option-badges">{model.isAlias && <b>ALIAS</b>}{weight && <b className="model-weight-badge" data-tooltip={weightHint} aria-label={weightHint}>x{formatModelWeight(weight)}</b>}</span>}</button>; })}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{isAdmin && <button className="default-choice-action" disabled={!selectedModel || applyingDefault === "model"} onClick={() => void applyDefaultToEveryone("model")}>{applyingDefault === "model" ? <LoaderCircle className="spin" size={14} /> : <Users size={14} />}{applyingDefault === "model" ? c.applyingToEveryone : c.applyToEveryone}</button>}{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
         </div>
 
         <div className="surface-actions">
@@ -1816,9 +1819,10 @@ function SettingsPanel({ initial, onClose, onSaved, onLogout, onAccentPreview }:
   const modalRef = useModalFocus(onClose);
   const admin = initial.account?.role === "admin" || initial.account?.role === "superadmin";
   const firstEditableModel = initial.models.find((model) => !model.isAlias || model.ownerId === initial.account?.id) || initial.models[0];
-  const [draft, setDraft] = useState<PublicConfig>(structuredClone(initial)); const [tab, setTab] = useState<SettingsTab>("general"); const [activeModelId, setActiveModelId] = useState(firstEditableModel?.id || ""); const [saving, setSaving] = useState(false); const [detectingConnectionId, setDetectingConnectionId] = useState(""); const [notice, setNotice] = useState("");
+  const [draft, setDraft] = useState<PublicConfig>(structuredClone(initial)); const [tab, setTab] = useState<SettingsTab>("general"); const [activeModelId, setActiveModelId] = useState(firstEditableModel?.id || ""); const [saving, setSaving] = useState(false); const [detectingConnectionId, setDetectingConnectionId] = useState(""); const [notice, setNotice] = useState(""); const [statusNonce, setStatusNonce] = useState(0);
   const activeModel = draft.models.find((model) => model.id === activeModelId);
   const c = copyFor(draft.preferences.language || "en");
+  const { dialog: detectDialog, notify: notifyDetect } = useMessageDialog(draft.preferences.language === "ko");
   // The footer only offers a save while something actually differs from the saved configuration.
   const [saved, setSaved] = useState(() => JSON.stringify(initial));
   const dirty = JSON.stringify(draft) !== saved;
@@ -1835,17 +1839,24 @@ function SettingsPanel({ initial, onClose, onSaved, onLogout, onAccentPreview }:
     setDetectingConnectionId(connectionId); setNotice("");
     try {
       const response = await fetch("/api/models/detect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(target) });
-      const body = await response.json(); if (!response.ok) throw new Error(body.error);
+      // A failure arrives as a classified code; an unreadable reply from this app itself is reported the same way.
+      const body = await response.json().catch(() => undefined) as { models?: ModelConfig[]; error?: string; code?: unknown; status?: number } | undefined;
+      if (!response.ok || !Array.isArray(body?.models)) throw { code: isConnectionFailureCode(body?.code) ? body.code : response.ok ? "invalid-json" : "unexpected", status: body?.status, detail: body?.error || `HTTP ${response.status}` };
       const aliases = draft.models.filter((model) => model.isAlias);
-      const detected: ModelConfig[] = body.models.map((model: ModelConfig) => {
+      const detected: ModelConfig[] = body!.models!.map((model: ModelConfig) => {
         const baseIdentifier = model.sourceModel.split(":")[0];
         const previous = reconcileConnectionEdits([target], draft.models)[0].models.find((item) => !item.isAlias && item.sourceModel.split(":")[0] === baseIdentifier);
         return previous ? { ...model, name: previous.name, visible: previous.visible, description: previous.description, systemPrompt: previous.systemPrompt, reasoningPresets: normalizeReasoning({ ...model, reasoningPresets: previous.reasoningPresets }).reasoningPresets, contextWindowTokens: previous.contextWindowTokens, visionImageMode: previous.visionImageMode, visionMaxEdgePixels: previous.visionMaxEdgePixels } : model;
       });
       setDraft((current) => { const connections = current.connections.map((connection) => connection.id === connectionId ? { ...connection, models: detected } : connection); return { ...current, connections, models: resolveConnectionModels(connections as ConnectionConfig[], current.models.filter((model) => model.isAlias), current.models.map((model) => model.id)) }; });
       setActiveModelId(detected[0]?.id || aliases[0]?.id || "");
-      setNotice(`${body.models.length}${c.detectSaved}`);
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Connection failed."); } finally { setDetectingConnectionId(""); }
+      setNotice(`${detected.length}${c.detectSaved}`);
+    } catch (error) {
+      const failure = error && typeof error === "object" && "code" in error ? error as { code: Parameters<typeof describeConnectionFailure>[0]; status?: number; detail?: string } : { code: "unreachable" as const, detail: error instanceof Error ? error.message : String(error) };
+      setNotice(c.detectFailedNotice);
+      void notifyDetect({ tone: "danger", title: c.detectFailedTitle, message: describeConnectionFailure(failure.code, draft.preferences.language === "ko" ? "ko" : "en"), detail: `${target.name} · ${target.baseUrl}${failure.detail ? `
+${c.detectFailedDetail}: ${failure.detail}` : ""}` });
+    } finally { setDetectingConnectionId(""); setStatusNonce((value) => value + 1); }
   }
   function addAlias() { const base = draft.models.find((model) => !model.isAlias && model.visible !== false); if (!base) { setNotice(c.detectFirst); return; } const alias: ModelConfig = { ...structuredClone(base), id: uid("alias"), name: draft.preferences.language === "ko" ? "새 커스텀 모델" : "New custom model", isAlias: true, visible: true, systemPrompt: "", contextWindowTokens: undefined, apiContextWindowTokens: undefined, ownerId: initial.account?.id, isPublic: false }; setDraft((current) => ({ ...current, models: [...current.models, alias] })); setActiveModelId(alias.id); setTab("models"); }
   function addPreset() { if (!activeModel) return ""; const preset: ReasoningPreset = { id: uid("preset"), name: draft.preferences.language === "ko" ? "새 템플릿" : "New template", kind: "custom", effort: "", systemPrompt: "", systemPromptMode: "append", ownerId: initial.account?.id }; updateModel({ reasoningPresets: [...activeModel.reasoningPresets, preset] }); return preset.id; }
@@ -1873,7 +1884,7 @@ function SettingsPanel({ initial, onClose, onSaved, onLogout, onAccentPreview }:
     } catch (error) { setNotice(error instanceof Error ? error.message : c.invalidModelSettings); }
     finally { setSaving(false); }
   }
-  return createPortal(<div ref={modalRef} tabIndex={-1} className="settings-layer" role="dialog" aria-modal="true" aria-label={c.settings}><button tabIndex={-1} className="settings-backdrop" onClick={onClose} aria-label={c.cancel} /><section className="settings-panel"><header><div><span>{c.workspace}</span><h2>{c.settings}</h2></div><button aria-label={c.cancel} onClick={onClose}><X size={20} /></button></header><div className="settings-body"><nav aria-label={c.settings}><button className={tab === "general" ? "active" : ""} onClick={() => setTab("general")}><Settings2 size={17} /> {c.general}</button><button className={tab === "appearance" ? "active" : ""} onClick={() => setTab("appearance")}><Palette size={17} /> {c.appearance}</button>{admin && <button className={tab === "connection" ? "active" : ""} onClick={() => setTab("connection")}><Server size={17} /> {c.connection}</button>}{admin && <button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><Wrench size={17} /> {c.toolsSettings}</button>}{admin && <button className={tab === "experimental" ? "active" : ""} onClick={() => setTab("experimental")}><FlaskConical size={17} /> {c.experimental}</button>}<button className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><NeuralMark size={18} /> {c.models}</button><button className={tab === "reasoning" ? "active" : ""} onClick={openReasoning}><Lightbulb size={17} /> {c.reasoningLevel}</button>{admin && <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}><Users size={17} /> {c.users}</button>}{admin&&<button className={tab==="plans"?"active":""} onClick={()=>setTab("plans")}><Gauge size={17}/>{draft.preferences.language==="ko"?"플랜":"Plans"}</button>}{admin&&<button className={tab==="data"?"active":""} onClick={()=>setTab("data")}><DatabaseBackup size={17}/>{draft.preferences.language==="ko"?"데이터 관리":"Data"}</button>}<button className={tab === "account" ? "active" : ""} onClick={() => setTab("account")}><UserRound size={17} /> {c.account}</button></nav><div className="settings-content">{tab === "general" && <GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving} />}{tab === "appearance" && <AppearanceSettings c={c} draft={draft} setDraft={setDraft} admin={admin} />}{tab === "connection" && admin && <ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} />}{tab === "tools" && admin && <><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><ToolsSettings c={c} draft={draft} setDraft={setDraft} /><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}{tab === "experimental" && admin && <ExperimentalSettings c={c} draft={draft} setDraft={setDraft} />}{tab === "models" && <ModelSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account} />}{tab === "reasoning" && <ReasoningSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account} />}{tab === "users" && admin && <UsersSettings c={c} />}{tab==="plans"&&admin&&<PlanSettings models={draft.models} ko={draft.preferences.language==="ko"}/>} {tab==="data"&&admin&&<DataManagementSettings ko={draft.preferences.language==="ko"}/>} {tab === "account" && <><AccountSettings c={c} account={initial.account} draft={draft} setDraft={setDraft} onLogout={onLogout} /><AccountBackupSettings ko={draft.preferences.language==="ko"}/></>}</div></div><footer><span>{notice}</span><div><button className="secondary-button" onClick={onClose}>{dirty ? c.cancel : c.close}</button>{!["users","plans","data"].includes(tab) && <button className="save-button" onClick={save} disabled={saving || !dirty}>{saving ? c.saving : c.saveChanges}</button>}</div></footer></section></div>, document.body);
+  return createPortal(<div ref={modalRef} tabIndex={-1} className="settings-layer" role="dialog" aria-modal="true" aria-label={c.settings}><button tabIndex={-1} className="settings-backdrop" onClick={onClose} aria-label={c.cancel} /><section className="settings-panel"><header><div><span>{c.workspace}</span><h2>{c.settings}</h2></div><button aria-label={c.cancel} onClick={onClose}><X size={20} /></button></header><div className="settings-body"><nav aria-label={c.settings}><button className={tab === "general" ? "active" : ""} onClick={() => setTab("general")}><Settings2 size={17} /> {c.general}</button><button className={tab === "appearance" ? "active" : ""} onClick={() => setTab("appearance")}><Palette size={17} /> {c.appearance}</button>{admin && <button className={tab === "connection" ? "active" : ""} onClick={() => setTab("connection")}><Server size={17} /> {c.connection}</button>}{admin && <button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><Wrench size={17} /> {c.toolsSettings}</button>}{admin && <button className={tab === "experimental" ? "active" : ""} onClick={() => setTab("experimental")}><FlaskConical size={17} /> {c.experimental}</button>}<button className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><NeuralMark size={18} /> {c.models}</button><button className={tab === "reasoning" ? "active" : ""} onClick={openReasoning}><Lightbulb size={17} /> {c.reasoningLevel}</button>{admin && <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}><Users size={17} /> {c.users}</button>}{admin&&<button className={tab==="plans"?"active":""} onClick={()=>setTab("plans")}><Gauge size={17}/>{draft.preferences.language==="ko"?"플랜":"Plans"}</button>}{admin&&<button className={tab==="data"?"active":""} onClick={()=>setTab("data")}><DatabaseBackup size={17}/>{draft.preferences.language==="ko"?"데이터 관리":"Data"}</button>}<button className={tab === "account" ? "active" : ""} onClick={() => setTab("account")}><UserRound size={17} /> {c.account}</button></nav><div className="settings-content">{tab === "general" && <GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving} />}{tab === "appearance" && <AppearanceSettings c={c} draft={draft} setDraft={setDraft} admin={admin} />}{tab === "connection" && admin && <ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} statusNonce={statusNonce} />}{tab === "tools" && admin && <><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><ToolsSettings c={c} draft={draft} setDraft={setDraft} /><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}{tab === "experimental" && admin && <ExperimentalSettings c={c} draft={draft} setDraft={setDraft} />}{tab === "models" && <ModelSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account} />}{tab === "reasoning" && <ReasoningSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account} />}{tab === "users" && admin && <UsersSettings c={c} />}{tab==="plans"&&admin&&<PlanSettings models={draft.models} ko={draft.preferences.language==="ko"}/>} {tab==="data"&&admin&&<DataManagementSettings ko={draft.preferences.language==="ko"}/>} {tab === "account" && <><AccountSettings c={c} account={initial.account} draft={draft} setDraft={setDraft} onLogout={onLogout} /><AccountBackupSettings ko={draft.preferences.language==="ko"}/></>}</div></div><footer><span>{notice}</span><div><button className="secondary-button" onClick={onClose}>{dirty ? c.cancel : c.close}</button>{!["users","plans","data"].includes(tab) && <button className="save-button" onClick={save} disabled={saving || !dirty}>{saving ? c.saving : c.saveChanges}</button>}</div></footer></section>{detectDialog}</div>, document.body);
 }
 
 function ExperimentalSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>> }) {
@@ -2039,7 +2050,7 @@ function AppearanceSettings({ c, draft, setDraft, admin }: { c: CopySet; draft: 
   </div>;
 }
 
-function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionId }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; onDetect: (connectionId: string) => void; detectingConnectionId: string }) {
+function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionId, statusNonce }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; onDetect: (connectionId: string) => void; detectingConnectionId: string; statusNonce: number }) {
   const [activeConnectionId, setActiveConnectionId] = useState(draft.connections[0]?.id || "");
   const activeConnection = draft.connections.find((connection) => connection.id === activeConnectionId) || draft.connections[0];
   const activeIndex = activeConnection ? draft.connections.findIndex((connection) => connection.id === activeConnection.id) : -1;
@@ -2049,9 +2060,10 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
   const { dialog: messageDialog, confirm: askConfirm } = useMessageDialog(draft.preferences.language === "ko");
   const [serverStates, setServerStates] = useState<Record<string, ServerState>>({});
   const [statusTick, setStatusTick] = useState(0);
-  // Probe what the draft describes, so an edited address or a new server shows its state before saving.
+  // Probe what the draft describes, so an edited address or a new server shows its state before saving. Beyond
+  // edits, servers are rechecked after model detection and when typing resumes after a minute, never on a timer.
   const probeKey = JSON.stringify(draft.connections.map(({ id, driver, baseUrl, apiKey, clearApiKey, disabled }) => ({ id, driver, baseUrl, apiKey, clearApiKey, disabled })));
-  useEffect(() => { const timer = window.setInterval(() => setStatusTick((tick) => tick + 1), 15_000); return () => window.clearInterval(timer); }, []);
+  useKeyboardReturn(60_000, useCallback(() => setStatusTick((tick) => tick + 1), []));
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
@@ -2061,9 +2073,9 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
         .catch(() => undefined);
     }, 500);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [probeKey, statusTick]);
+  }, [probeKey, statusTick, statusNonce]);
   const stateOf = (connection: PublicConfig["connections"][number]): ServerState | undefined => connection.disabled ? "disabled" : serverStates[connection.id] === "disabled" ? undefined : serverStates[connection.id];
-  const stateLabel = (state?: ServerState) => state === "online" ? c.serverStateOnline : state === "offline" ? c.serverStateOffline : state === "disabled" ? c.serverStateDisabled : undefined;
+  const stateLabel = (state?: ServerState) => state === "online" ? c.serverStateOnline : state === "offline" ? c.serverStateOffline : state === "error" ? c.serverStateError : state === "disabled" ? c.serverStateDisabled : undefined;
   async function confirmRemoveConnection(connection: PublicConfig["connections"][number]) {
     if (draft.connections.length < 2) return;
     if (await askConfirm({ tone: "danger", title: c.removeConnection, message: c.confirmRemoveConnection, detail: `${connection.name} · ${c.removeConnectionDetail}`, confirmLabel: c.confirmDelete })) removeConnection(connection.id);

@@ -3,12 +3,19 @@ import type { ConnectionConfig, ModelConfig } from "./types";
 
 export type ServerState = ConnectionState;
 
-/** A model follows its server: switched off by an administrator, reported unreachable, or usable. Unchecked servers count as online. */
+/**
+ * A model follows its server: switched off by an administrator, reported unreachable, answering with an error,
+ * or online. Unchecked servers count as online.
+ */
 export function modelServerState(model: Pick<ModelConfig, "connectionId">, connections: Array<Pick<ConnectionConfig, "id" | "disabled">>, statuses: Record<string, ServerState>): ServerState {
   if (!model.connectionId) return "online";
   if (connections.find(connection => connection.id === model.connectionId)?.disabled) return "disabled";
-  return statuses[model.connectionId] === "offline" ? "offline" : "online";
+  const state = statuses[model.connectionId];
+  return state === "offline" || state === "error" ? state : "online";
 }
+
+/** A server that answers with an error still takes requests, so its models stay selectable and are only flagged. */
+export function selectableState(state: ServerState) { return state === "online" || state === "error"; }
 
 /**
  * The model to switch to when the selection's server is not online: the default model when it is online,

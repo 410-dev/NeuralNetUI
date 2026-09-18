@@ -12,11 +12,11 @@ import { chromium } from "playwright-core";
 // and a picker that greys out offline models, moves an offline selection and reports "server offline".
 const shots = process.env.BETA19_SCREENSHOTS;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-/** A model server whose availability the test switches: while down it answers every request with 503. */
+/** A model server whose availability the test switches: while down it resets every connection (beta 20 reports a 503 as an error, not offline). */
 function modelServer(model) {
   const state = { down: false };
   const server = http.createServer((request, response) => {
-    if (state.down) { response.writeHead(503).end(); return; }
+    if (state.down) { request.socket.destroy(); return; }
     if (request.method === "GET" && request.url === "/v1/models") { response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ data: [{ id: model }] })); return; }
     if (request.method === "POST" && request.url === "/v1/chat/completions") {
       response.writeHead(200, { "Content-Type": "text/event-stream" });
