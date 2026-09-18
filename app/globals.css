@@ -561,7 +561,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .model-column-list > button[draggable="true"]:active { cursor: grabbing; }
 .model-type-icon { width: 26px; height: 26px; display: grid; place-items: center; color: var(--muted); background: transparent; }
 .model-type-icon { position: relative; }
-.server-status-dot { position: absolute; right: 0; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: #71717a; }
+.server-status-dot { position: absolute; right: -3px; top: 50%; width: 4.8px; height: 4.8px; margin-top: -2.4px; border-radius: 50%; background: #71717a; }
 .server-status-dot.online { background: #22c55e; }
 .server-status-dot.offline { background: #ef4444; }
 .server-status-dot.disabled { background: #71717a; }
