@@ -12,7 +12,7 @@ export async function discoverModelRecords(driver: ConnectionDriver, baseUrl: st
   const raw = listingModels(driver, await readListingJson(response));
   if (!raw) throw new ConnectionError(invalidShapeFailure(driver));
   const records = (raw as Array<Record<string, unknown> | null>).filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && (item.id || item.key) && (driver !== "lmstudio" || item.type === "llm")));
-  if (driver === "lmstudio") return records;
+  if (driver !== "openai") return records;
   try {
     const native = await fetcher(`${connectionRoot(baseUrl)}/api/v1/models`, { ...request, signal: AbortSignal.timeout(3_000) });
     if (!native.ok) return records;

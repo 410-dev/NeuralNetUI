@@ -3,8 +3,8 @@ import test from "node:test";
 import { capabilityStateWord, capabilitySummary, driverCapabilities } from "./driver-capabilities.ts";
 import type { ConnectionDriver, Locale } from "./types.ts";
 
-test("every capability is answered for both drivers in both languages", () => {
-  for (const driver of ["openai", "lmstudio"] as ConnectionDriver[]) {
+test("every capability is answered for every driver in both languages", () => {
+  for (const driver of ["openai", "lmstudio", "nnui"] as ConnectionDriver[]) {
     for (const locale of ["en", "ko"] as Locale[]) {
       const rows = driverCapabilities(driver, locale);
       assert.equal(rows.length, 5, `${driver}/${locale}`);
@@ -23,6 +23,13 @@ test("LM Studio manages models natively while OpenAI-compatible connections are 
   const compatible = driverCapabilities("openai", "en");
   assert.equal(native.find((row) => row.id === "management")!.state, "yes");
   assert.equal(compatible.find((row) => row.id === "management")!.state, "partial");
+});
+
+test("NNUI Server exposes native management and event progress", () => {
+  const nnui = driverCapabilities("nnui", "en");
+  assert.equal(nnui.find((row) => row.id === "management")!.state, "yes");
+  assert.equal(nnui.find((row) => row.id === "progress")!.state, "yes");
+  assert.equal(nnui.find((row) => row.id === "effort")!.state, "partial");
 });
 
 test("progress for OpenAI-compatible connections depends on the experimental switch", () => {

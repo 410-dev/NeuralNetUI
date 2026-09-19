@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { authErrorResponse, requireAdmin } from "@/lib/auth";
 import { readConfig } from "@/lib/config";
 import { inferenceEndpoint, loadedModelIdentifier } from "@/lib/inference-control";
-import { connectionForModel, connectionHeaders, lmStudioEndpoint, modelsEndpoint } from "@/lib/connection-drivers";
+import { connectionForModel, connectionHeaders, lmStudioEndpoint, modelsEndpoint, nnuiModelEndpoint } from "@/lib/connection-drivers";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +16,12 @@ export async function POST(request: Request) {
     const connection = connectionForModel(config.connections, model);
     if (!connection) throw new Error("The model connection is unavailable.");
     const headers = { Accept: "application/json", ...connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "") };
+    if (connection.driver === "nnui") {
+      const response = await fetch(nnuiModelEndpoint(connection.baseUrl, model.sourceModel, "unload"), { method: "POST", headers, signal: AbortSignal.timeout(300_000), cache: "no-store" });
+      const detail = await response.text();
+      if (!response.ok) throw new Error(detail || `NNUI model unload failed with ${response.status}`);
+      return NextResponse.json({ ok: true });
+    }
     if (connection.driver === "lmstudio") {
       const listResponse = await fetch(modelsEndpoint("lmstudio", connection.baseUrl), { headers, signal: AbortSignal.timeout(30_000), cache: "no-store" });
       if (!listResponse.ok) throw new Error((await listResponse.text()) || `Model list failed with ${listResponse.status}`);

@@ -4,7 +4,7 @@ import type { HostTrustedPermissions } from "./host-permissions.ts";
 export type ReasoningKind = "builtin" | "custom";
 export type SystemPromptMode = "replace" | "prepend" | "append";
 export type Locale = "en" | "ko";
-export type ConnectionDriver = "openai" | "lmstudio";
+export type ConnectionDriver = "openai" | "lmstudio" | "nnui";
 export type McpAuthType = "oauth" | "api_key" | "none";
 export type ModelWaitPolicy = "capacity" | "serial";
 export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response" | "processing-prompt" | "compacting-context";

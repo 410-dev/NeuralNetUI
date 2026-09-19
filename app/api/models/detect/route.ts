@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const config = await readConfig();
     const saved = config.connections.find((connection) => connection.id === body.id);
-    const driver = body.driver === "lmstudio" ? "lmstudio" : "openai";
+    const driver = body.driver === "lmstudio" || body.driver === "nnui" ? body.driver : "openai";
     const baseUrl = String(body.baseUrl || saved?.baseUrl || "");
     const apiKey = (body.clearApiKey ?? saved?.clearApiKey) ? "" : String(body.apiKey || saved?.apiKey || (driver === "openai" ? process.env.OPENAI_API_KEY : "") || "");
     const items = await discoverModelRecords(driver, baseUrl, apiKey);

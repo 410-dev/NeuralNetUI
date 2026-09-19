@@ -25,6 +25,7 @@
 | --- | --- |
 | OpenAI API | `/models` 메타데이터와 잘 알려진 reasoning 모델 이름 |
 | LM Studio | `/api/v1/models`의 `capabilities.reasoning.allowed_options` 우선 |
+| NNUI Server | `/v1/models` 메타데이터와 잘 알려진 reasoning 모델 이름. 실제 옵션 처리는 llama.cpp 모델·빌드에 따름 |
 
 감지 결과는 설정에서 언제든 수동으로 덮어쓸 수 있습니다. alias의 reasoning 능력은 실제 기반 연결을 따르며, 기반을 바꾸거나 다시 감지해도 올바르게 갱신됩니다. 오래된 설치라면 모델을 다시 감지하고 저장해 레거시 메타데이터를 갱신하세요.
 

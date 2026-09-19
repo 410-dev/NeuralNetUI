@@ -12,6 +12,7 @@
 | 이미지 처리 | `sharp` |
 | 브라우저 자동화 | `playwright-core` (Chromium) |
 | LM Studio | `@lmstudio/sdk` |
+| NNUI Server | OpenAI 호환 HTTP와 인증된 SSE 이벤트 스트림 |
 | 보조 런타임 | Python (`ddgs` 검색, PDF 처리) |
 
 프론트엔드와 스트리밍 프록시 백엔드는 **하나의 Node 프로세스**에서 실행됩니다. `scripts/start-server.mjs`가 `app-config.json`과 환경 변수를 읽어 수신 주소·포트·접근 범위를 정한 뒤 Next.js standalone 서버를 띄웁니다.

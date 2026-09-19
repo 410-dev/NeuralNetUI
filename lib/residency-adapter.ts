@@ -1,8 +1,9 @@
-import { lmStudioEndpoint, modelsEndpoint } from "./connection-drivers.ts";
+import { lmStudioEndpoint, modelsEndpoint, nnuiEventsEndpoint, nnuiModelEndpoint, nnuiStatusEndpoint } from "./connection-drivers.ts";
 import { inferenceEndpoint } from "./inference-control.ts";
 import { progressFetch, SERVER_RESPONSE_TIMEOUT_MS, withSlowProgress } from "./chat-progress.ts";
 import type { ChatWaitPhase, ConnectionConfig } from "./types.ts";
 import { ModelBusyError, type ResidencyAdapter, type ResidentModel } from "./model-residency.ts";
+import { nnuiEventProgress, startNnuiEventObserver } from "./nnui-driver.ts";
 
 function record(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function text(value: unknown) { return typeof value === "string" && value.trim() ? value : undefined; }
@@ -30,12 +31,54 @@ export function legacyResidents(payload: unknown): ResidentModel[] {
   return [...ids].map(id => ({ id, identifiers: [id, ...(text(status.gguf_variant) ? [`${id}:${status.gguf_variant}`] : [])], instanceIds: [id], busy: status.busy === true || status.status === "generating" }));
 }
 
+/** Translate the NNUI control-plane snapshot into the residency manager's conservative inventory. */
+export function nnuiResidents(payload: unknown): ResidentModel[] {
+  const models = record(payload)?.models;
+  if (!Array.isArray(models)) throw new Error("NNUI Server returned an invalid model status list.");
+  return models.flatMap(value => {
+    const model = record(value); const id = text(model?.id); const state = text(model?.state);
+    if (!model || !id || !state) throw new Error("NNUI Server returned an invalid model status record.");
+    if (["unloaded", "failed"].includes(state)) return [];
+    const settings = record(model.settings); const aliases = Array.isArray(settings?.aliases) ? settings.aliases.map(text).filter((alias): alias is string => Boolean(alias)) : [];
+    const active = typeof model.active_requests === "number" ? model.active_requests : 0;
+    return [{ id, identifiers: [...new Set([id, ...aliases])], instanceIds: [id], busy: active > 0 || ["starting", "loading", "stopping"].includes(state) }];
+  });
+}
+
 function legacyLoadBody(source: string) {
   const separator = source.lastIndexOf(":"); const pathSeparator = Math.max(source.lastIndexOf("/"), source.lastIndexOf("\\"));
   return separator <= pathSeparator || separator === 1 ? { model_path: source } : { model_path: source.slice(0, separator), gguf_variant: source.slice(separator + 1) };
 }
 
 export function createResidencyAdapter(connection: ConnectionConfig, headers: Record<string, string>, contextWindowTokens: number | undefined, onPhase: (phase: ChatWaitPhase) => void, request: typeof fetch = fetch, onLoadProgress?: (progress: number) => void): ResidencyAdapter {
+  if (connection.driver === "nnui") {
+    async function ensureOk(response: Response) {
+      if (!response.ok) throw new Error(`NNUI model management failed (${response.status}): ${await response.text()}`);
+    }
+    return {
+      async list(signal) {
+        const response = await progressFetch(nnuiStatusEndpoint(connection.baseUrl), { headers, signal, cache: "no-store" }, onPhase, "preparing-response", request);
+        await ensureOk(response); return nnuiResidents(await response.json());
+      },
+      async unload(model, signal) {
+        const response = await progressFetch(nnuiModelEndpoint(connection.baseUrl, model.id, "unload"), { method: "POST", headers, signal, cache: "no-store" }, onPhase, "freeing-space", request);
+        await ensureOk(response); await response.body?.cancel().catch(() => undefined);
+      },
+      async load(model, signal) {
+        const eventController = new AbortController();
+        const eventSignal = AbortSignal.any([signal, eventController.signal]);
+        const events = onLoadProgress ? startNnuiEventObserver(nnuiEventsEndpoint(connection.baseUrl), headers, eventSignal, event => {
+          if (event.model !== model) return;
+          const progress = nnuiEventProgress(event); if (progress?.phase === "loading-model") onLoadProgress(progress.progress);
+        }, request) : undefined;
+        try {
+          await events?.ready;
+          const response = await progressFetch(nnuiModelEndpoint(connection.baseUrl, model, "load"), { method: "POST", headers, signal, cache: "no-store" }, onPhase, "loading-model", request);
+          await ensureOk(response); await response.body?.cancel().catch(() => undefined);
+        } finally { eventController.abort(); void events?.done; }
+      },
+    };
+  }
   let mode: "native" | "legacy" | undefined = connection.driver === "lmstudio" ? "native" : undefined;
   let phase: ChatWaitPhase = "preparing-response";
   async function call(url: string, signal: AbortSignal, body?: unknown) {

@@ -11,21 +11,39 @@ export function connectionRoot(baseUrl: string) {
 
 export function modelsEndpoint(driver: ConnectionDriver, baseUrl: string) {
   const base = baseUrl.replace(/\/$/, "");
-  return driver === "lmstudio" ? `${connectionRoot(baseUrl)}/api/v1/models` : `${base}/models`;
+  if (driver === "lmstudio") return `${connectionRoot(baseUrl)}/api/v1/models`;
+  if (driver === "nnui") return `${connectionRoot(baseUrl)}/v1/models`;
+  return `${base}/models`;
 }
 
 export function chatEndpoint(driver: ConnectionDriver, baseUrl: string) {
   const base = baseUrl.replace(/\/$/, "");
-  return driver === "lmstudio" ? `${connectionRoot(baseUrl)}/v1/chat/completions` : `${base}/chat/completions`;
+  return driver === "lmstudio" || driver === "nnui" ? `${connectionRoot(baseUrl)}/v1/chat/completions` : `${base}/chat/completions`;
 }
 
 export function lmStudioEndpoint(baseUrl: string, action: "load" | "unload") {
   return `${connectionRoot(baseUrl)}/api/v1/models/${action}`;
 }
 
+export function nnuiModelEndpoint(baseUrl: string, model: string, action: "load" | "unload") {
+  return `${connectionRoot(baseUrl)}/api/models/${encodeURIComponent(model)}/${action}`;
+}
+
+export function nnuiStatusEndpoint(baseUrl: string) {
+  return `${connectionRoot(baseUrl)}/api/models/status`;
+}
+
+export function nnuiEventsEndpoint(baseUrl: string) {
+  return `${connectionRoot(baseUrl)}/api/events`;
+}
+
 export function connectionHeaders(connection: Pick<ConnectionConfig, "apiKey" | "clearApiKey">, fallbackKey = "") {
   const apiKey = connection.clearApiKey ? "" : connection.apiKey || fallbackKey;
   return { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) };
+}
+
+export function chatHeaders(connection: Pick<ConnectionConfig, "driver" | "apiKey" | "clearApiKey">, fallbackKey = "", sessionId?: string) {
+  return { ...connectionHeaders(connection, fallbackKey), ...(connection.driver === "nnui" && sessionId ? { "X-Llama-NNUI-Session-Id": sessionId } : {}) };
 }
 
 export function resolveConnectionModels(connections: ConnectionConfig[], aliases: ModelConfig[] = [], preferredOrder: string[] = []) {

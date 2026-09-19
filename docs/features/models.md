@@ -8,8 +8,11 @@
 | --- | --- | --- | --- | --- |
 | OpenAI API | `http://localhost:8888/v1` | `/models` | `/v1/chat/completions` 스트림 | LM Studio 관리 API를 먼저 시도하고, 없으면 `/api/inference` |
 | LM Studio | `http://localhost:1234` | `/api/v1/models` | 네이티브 SDK 추론, 미지원 요청은 `/v1/chat/completions` | `/api/v1/models/load`, `/unload` |
+| NNUI Server | `http://127.0.0.1:11435` | `/v1/models` | `/v1/chat/completions` 스트림과 대화별 세션 고정 | `/api/models/status`, `/{id}/load`, `/{id}/unload` |
 
 LM Studio 채팅은 도구 호출과 전체 대화 이력을 보존해야 하는 경우 호환 스트림을 사용합니다. 명명된 reasoning effort와 이전 추론 분리 전달은 SDK 1.5.0이 표현할 수 없어 Chat Completions 경로를 유지합니다.
+
+NNUI Server 드라이버는 Base URL에 `/v1`을 쓰지 않아도 자동으로 공개 API 경로를 구성합니다. 각 대화의 안정적인 ID를 `X-Llama-NNUI-Session-Id`로 보내 같은 llama.cpp 슬롯과 prompt prefix를 재사용하고, Bearer 키가 설정돼 있으면 모델·관리·이벤트 API 모두에 같은 키를 사용합니다.
 
 ### 우선순위
 
@@ -66,7 +69,7 @@ LM Studio 채팅은 도구 호출과 전체 대화 이력을 보존해야 하는
 | `maxResidentModels` | 연결별 | 0은 무제한. 양수면 On demand가 꺼져 있어도 관리형 로딩이 활성화 |
 | `modelWaitPolicy` | 연결별 | `capacity`(여유 생길 때까지 대기) 또는 `serial`(한 번에 하나) |
 
-On demand로 로드할 때 OpenAI 드라이버의 `repo:variant` 형식 ID는 `model_path`와 `gguf_variant`로 나뉘어 전송되고, LM Studio에는 `model`과 선택적 `context_length`가 전송됩니다.
+On demand로 로드할 때 OpenAI 드라이버의 `repo:variant` 형식 ID는 `model_path`와 `gguf_variant`로 나뉘어 전송되고, LM Studio에는 `model`과 선택적 `context_length`가 전송됩니다. NNUI Server는 등록된 모델 ID를 URL path에 넣어 load/unload를 호출하며, 모델 설정은 NNUI 제어면의 등록값을 사용합니다.
 
 ### admission과 축출
 
@@ -105,6 +108,7 @@ On demand로 로드할 때 OpenAI 드라이버의 `repo:variant` 형식 ID는 `m
 ## 진행률 표시
 
 - LM Studio 연결은 요청 범위의 `@lmstudio/sdk`에서 실제 모델 로드·프롬프트 처리 진행률을 받아옵니다. 표시 방식(텍스트/퍼센트/도넛/둘 다)은 `설정 > 모양`에서 고릅니다.
+- NNUI Server 연결은 인증된 `/api/events` SSE에서 `model.load.progress`와 `request.prefill.progress`를 읽습니다. 이벤트 스트림이 끊겨도 채팅은 계속되며 최종 모델 상태는 `/api/models/status`를 기준으로 확인합니다.
 - 프롬프트 처리 퍼센트는 짧은 스트림 공백 동안에도 유효한 값으로 유지되며, 30초 동안 서버 응답이 없을 때만 "서버 대기"로 바뀝니다.
 - `설정 > 실험실`의 **openAIProgress**(관리자, 기본 꺼짐)를 켜면 OpenAI 드라이버 연결도 같은 서버의 LM Studio 네이티브 재고를 먼저 조회합니다. 그 외 호스트는 표준 Chat Completions로 동작하며 진행률은 제공되지 않습니다. 일반 토큰 사용량을 프롬프트 처리율로 해석하는 일은 없습니다.
 

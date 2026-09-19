@@ -15,6 +15,12 @@ test("generic OpenAI servers survive absent native API; native discovery exclude
   const native: typeof fetch = async () => Response.json({ models: [null, { key: 'embed', type: 'embedding' }, { key: 'chat', type: 'llm' }] });
   assert.deepEqual(await discoverModelRecords('lmstudio', 'http://host', '', native), [{ key: 'chat', type: 'llm' }]);
 });
+test("NNUI discovery uses its OpenAI model list without probing LM Studio", async () => {
+  const calls: string[] = [];
+  const fetcher: typeof fetch = async input => { calls.push(String(input)); return Response.json({ data: [{ id: "local-main", llama_nnui_status: "unloaded", capabilities: ["completion"] }] }); };
+  assert.deepEqual(await discoverModelRecords("nnui", "http://host:11435", "key", fetcher), [{ id: "local-main", llama_nnui_status: "unloaded", capabilities: ["completion"] }]);
+  assert.deepEqual(calls, ["http://host:11435/v1/models"]);
+});
 test("discovery failures carry a code the settings screen can explain", async () => {
   const codeOf = async (fetcher: typeof fetch, driver: 'openai' | 'lmstudio' = 'openai') => { try { await discoverModelRecords(driver, 'http://host/v1', 'key', fetcher); return 'ok'; } catch (error) { return (error as { failure?: { code: string } }).failure?.code; } };
   assert.equal(await codeOf(async () => new Response('{"error":"bad key"}', { status: 401 })), 'unauthorized');

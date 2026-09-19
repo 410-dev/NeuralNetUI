@@ -24,14 +24,23 @@ const DETAILS: Partial<Record<CapabilityId, Partial<Record<ConnectionDriver, [st
   discovery: {
     openai: ["Standard model list, enriched when the host also exposes LM Studio metadata", "표준 모델 목록. 같은 서버가 LM Studio 정보를 제공하면 함께 사용합니다"],
     lmstudio: ["Native inventory with reasoning capabilities and loaded instances", "추론 capability와 로드된 인스턴스까지 포함한 네이티브 목록"],
+    nnui: ["Registered models from the NNUI control plane, including unloaded models", "NNUI 제어면에 등록된 모델을 언로드 상태까지 포함해 감지합니다"],
   },
   management: {
     openai: ["Probes LM Studio management, otherwise falls back to /api/inference", "LM Studio 관리 API를 먼저 시도하고, 없으면 /api/inference로 대체합니다"],
     lmstudio: ["Native load and unload endpoints", "네이티브 로드·언로드 엔드포인트"],
+    nnui: ["Native status, load, unload and active-request-aware residency", "네이티브 상태·로드·언로드 API와 활성 요청 기반 상주 관리를 사용합니다"],
   },
   progress: {
     openai: ["Only on hosts verified as LM Studio, and only while the experimental switch is on", "LM Studio로 확인된 서버에서만, 실험적 기능 스위치를 켠 경우에만 표시됩니다"],
     lmstudio: ["Reported for plain requests; a named effort level or prior reasoning falls back to no progress", "일반 요청에서 표시됩니다. 추론 강도 단계나 이전 생각 기록이 있으면 진행률 없이 진행합니다"],
+    nnui: ["Load and prompt-prefill events are read from the authenticated server event stream", "인증된 서버 이벤트 스트림에서 모델 로드와 프롬프트 프리필 진행률을 읽습니다"],
+  },
+  effort: {
+    nnui: ["Forwarded to llama.cpp; exact levels depend on the selected model and server build", "llama.cpp로 전달되며 정확한 단계 지원은 선택한 모델과 서버 빌드에 따라 달라집니다"],
+  },
+  reasoningHistory: {
+    nnui: ["Forwarded through Chat Completions; acceptance depends on the selected llama.cpp model", "Chat Completions로 전달되며 선택한 llama.cpp 모델에 따라 처리 여부가 달라집니다"],
   },
 };
 
@@ -41,6 +50,7 @@ export const capabilityStateWord = (state: CapabilityState, locale: Locale) => S
 const STATES: Record<ConnectionDriver, Record<CapabilityId, CapabilityState>> = {
   openai: { discovery: "yes", management: "partial", progress: "no", effort: "yes", reasoningHistory: "yes" },
   lmstudio: { discovery: "yes", management: "yes", progress: "partial", effort: "yes", reasoningHistory: "yes" },
+  nnui: { discovery: "yes", management: "yes", progress: "yes", effort: "partial", reasoningHistory: "partial" },
 };
 
 /**

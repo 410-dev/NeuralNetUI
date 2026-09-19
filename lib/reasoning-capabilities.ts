@@ -18,7 +18,7 @@ export function inferReasoning(record: Record<string, unknown>, id: string, driv
     if (Array.isArray(advertised)) options = advertised.filter((v): v is string => typeof v === "string" && supportedOptions.has(v));
     else if (/qwen[ -]?3\.8/i.test(id)) options = ["off", "low", "medium", "xhigh", "on"];
     else if (/(gemma[ -]?4|qwen[ -]?3(?:\.\d+)?)/i.test(id)) options = ["off", "on"];
-    else if (driver === "openai" && /(?:^|\/)(?:o[134](?:-|$)|gpt-5)/i.test(id)) options = ["low", "medium", "high"];
+    else if (driver !== "lmstudio" && /(?:^|\/)(?:o[134](?:-|$)|gpt-5)/i.test(id)) options = ["low", "medium", "high"];
   }
   return { reasoningSupported: options.length > 0, reasoningEfforts: [...new Set(options)] };
 }

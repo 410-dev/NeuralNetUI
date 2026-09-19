@@ -9,7 +9,7 @@ NeuralNetUI는 Next.js 프론트엔드와 스트리밍 프록시 백엔드를 **
 | Node.js | 22 이상 | `package.json`의 `engines`에 명시 |
 | Python | 3.x | 인터넷 검색(`ddgs`)과 PDF 처리에 사용. 호스팅 스크립트가 격리 환경을 자동 구성 |
 | 브라우저 엔진 | Chrome / Edge / Chromium | **브라우저 도구**를 쓸 때만 필요 |
-| 추론 서버 | OpenAI 호환 API 또는 LM Studio | 별도 호스트에 있어도 됩니다 |
+| 추론 서버 | OpenAI 호환 API, LM Studio 또는 NNUI Server | 별도 호스트에 있어도 됩니다 |
 
 Docker 이미지와 Windows MSI에는 Node.js, Python 의존성, Chromium이 모두 포함되어 있어 위 준비가 필요 없습니다.
 
@@ -70,7 +70,7 @@ chmod +x host-linux.sh
 ## 최초 설정
 
 1. **최고 관리자 계정 생성** — 사용자 테이블이 비어 있는 첫 접속에서 superadmin 계정을 만듭니다. 구버전에서 이관된 대화와 업로드는 이 계정에 귀속됩니다. 비밀번호는 8자 이상이어야 합니다.
-2. **연결 추가** — 좌측 하단 프로필 → `설정 > 연결`에서 드라이버(OpenAI API 또는 LM Studio)와 Base URL, API 키를 입력합니다. 기본 연결은 `http://localhost:8888/v1`이고, LM Studio 기본값은 `http://localhost:1234`입니다.
+2. **연결 추가** — 좌측 하단 프로필 → `설정 > 연결`에서 드라이버(OpenAI API, LM Studio 또는 NNUI Server)와 Base URL, API 키를 입력합니다. 기본 연결은 `http://localhost:8888/v1`, LM Studio 기본값은 `http://localhost:1234`, NNUI Server 기본값은 `http://127.0.0.1:11435`입니다.
 3. **모델 감지** — 연결 카드의 감지 버튼을 누르면 서버가 제공하는 모델 목록과 컨텍스트 길이, Reasoning 지원 여부를 읽어옵니다.
 4. **모델 정리** — `설정 > 모델`에서 표시 여부, 설명, 시스템 프롬프트, 컨텍스트 길이, 이미지 입력 방식을 조정합니다.
 5. **대화 시작** — 입력창 위 모델 선택기에서 모델과 추론 강도를 고르고 메시지를 보냅니다. 선택기 하단의 **기본으로 사용**으로 다음 접속의 초기 선택을 계정별로 저장할 수 있습니다.

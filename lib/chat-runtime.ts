@@ -12,8 +12,9 @@ import { readSsePayload } from "./stream-protocol";
 import { canUseModel, readConfig } from "./config";
 import { readConversation, writeConversation, renameConversation } from "./conversations";
 import { readUploadModelContent } from "./uploads";
-import { chatEndpoint, connectionForModel, connectionHeaders, connectionRoot } from "./connection-drivers";
+import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, nnuiEventsEndpoint } from "./connection-drivers";
 import { createResidencyAdapter } from "./residency-adapter";
+import { nnuiEventProgress, startNnuiEventObserver } from "./nnui-driver";
 import { modelResidency } from "./residency-runtime";
 import { progressFetch, SERVER_RESPONSE_TIMEOUT_MS, withSlowProgress } from "./chat-progress";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
@@ -247,18 +248,27 @@ async function materializeImageFiles(body: Record<string, unknown>) {
   return { ...body, messages:converted };
 }
 
-async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false, threshold?: number, baseInput?: number, chargeModelId?: string) {
+async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false, threshold?: number, baseInput?: number, chargeModelId?: string, nnui?: { eventsUrl: string; sessionId: string; model: string }) {
   const turnController = new AbortController();
   const signal = AbortSignal.any([job.controller.signal, turnController.signal]);
+  const eventController = new AbortController();
+  const events = nnui ? startNnuiEventObserver(nnui.eventsUrl, headers, AbortSignal.any([job.controller.signal, eventController.signal]), event => {
+    if (event.type !== "request.prefill.progress" || event.model !== nnui.model || event.session_id !== nnui.sessionId) return;
+    const progress = nnuiEventProgress(event); if (progress) setWaitProgress(job, progress.phase, progress.progress);
+  }) : undefined;
+  await events?.ready;
   setWaitPhase(job, "preparing-response");
-  const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal }) : undefined;
-  const httpBody = nativeResponse ? body : await materializeImageFiles(body);
-  const response = nativeResponse || await progressFetch(String(body._endpoint), {
-    method: "POST", headers, signal,
-    body: JSON.stringify(Object.fromEntries(Object.entries(httpBody).filter(([key]) => key !== "_endpoint")), (key, value) => key === "_neural_context_tokens" ? undefined : value),
-  }, phase => setWaitPhase(job, phase), "preparing-response");
-  if (!response.ok) throw new Error((await response.text()) || `Model server responded with ${response.status}`);
-  if (!response.body) throw new Error("The model server returned no response stream.");
+  let response: Response;
+  try {
+    const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal }) : undefined;
+    const httpBody = nativeResponse ? body : await materializeImageFiles(body);
+    response = nativeResponse || await progressFetch(String(body._endpoint), {
+      method: "POST", headers, signal,
+      body: JSON.stringify(Object.fromEntries(Object.entries(httpBody).filter(([key]) => key !== "_endpoint")), (key, value) => key === "_neural_context_tokens" ? undefined : value),
+    }, phase => setWaitPhase(job, phase), "preparing-response");
+    if (!response.ok) throw new Error((await response.text()) || `Model server responded with ${response.status}`);
+    if (!response.body) throw new Error("The model server returned no response stream.");
+  } catch (error) { eventController.abort(); void events?.done; throw error; }
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
   const calls = new Map<number, ToolCall>(); let content = ""; let reasoning = ""; let usage: Record<string, number | undefined> = {};
   let visibleStarted: number | undefined; let visibleEnded: number | undefined; let reasoningStarted: number | undefined; let reasoningEnded: number | undefined;
@@ -330,6 +340,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     if (chargeModelId && sawPayload) recordTokenUsage(job.userId, chargeModelId, chargedUsage.inputTokens, chargedUsage.outputTokens);
     throw error;
   } finally {
+    eventController.abort(); void events?.done;
     if (chargeModelId) clearLiveTokenUsage(job.userId, job.message.id);
     setWaitPhase(job, undefined);
     await reader.cancel().catch(() => undefined); reader.releaseLock();
@@ -480,7 +491,7 @@ async function run(job: ChatJob) {
     tools.push(...mcpTools.definitions);
     if (enabled.storageAccess) tools.push(storageAccessToolDefinition());
     const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
-    const harnessContext = { config, model, userId: job.userId, signal: job.controller.signal, onPhase: (phase: ChatWaitPhase) => setWaitPhase(job, phase) };
+    const harnessContext = { config, model, userId: job.userId, sessionId: job.input.conversationId, signal: job.controller.signal, onPhase: (phase: ChatWaitPhase) => setWaitPhase(job, phase) };
     if (enabled.hostComputer) tools.push(hostComputerToolDefinition());
     const hostLocale = job.input.clientContext?.language === "ko" || job.input.clientContext?.locale?.toLowerCase().startsWith("ko") ? "ko" : "en";
     const hostPolicy: HostExecutionPolicy = {
@@ -522,8 +533,9 @@ async function run(job: ChatJob) {
     if (compactedBeforeSending || messages.length !== messageCountBeforePreparation) { measuredInput = 0; if (compactedBeforeSending) broadcast(job, true); }
     let measuredEstimate = measuredInput > 0 ? estimateTokens(messages) + estimateTokens(tools) : undefined;
     job.message.contextTokens = estimateTokens(messages); broadcast(job, true);
-    const headers = connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "");
-    const progressEnabled = connection.driver === "lmstudio" || config.experimental?.openAIProgress === true;
+    const sessionId = job.input.conversationId;
+    const headers = chatHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "", sessionId);
+    const progressEnabled = connection.driver === "lmstudio" || connection.driver === "nnui" || config.experimental?.openAIProgress === true;
     let nativeServer = connection.driver === "lmstudio";
     if (!nativeServer && progressEnabled) {
       try {
@@ -536,7 +548,8 @@ async function run(job: ChatJob) {
     const limits = sameServer.map(item => item.maxResidentModels || 0).filter(limit => limit > 0);
     const limit = limits.length ? Math.min(...limits) : 0;
     const policy = sameServer.some(item => item.modelWaitPolicy === "serial") ? "serial" : "capacity";
-    const adapter = config.preferences.onDemand || limit > 0 || nativeServer ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase), fetch, nativeServer && progressEnabled ? progress => setWaitProgress(job, "loading-model", progress) : undefined) : undefined;
+    const managedServer = nativeServer || connection.driver === "nnui";
+    const adapter = config.preferences.onDemand || limit > 0 || managedServer ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase), fetch, managedServer && progressEnabled ? progress => setWaitProgress(job, "loading-model", progress) : undefined) : undefined;
     const acquireModel = () => modelResidency.acquire({ server: serverKey, model: model.sourceModel, limit, policy, adapter, signal: job.controller.signal, onPhase: phase => setWaitPhase(job, phase) });
     releaseModel = await acquireModel();
     let compactionResumes = 0;
@@ -586,7 +599,7 @@ async function run(job: ChatJob) {
       try {
         const configuredThreshold = contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined;
         const streamThreshold = configuredThreshold && projectedInput >= configuredThreshold && contextWindow ? Math.floor(contextWindow * .95) : configuredThreshold;
-        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled, harness.contextMode === "compacting" ? streamThreshold : undefined, projectedInput, chargeModelId);
+        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled, harness.contextMode === "compacting" ? streamThreshold : undefined, projectedInput, chargeModelId, connection.driver === "nnui" ? { eventsUrl: nnuiEventsEndpoint(connection.baseUrl), sessionId, model: model.sourceModel } : undefined);
       } catch (error) {
         const overflow = contextOverflowDetails(error);
         if (!overflow) throw error;

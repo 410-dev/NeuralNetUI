@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { db } from "./database";
 import { DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rollingMessages, resumePrompt } from "./harness";
 import { canUseModel } from "./config";
-import { connectionForModel, connectionHeaders, connectionRoot, chatEndpoint } from "./connection-drivers";
+import { connectionForModel, chatHeaders, connectionRoot, chatEndpoint } from "./connection-drivers";
 import { effectiveContextWindowTokens } from "./model-context";
 import { reasoningEffort } from "./model-edits";
 import { modelResidency } from "./residency-runtime";
@@ -12,7 +12,7 @@ import type { AppConfig, ModelConfig, ChatWaitPhase } from "./types";
 import { recordTokenUsage } from "./plans";
 
 type Message = { role: string; content: unknown; tool_calls?: unknown };
-type Context = { config: AppConfig; model: ModelConfig; userId: string; signal: AbortSignal; onPhase: (phase: ChatWaitPhase) => void };
+type Context = { config: AppConfig; model: ModelConfig; userId: string; sessionId?: string; signal: AbortSignal; onPhase: (phase: ChatWaitPhase) => void };
 
 function taskModel(ctx: Context, id: string) {
   const model = id ? ctx.config.models.find(m => m.id === id) : ctx.config.models.find(m => !m.isAlias && (m.sourceModel === ctx.model.sourceModel || m.id === ctx.model.sourceModel) && connectionForModel(ctx.config.connections, m)?.id === connectionForModel(ctx.config.connections, ctx.model)?.id) || ctx.model;
@@ -57,7 +57,7 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
   const chargeModelId=model.isAlias?(ctx.config.models.find(item=>!item.isAlias&&(item.id===model.sourceModel||item.sourceModel===model.sourceModel))?.id||model.sourceModel):model.id;
   const connection = connectionForModel(ctx.config.connections, model);
   if (!connection) throw new Error("Harness connection is unavailable.");
-  const headers = connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "");
+  const headers = chatHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "", ctx.sessionId ? `${ctx.sessionId}:harness` : undefined);
   const server = connectionRoot(connection.baseUrl);
   const peers = ctx.config.connections.filter(c => connectionRoot(c.baseUrl) === server);
   const limits = peers.map(c => c.maxResidentModels || 0).filter(Boolean);
@@ -65,7 +65,7 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
   const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(120_000)]);
   const release = await modelResidency.acquire({ server, model: model.sourceModel, limit,
     policy: peers.some(c => c.modelWaitPolicy === "serial") ? "serial" : "capacity", signal, onPhase: ctx.onPhase,
-    adapter: ctx.config.preferences.onDemand || limit ? createResidencyAdapter(connection, headers, model.contextWindowTokens, ctx.onPhase) : undefined });
+    adapter: ctx.config.preferences.onDemand || limit || connection.driver === "lmstudio" || connection.driver === "nnui" ? createResidencyAdapter(connection, headers, model.contextWindowTokens, ctx.onPhase) : undefined });
   try {
     ctx.onPhase(prompt === (ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS).compactPrompt ? "compacting-context" : "preparing-response");
     const effort = reasoningEffort(model, { id: "harness", name: "Harness", kind: "builtin", effort: effortValue === "off" && model.reasoningEfforts?.includes("none") ? "none" : effortValue });

@@ -3,7 +3,7 @@ import { DEFAULT_HARNESS_SETTINGS } from "./harness";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import type { AppConfig, ConnectionConfig, ExperimentalFeatures, ModelConfig, PublicConfig, ReasoningPreset, ToolSettings } from "./types";
+import type { AppConfig, ConnectionConfig, ConnectionDriver, ExperimentalFeatures, ModelConfig, PublicConfig, ReasoningPreset, ToolSettings } from "./types";
 import type { AuthUser } from "./auth";
 import { overwriteUserPreference, updateUserPreferences } from "./auth";
 import { planModelWeights } from "./plans";
@@ -19,7 +19,7 @@ import { HOST_PERMISSION_KEYS, hostPermissionsFromRiskLevels, type HostPermissio
 
 const presetSchema = z.object({ id: z.string().min(1), name: z.string().min(1), kind: z.enum(["builtin", "custom"]), effort: z.string().optional(), systemPrompt: z.string().optional(), systemPromptMode: z.enum(["replace", "prepend", "append"]).default("append"), ownerId: z.string().optional() });
 const modelSchema = z.object({ id: z.string().min(1), name: z.string().min(1), sourceModel: z.string().min(1), description: z.string().optional(), systemPrompt: z.string().optional(), isAlias: z.boolean(), visible: z.boolean().default(true), reasoningSupported: z.boolean(), reasoningEfforts: z.array(z.string()).optional(), reasoningPresets: z.array(presetSchema), contextWindowTokens: z.number().int().positive().optional(), apiContextWindowTokens: z.number().int().positive().optional(), visionImageMode: z.enum(["original", "max-resolution"]).default("original"), visionMaxEdgePixels: z.number().int().min(128).max(8192).default(1024), ownerId: z.string().optional(), isPublic: z.boolean().optional(), connectionId: z.string().min(1).optional() });
-const connectionSchema = z.object({ id: z.string().min(1), name: z.string().min(1), driver: z.enum(["openai", "lmstudio"]), baseUrl: z.string().url(), apiKey: z.string(), clearApiKey: z.boolean().optional(), disabled: z.boolean().optional(), maxResidentModels: z.number().int().min(0).max(128).default(0), modelWaitPolicy: z.enum(["capacity", "serial"]).default("capacity"), models: z.array(modelSchema).default([]) });
+const connectionSchema = z.object({ id: z.string().min(1), name: z.string().min(1), driver: z.enum(["openai", "lmstudio", "nnui"]), baseUrl: z.string().url(), apiKey: z.string(), clearApiKey: z.boolean().optional(), disabled: z.boolean().optional(), maxResidentModels: z.number().int().min(0).max(128).default(0), modelWaitPolicy: z.enum(["capacity", "serial"]).default("capacity"), models: z.array(modelSchema).default([]) });
 
 export const DEFAULT_EXPERIMENTAL: Required<ExperimentalFeatures> = { browserTool: false, openAIProgress: false, hostComputerTool: false };
 export const DEFAULT_TOOL_SETTINGS: ToolSettings = { maxToolRounds: 8, maxBrowserTabs: 8, maxMultipleChoiceQuestions: 3, maxAttachmentsPerMessage: 12, textDownloadLimitMb: 1, textCharacterLimit: 24_000, imageDownloadLimitMb: 10, imageUploadLimitMb: 20, pdfSizeLimitMb: 25, pdfPageLimit: 100, pdfTextCharacterLimit: 100_000, pdfVisionPageLimit: 6, pdfProcessingTimeoutSeconds: 30, temporaryFileTtlMinutes: 60, orphanUploadTtlHours: 24 };
@@ -180,12 +180,13 @@ export async function applyGlobalDefault(kind: "model" | "reasoning", id: string
   return saved;
 }
 
-export function inferModel(input: string | Record<string, unknown>, driver: "openai" | "lmstudio" = "openai", connectionId?: string): ModelConfig {
+export function inferModel(input: string | Record<string, unknown>, driver: ConnectionDriver = "openai", connectionId?: string): ModelConfig {
   const record = typeof input === "string" ? {} : input; const modelId = typeof input === "string" ? input : String(record.key || record.id || ""); const id = modelId.toLowerCase();
   const knownQwen = /qwen3\.8/i.test(modelId);
   const capability = inferReasoning(record, modelId, driver);
   const knownGemma = /gemma4.*31b/i.test(modelId);
   const friendlyName = typeof record.display_name === "string" ? record.display_name : knownQwen ? "Qwen3.8 27B" : knownGemma ? "Gemma 4 31B" : modelId.split(/[\/_-]/).filter(Boolean).slice(-2).join(" ").replace(/\b\w/g, (c) => c.toUpperCase());
   const sourceModel = driver === "openai" && knownQwen && /esatapedico/i.test(modelId) ? `${modelId}:Qwen3.8-27B-NVFP4-MTP-HIGH` : driver === "openai" && knownGemma && record.quant ? `${modelId}:${String(record.quant)}` : modelId;
-  return normalizeReasoning({ id: modelId, name: friendlyName, sourceModel, description: `Language model from ${driver === "lmstudio" ? "LM Studio" : "OpenAI API"}`, isAlias: false, visible: true, ...capability, apiContextWindowTokens: inferApiContextWindowTokens(record), visionImageMode: "original", visionMaxEdgePixels: 1024, connectionId, reasoningPresets: [] });
+  const provider = driver === "lmstudio" ? "LM Studio" : driver === "nnui" ? "NNUI Server" : "OpenAI API";
+  return normalizeReasoning({ id: modelId, name: friendlyName, sourceModel, description: `Language model from ${provider}`, isAlias: false, visible: true, ...capability, apiContextWindowTokens: inferApiContextWindowTokens(record), visionImageMode: "original", visionMaxEdgePixels: 1024, connectionId, reasoningPresets: [] });
 }
