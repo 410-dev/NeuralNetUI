@@ -5,6 +5,7 @@ export type ReasoningKind = "builtin" | "custom";
 export type SystemPromptMode = "replace" | "prepend" | "append";
 export type Locale = "en" | "ko";
 export type ConnectionDriver = "openai" | "lmstudio";
+export type McpAuthType = "oauth" | "api_key" | "none";
 export type ModelWaitPolicy = "capacity" | "serial";
 export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response" | "processing-prompt" | "compacting-context";
 export type AccentPaletteId = "blue" | "violet" | "teal" | "amber" | "rose" | "graphite" | "custom";
@@ -125,7 +126,27 @@ export interface UsagePlan {
   tokenLimits: PlanTokenLimit[];
   storageQuotaBytes: number;
   trashQuotaBytes: number;
+  mcpEnabled: boolean;
+  maxMcpConnections: number;
   userCount?: number;
+}
+
+export interface McpConnection {
+  id: string;
+  name: string;
+  description?: string;
+  url: string;
+  authType: McpAuthType;
+  hasCredential: boolean;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface McpEntitlement {
+  enabled: boolean;
+  maxConnections: number;
+  usedConnections: number;
 }
 
 export interface ResetCredit {
@@ -305,6 +326,7 @@ export interface EnabledTools {
   location: boolean;
   multipleChoice: boolean;
   hostComputer: boolean;
+  mcpConnectionIds: string[];
 }
 
 export interface StoredAttachment {
@@ -368,4 +390,7 @@ export type PublicConfig = Omit<AppConfig, "connections"> & {
   hostComputerAvailable?: boolean;
   /** Present while weight badges are enabled: the account's plan weights other than 1, keyed by picker model id. */
   modelWeights?: Record<string, number>;
+  /** Runtime-only, user-owned MCP records. Credentials are never included. */
+  mcpConnections: McpConnection[];
+  mcpEntitlement: McpEntitlement;
 };

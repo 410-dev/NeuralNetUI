@@ -43,6 +43,7 @@
 | `lib/connection-drivers.ts` / `driver-capabilities.ts` | 드라이버별 동작과 지원 범위 |
 | `lib/model-residency.ts` / `residency-adapter.ts` | 모델 상주 admission, 축출 |
 | `lib/web-tools.ts` | 검색·페이지 방문·시간·위치·선택형 질문 도구 |
+| `lib/mcp.ts` / `mcp-utils.ts` | 사용자별 MCP CRUD, Streamable HTTP 실행, 도구 네임스페이스, 네트워크 경계 |
 | `lib/browser-tool.ts` | Chromium 세션, 탭, 스냅샷, 스크린샷 |
 | `lib/storage-tool.ts` / `uploads.ts` / `storage-chunk-upload.ts` | 개인 저장소와 업로드 |
 | `lib/host-computer-tool.ts` / `host-permissions.ts` | 호스트 컴퓨터 도구와 권한 매트릭스 |
@@ -95,6 +96,9 @@
 | `/api/config` | GET, PUT | 권한에 맞게 걸러진 설정 읽기·쓰기 |
 | `/api/config/defaults` | PUT | 워크스페이스 기본값 한 키를 모든 계정에 적용(관리자) |
 | `/api/models/detect` | POST | 연결의 모델 목록 감지 |
+| `/api/mcp-connections` | GET, POST | 현재 사용자의 MCP 목록 조회·등록 |
+| `/api/mcp-connections/[id]` | PUT, DELETE | 소유 MCP 수정·삭제 |
+| `/api/mcp-connections/test` | POST | 저장 전후 MCP 연결·도구 목록 테스트 |
 | `/api/models/context` | POST | 모델 컨텍스트 길이 조회 |
 | `/api/inference/unload` | POST | 로드된 모델 언로드(관리자) |
 

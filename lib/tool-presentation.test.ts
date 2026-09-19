@@ -9,6 +9,7 @@ test("known tool names are localized and unknown names remain readable", () => {
   assert.equal(getToolDisplayName("browser", "ko"), "브라우저");
   assert.equal(getToolDisplayName("host_computer", "ko"), "호스트 컴퓨터");
   assert.equal(getToolDisplayName("custom_data_lookup", "en"), "Custom data lookup");
+  assert.equal(getToolDisplayName("mcp_a1b2c3d4_search_docs", "en"), "MCP search docs");
 });
 
 test("tool status labels use active, completed, and failure wording", () => {

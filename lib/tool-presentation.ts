@@ -16,7 +16,8 @@ const TOOL_NAMES: Record<string, Record<Locale, string>> = {
 export function getToolDisplayName(name: string, locale: Locale) {
   const known = TOOL_NAMES[name]?.[locale];
   if (known) return known;
-  const readable = name.replaceAll("_", " ").trim() || (locale === "ko" ? "알 수 없는" : "Unknown");
+  const mcpName = name.match(/^mcp_[a-f0-9]{8}_(.+)$/i)?.[1];
+  const readable = (mcpName ? `MCP ${mcpName}` : name).replaceAll("_", " ").trim() || (locale === "ko" ? "알 수 없는" : "Unknown");
   return locale === "en" ? readable.charAt(0).toUpperCase() + readable.slice(1) : readable;
 }
 

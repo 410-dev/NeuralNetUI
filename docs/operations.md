@@ -32,6 +32,7 @@ node scripts/test-audit-integration.mjs
 | `test-compaction-integration.mjs` | 컨텍스트 압축과 재개 |
 | `test-browser-view-integration.mjs` | 실시간 브라우저 분할 화면 |
 | `test-google-browser-smoke.mjs` | 브라우저 도구 호환성 스모크 |
+| `test-mcp-integration.mjs` | MCP Streamable HTTP 인증·도구 발견, 자격 증명 비노출, 플랜 한도·비활성화, 암호화 백업 복원 |
 | `test-beta*-integration.mjs` | 해당 베타 릴리스의 중점 변경 |
 
 ## 백업과 복원
@@ -62,6 +63,8 @@ SQLite와 로컬 업로드 파일을 쓰므로 **한 데이터 디렉터리를 �
 | --- | --- |
 | 브라우저 도구가 메뉴에 없음 | `설정 > 실험실`에서 브라우저 도구를 켰는지 |
 | 브라우저 도구 실행 실패 | Chrome/Edge 설치 여부, `npm run browser:install`, `NEURAL_CHAT_BROWSER_EXECUTABLE` |
+| MCP가 도구 메뉴에 없음 | 현재 플랜의 MCP 사용 여부, 연결의 사용 스위치, 채팅 도구 메뉴의 MCP 선택 상태 |
+| MCP 연결 테스트 실패 | Streamable HTTP URL인지, Bearer 토큰이 유효한지, 일반 계정에서 사설망 주소를 쓰지 않았는지 |
 | 인터넷 검색 실패 | Python과 `requirements.txt` 설치 여부, `NEURAL_CHAT_PYTHON` |
 | 응답이 도중에 잘림 | 하네스의 최대 출력 토큰. `0`이면 컨텍스트 창 전체를 사용 |
 | 컨텍스트 초과 오류 | 컨텍스트 모드를 `compacting`으로, 임계값을 낮춤. 모델 컨텍스트 길이 설정 확인 |

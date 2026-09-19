@@ -10,3 +10,9 @@ test("saved tool switches override defaults and ignore unknown values", () => {
   assert.equal(tools.pageVisit, false);
   assert.equal("unknown" in tools, false);
 });
+
+test("MCP selections are deduplicated, bounded, and reject malformed values", () => {
+  const tools = normalizeEnabledTools({ mcpConnectionIds: ["one", "one", 4, "", "two"] });
+  assert.deepEqual(tools.mcpConnectionIds, ["one", "two"]);
+  assert.deepEqual(normalizeEnabledTools({ mcpConnectionIds: "one" }).mcpConnectionIds, []);
+});

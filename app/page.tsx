@@ -12,6 +12,7 @@ import { ImageLightbox } from "./image-lightbox";
 import { StorageUsageMeter } from "./storage-usage-meter";
 import { AccountBackupSettings, DataManagementSettings } from "./backup-settings";
 import { PlanSettings } from "./plan-settings";
+import { McpSettings } from "./mcp-settings";
 import { UsageDonut } from "./usage-donut";
 import { USAGE_REFRESH_EVENT } from "@/lib/usage-popover";
 import { formatModelWeight } from "@/lib/plan-usage";
@@ -31,9 +32,9 @@ import {
   FileText, GitBranch, GripVertical, ImagePlus, KeyRound, LoaderCircle, Menu, MessageSquarePlus, Pencil, Plus, RefreshCw,
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
   LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload, HardDrive, ShieldAlert,
-  Palette, PanelLeftClose, PanelLeftOpen, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge,
+  Palette, PanelLeftClose, PanelLeftOpen, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge, Cable,
 } from "lucide-react";
-import { FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -42,7 +43,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type {
   ChatWaitPhase, ChatBranch, ConnectionConfig, Conversation, ConversationSummary, MessageStep, ModelConfig, PublicConfig,
-  ReasoningPreset, StoredAttachment, StoredMessage, StorageFile, Locale, AccountInfo, UserSummary, EnabledTools, ToolEvent, MultipleChoiceQuestion, ToolSettings, AccentPaletteId, AppearancePreferences, LoginAppearance, ConnectionDriver,
+  ReasoningPreset, StoredAttachment, StoredMessage, StorageFile, Locale, AccountInfo, UserSummary, EnabledTools, ToolEvent, MultipleChoiceQuestion, ToolSettings, AccentPaletteId, AppearancePreferences, LoginAppearance, ConnectionDriver, McpConnection,
 } from "@/lib/types";
 import { advertisedContextWindowTokens, effectiveContextWindowTokens } from "@/lib/model-context";
 import { createClientId } from "@/lib/client-id";
@@ -64,7 +65,7 @@ import { moveItemById, nudgeItemById } from "@/lib/ordered-list";
 import { duplicateConversation } from "@/lib/conversation-duplicate";
 import { branchesHoldingRevision, deleteMessageEverywhere, deleteMessageFromBranch, revisionGroupOf } from "@/lib/branch-deletion";
 
-type SettingsTab = "general" | "appearance" | "connection" | "tools" | "experimental" | "models" | "reasoning" | "users" | "plans" | "data" | "account";
+type SettingsTab = "general" | "appearance" | "connection" | "mcp" | "tools" | "experimental" | "models" | "reasoning" | "users" | "plans" | "data" | "account";
 type AuthStatus = { setupRequired: boolean; authenticated: boolean; user: AccountInfo | null; loginAccent?: string };
 type MessageRevision = { messageId: string; branchId: string; updatedAt: string };
 type QueuedPrompt = {
@@ -87,11 +88,14 @@ const emptyConfig: PublicConfig = {
   userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024, defaultTrashQuotaBytes: 1024 * 1024 * 1024, trashRetentionDays: 60 },
   toolSettings: { maxToolRounds: 8, maxBrowserTabs: 8, maxMultipleChoiceQuestions: 3, maxAttachmentsPerMessage: 12, textDownloadLimitMb: 1, textCharacterLimit: 24_000, imageDownloadLimitMb: 10, imageUploadLimitMb: 20, pdfSizeLimitMb: 25, pdfPageLimit: 100, pdfTextCharacterLimit: 100_000, pdfVisionPageLimit: 6, pdfProcessingTimeoutSeconds: 30, temporaryFileTtlMinutes: 60, orphanUploadTtlHours: 24 },
   experimental: { browserTool: false, hostComputerTool: false },
+  mcpConnections: [],
+  mcpEntitlement: { enabled: false, maxConnections: 0, usedConnections: 0 },
   models: [],
 };
 const uid = createClientId;
 const now = () => new Date().toISOString();
 const titleFrom = (text: string) => text.trim().split(/\s+/).slice(0, 7).join(" ").slice(0, 58) || "New chat";
+const McpToolsContext = createContext<{ connections: McpConnection[]; selectedIds: string[]; setSelectedIds: (ids: string[]) => void }>({ connections: [], selectedIds: [], setSelectedIds: () => undefined });
 
 const translations = {
   en: {
@@ -354,10 +358,11 @@ export default function Home() {
   const [currentTimeEnabled, setCurrentTimeEnabled] = useState(true);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [multipleChoiceEnabled, setMultipleChoiceEnabled] = useState(true);
+  const [mcpConnectionIds, setMcpConnectionIds] = useState<string[]>([]);
   const pendingToolsRef = useRef<Partial<EnabledTools>>({});
   const toolSaveTimerRef = useRef<number | undefined>(undefined);
   /** Composer tool switches are account preferences: apply locally, then save the batched change. */
-  const persistedTool = (key: keyof EnabledTools, set: (value: boolean) => void) => (value: boolean) => {
+  const persistedTool = (key: Exclude<keyof EnabledTools,"mcpConnectionIds">, set: (value: boolean) => void) => (value: boolean) => {
     set(value);
     pendingToolsRef.current = { ...pendingToolsRef.current, [key]: value };
     window.clearTimeout(toolSaveTimerRef.current);
@@ -365,6 +370,13 @@ export default function Home() {
       const patch = pendingToolsRef.current; pendingToolsRef.current = {};
       void fetch("/api/preferences/tools", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }).catch(() => undefined);
     }, 250);
+  };
+  const persistedMcpConnections = (ids: string[]) => {
+    const next = [...new Set(ids)].filter(id => config.mcpConnections.some(connection => connection.id === id && connection.enabled));
+    setMcpConnectionIds(next);
+    pendingToolsRef.current = { ...pendingToolsRef.current, mcpConnectionIds: next };
+    window.clearTimeout(toolSaveTimerRef.current);
+    toolSaveTimerRef.current = window.setTimeout(() => { const patch = pendingToolsRef.current; pendingToolsRef.current = {}; void fetch("/api/preferences/tools", { method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch) }).catch(()=>undefined); },250);
   };
   const [renderedMessageCount, setRenderedMessageCount] = useState(60);
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
@@ -415,7 +427,7 @@ export default function Home() {
         setConfig(next); setSendReasoning(next.preferences.sendReasoningToModel);
         const tools = { ...DEFAULT_ENABLED_TOOLS, ...next.preferences.enabledTools };
         setInternetSearchEnabled(tools.internetSearch); setPageVisitEnabled(tools.pageVisit); setBrowserEnabled(tools.browser); setHostComputerEnabled(tools.hostComputer);
-        setStorageAccessEnabled(tools.storageAccess); setCurrentTimeEnabled(tools.currentTime); setLocationEnabled(tools.location); setMultipleChoiceEnabled(tools.multipleChoice);
+        setStorageAccessEnabled(tools.storageAccess); setCurrentTimeEnabled(tools.currentTime); setLocationEnabled(tools.location); setMultipleChoiceEnabled(tools.multipleChoice); setMcpConnectionIds(next.mcpEntitlement.enabled?tools.mcpConnectionIds.filter(id=>next.mcpConnections.some(connection=>connection.id===id&&connection.enabled)):[]);
         setHistories(stored.conversations || []);
         const visible = next.models.filter((model) => model.visible !== false);
         const first = visible.find((model) => model.id === next.preferences.defaultModelId) || visible[0];
@@ -929,7 +941,7 @@ export default function Home() {
       const response = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversationId: working.id, branchId, assistantMessageId: placeholder.id, revisionGroupId, modelId: working.modelId, reasoningPresetId: working.reasoningPresetId, sendReasoning: options?.sendReasoning ?? sendReasoning,
-          tools: options?.tools || { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserToolAvailable && browserEnabled, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled },
+          tools: options?.tools || { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserToolAvailable && browserEnabled, storageAccess:storageAccessEnabled, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled, mcpConnectionIds },
           clientContext: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: navigator.language, language: config.preferences.language },
           messages: requestMessages.map((message) => ({ role: message.role, content: message.content, reasoning_content: message.reasoning, toolEvents: message.toolEvents, attachments: message.attachments?.map(({ id }) => ({ id })) })) }),
       });
@@ -979,7 +991,7 @@ export default function Home() {
       if (!requestModel) { setError(c.noModel); return; }
       if (uploadingImages) return;
       const queued: QueuedPrompt = { id: uid("user"), content: text, attachments: draftAttachments, modelId: requestModel.id, reasoningPresetId: requestPreset?.id, sendReasoning,
-        tools: { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserEnabled, storageAccess:storageAccessEnabled, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled } };
+        tools: { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserEnabled, storageAccess:storageAccessEnabled, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled, mcpConnectionIds } };
       replaceQueue([...queuedPromptsRef.current, queued]); setDraft(""); setDraftAttachments([]); return;
     }
     if (!hasMessage || uploadingImages) return;
@@ -987,7 +999,7 @@ export default function Home() {
     const attachments = draftAttachments;
     const userMessage: StoredMessage = { id: uid("user"), role: "user", content: text, attachments, createdAt: now() }; setDraft(""); setDraftAttachments([]);
     const options: CompletionOptions = { modelId: requestModel.id, reasoningPresetId: requestPreset?.id, sendReasoning,
-      tools: { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserEnabled, storageAccess:storageAccessEnabled, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled } };
+      tools: { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserEnabled, storageAccess:storageAccessEnabled, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled, mcpConnectionIds } };
     if (!conversation) {
       const next = createConversation(userMessage, requestModel, requestPreset); await runCompletionAndDrain(next, next.activeBranchId, [userMessage], true, undefined, options); return;
     }
@@ -1129,6 +1141,7 @@ export default function Home() {
     requestAnimationFrame(() => { if (element) element.scrollTop += element.scrollHeight - previousHeight; });
   }
   return (
+    <McpToolsContext.Provider value={{connections:config.mcpEntitlement.enabled?config.mcpConnections.filter(connection=>connection.enabled):[],selectedIds:mcpConnectionIds,setSelectedIds:persistedMcpConnections}}>
     <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""} ${browserEnabled && browserViewOpen ? "browser-split-open" : ""}`}>
       <button className="mobile-menu" aria-label={locale === "ko" ? "메뉴 열기" : "Open menu"} onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
       <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-visible" : ""}`}>
@@ -1194,10 +1207,11 @@ export default function Home() {
         onDeleted={()=>void managedChatsChanged()}
       />}
       {renameTarget && <TextDialog ko={locale === "ko"} title={locale === "ko" ? "채팅 제목 변경" : "Rename chat"} value={renameTarget.title} saveLabel={c.saveEdit} cancelLabel={c.cancel} secondary={{ label: c.duplicateChat, icon: <Copy size={15} />, busy: duplicating, onAction: (title) => { const target = renameTarget; void duplicateHistory(target.id, title); } }} onClose={() => setRenameTarget(null)} onSave={title => { const target = renameTarget; void (async () => { try { const response = await fetch(`/api/conversations/${target.id}`, {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({title})}); if (!response.ok) throw new Error(locale === "ko" ? "제목 변경 실패" : "Rename failed"); setConversation(current => current?.id === target.id ? {...current,title} : current); await refreshHistories(); setRenameTarget(null); } catch (caught) { setError(caught instanceof Error ? caught.message : "Rename failed"); setRenameTarget(null); } })(); }} />}
-      {settingsOpen && <SettingsPanel initial={config} onAccentPreview={setAccentPreview} onClose={() => { setSettingsOpen(false); setAccentPreview(""); }} onLogout={async () => { resetWorkspaceForAuthChange(); await fetch("/api/auth/logout", { method: "POST" }); setSettingsOpen(false); setAuth(await fetch("/api/auth/status").then((response) => response.json()).catch(() => ({ setupRequired: false, authenticated: false, user: null }))); }} onSaved={(next) => { setConfig(next); setSendReasoning(next.preferences.sendReasoningToModel); const visible = next.models.filter((item) => item.visible !== false); const model = visible.find((item) => item.id === selectedModelIdRef.current) || visible.find((item) => item.id === next.preferences.defaultModelId) || visible[0]; const preset = model?.reasoningPresets.find((item) => item.id === selectedPresetId) || model?.reasoningPresets.find((item) => item.id === next.preferences.defaultReasoningPresetId) || model?.reasoningPresets[0]; selectedModelIdRef.current = model?.id || ""; setSelectedModelId(model?.id || ""); setSelectedPresetId(preset?.id || ""); }} />}
+      {settingsOpen && <SettingsPanel initial={config} onAccentPreview={setAccentPreview} onClose={() => { setSettingsOpen(false); setAccentPreview(""); }} onLogout={async () => { resetWorkspaceForAuthChange(); await fetch("/api/auth/logout", { method: "POST" }); setSettingsOpen(false); setAuth(await fetch("/api/auth/status").then((response) => response.json()).catch(() => ({ setupRequired: false, authenticated: false, user: null }))); }} onSaved={(next) => { setConfig(next); setMcpConnectionIds(current=>next.mcpEntitlement.enabled?current.filter(id=>next.mcpConnections.some(connection=>connection.id===id&&connection.enabled)):[]); setSendReasoning(next.preferences.sendReasoningToModel); const visible = next.models.filter((item) => item.visible !== false); const model = visible.find((item) => item.id === selectedModelIdRef.current) || visible.find((item) => item.id === next.preferences.defaultModelId) || visible[0]; const preset = model?.reasoningPresets.find((item) => item.id === selectedPresetId) || model?.reasoningPresets.find((item) => item.id === next.preferences.defaultReasoningPresetId) || model?.reasoningPresets[0]; selectedModelIdRef.current = model?.id || ""; setSelectedModelId(model?.id || ""); setSelectedPresetId(preset?.id || ""); }} />}
       {exportOpen && <ExportDialog c={c} conversation={conversation || undefined} initialIncludeReasoning={config.preferences.exportReasoning} onClose={() => setExportOpen(false)} onPreference={(value) => { const next = { ...config, preferences: { ...config.preferences, exportReasoning: value } }; setConfig(next); fetch("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) }); }} />}
       {messageDialog}
     </main>
+    </McpToolsContext.Provider>
   );
 }
 
@@ -1345,6 +1359,7 @@ const MIN_INLINE_DRAFT_WIDTH = 150;
 
 function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextBreakdown: ContextUsage; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; admin: boolean; applyingReasoningDefault: boolean; applyReasoningToEveryone: () => void; sendReasoning: boolean; toggleSendReasoning: (value: boolean) => void; error: string; clearError: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onOpenStorage: () => void; onRemoveAttachment: (attachment: StoredAttachment) => void; internetSearchEnabled: boolean; setInternetSearchEnabled: (value: boolean) => void; pageVisitEnabled: boolean; setPageVisitEnabled: (value: boolean) => void; browserToolAvailable: boolean; browserEnabled: boolean; setBrowserEnabled: (value: boolean) => void; hostComputerToolAvailable: boolean; hostComputerEnabled: boolean; setHostComputerEnabled: (value: boolean) => void; storageAccessEnabled:boolean;setStorageAccessEnabled:(value:boolean)=>void; currentTimeEnabled: boolean; setCurrentTimeEnabled: (value: boolean) => void; locationEnabled: boolean; setLocationEnabled: (value: boolean) => void; multipleChoiceEnabled: boolean; setMultipleChoiceEnabled: (value: boolean) => void; pendingChoice?: ToolEvent; pendingHostApproval?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean> }) {
   const { c, appearance, draft, setDraft, sendMessage, keyDown, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextBreakdown, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, admin, applyingReasoningDefault, applyReasoningToEveryone, sendReasoning, toggleSendReasoning, error, clearError, attachments, maxAttachments, uploadingImages, onFiles, onOpenStorage, onRemoveAttachment, internetSearchEnabled, setInternetSearchEnabled, pageVisitEnabled, setPageVisitEnabled, browserToolAvailable, browserEnabled, setBrowserEnabled, hostComputerToolAvailable, hostComputerEnabled, setHostComputerEnabled, storageAccessEnabled,setStorageAccessEnabled,currentTimeEnabled, setCurrentTimeEnabled, locationEnabled, setLocationEnabled, multipleChoiceEnabled, setMultipleChoiceEnabled, pendingChoice, pendingHostApproval, onChoiceSubmit } = props;
+  const {connections:mcpConnections,selectedIds:mcpConnectionIds,setSelectedIds:setMcpConnectionIds}=useContext(McpToolsContext);
   const fileRef = useRef<HTMLInputElement>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -1369,8 +1384,8 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
   const locale: Locale = c === translations.ko ? "ko" : "en";
   const { mounted: addMenuMounted, closing: addMenuClosing } = usePopoverPresence(addMenuOpen);
   const { mounted: presetMounted, closing: presetClosing } = usePopoverPresence(presetOpen);
-  const activeToolCount = Number(internetSearchEnabled) + Number(pageVisitEnabled) + Number(browserToolAvailable && browserEnabled) + Number(hostComputerToolAvailable && hostComputerEnabled) + Number(storageAccessEnabled) + Number(currentTimeEnabled) + Number(locationEnabled) + Number(multipleChoiceEnabled);
-  const[toolGroups,setToolGroups]=useState<Record<string,boolean>>({internet:true,awareness:true,agent:true,interaction:true});
+  const activeToolCount = Number(internetSearchEnabled) + Number(pageVisitEnabled) + Number(browserToolAvailable && browserEnabled) + Number(hostComputerToolAvailable && hostComputerEnabled) + Number(storageAccessEnabled) + Number(currentTimeEnabled) + Number(locationEnabled) + Number(multipleChoiceEnabled) + mcpConnectionIds.length;
+  const[toolGroups,setToolGroups]=useState<Record<string,boolean>>({internet:true,awareness:true,agent:true,interaction:true,mcp:true});
   const toggleToolGroup=(key:string)=>setToolGroups(current=>({...current,[key]:!current[key]}));
   useEffect(() => {
     const measureShell = () => setShellWidth(formRef.current?.clientWidth || 0);
@@ -1417,6 +1432,7 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
             <section className="composer-tool-group"><button type="button" aria-expanded={toolGroups.awareness} onClick={()=>toggleToolGroup("awareness")}><span>{c.awarenessGroup}</span><ChevronDown size={14}/></button>{toolGroups.awareness&&<div><div className="tool-toggle-row"><Clock3 size={17} /><span><strong>{c.currentTime}</strong><small>{c.currentTimeDesc}</small></span><button type="button" role="switch" aria-label={c.currentTime} aria-checked={currentTimeEnabled} className={`toggle ${currentTimeEnabled ? "on" : ""}`} onClick={() => setCurrentTimeEnabled(!currentTimeEnabled)}><i /></button></div><div className="tool-toggle-row"><MapPin size={17} /><span><strong>{c.locationTool}</strong><small>{c.locationToolDesc}</small></span><button type="button" role="switch" aria-label={c.locationTool} aria-checked={locationEnabled} className={`toggle ${locationEnabled ? "on" : ""}`} onClick={() => setLocationEnabled(!locationEnabled)}><i /></button></div></div>}</section>
             {(browserToolAvailable || hostComputerToolAvailable) && <section className="composer-tool-group"><button type="button" aria-expanded={toolGroups.agent} onClick={()=>toggleToolGroup("agent")}><span>{c.agentGroup}</span><ChevronDown size={14}/></button>{toolGroups.agent&&<div>{browserToolAvailable && <div className="tool-toggle-row"><Monitor size={17} /><span><strong>{c.browserTool}</strong><small>{c.browserToolDesc}</small></span><button type="button" role="switch" aria-label={c.browserTool} aria-checked={browserEnabled} className={`toggle ${browserEnabled ? "on" : ""}`} onClick={() => setBrowserEnabled(!browserEnabled)}><i /></button></div>}{hostComputerToolAvailable && <div className="tool-toggle-row"><HardDrive size={17} /><span><strong>{c.hostComputerTool}</strong><small>{c.hostComputerToolDesc}</small></span><button type="button" role="switch" aria-label={c.hostComputerTool} aria-checked={hostComputerEnabled} className={`toggle ${hostComputerEnabled ? "on" : ""}`} onClick={() => setHostComputerEnabled(!hostComputerEnabled)}><i /></button></div>}</div>}</section>}
             <section className="composer-tool-group"><button type="button" aria-expanded={toolGroups.interaction} onClick={()=>toggleToolGroup("interaction")}><span>{c.interactionGroup}</span><ChevronDown size={14}/></button>{toolGroups.interaction&&<div><div className="tool-toggle-row"><ListChecks size={17} /><span><strong>{c.multipleChoice}</strong><small>{c.multipleChoiceDesc}</small></span><button type="button" role="switch" aria-label={c.multipleChoice} aria-checked={multipleChoiceEnabled} className={`toggle ${multipleChoiceEnabled ? "on" : ""}`} onClick={() => setMultipleChoiceEnabled(!multipleChoiceEnabled)}><i /></button></div></div>}</section>
+            {mcpConnections.length>0&&<section className="composer-tool-group mcp-tool-group"><button type="button" aria-expanded={toolGroups.mcp} onClick={()=>toggleToolGroup("mcp")}><span>MCP</span><ChevronDown size={14}/></button>{toolGroups.mcp&&<div>{mcpConnections.map(connection=>{const enabled=mcpConnectionIds.includes(connection.id);return <div className="tool-toggle-row" key={connection.id}><Cable size={17}/><span><strong>{connection.name}</strong><small>{connection.description||connection.url}</small></span><button type="button" role="switch" aria-label={connection.name} aria-checked={enabled} className={`toggle ${enabled?"on":""}`} onClick={()=>setMcpConnectionIds(enabled?mcpConnectionIds.filter(id=>id!==connection.id):[...mcpConnectionIds,connection.id])}><i/></button></div>})}</div>}</section>}
           </div>}
         </div>
         {attachments.length > 0 && <small className="attachment-count">{attachments.length} {c.imagesAttached}</small>}
@@ -1884,7 +1900,40 @@ ${c.detectFailedDetail}: ${failure.detail}` : ""}` });
     } catch (error) { setNotice(error instanceof Error ? error.message : c.invalidModelSettings); }
     finally { setSaving(false); }
   }
-  return createPortal(<div ref={modalRef} tabIndex={-1} className="settings-layer" role="dialog" aria-modal="true" aria-label={c.settings}><button tabIndex={-1} className="settings-backdrop" onClick={onClose} aria-label={c.cancel} /><section className="settings-panel"><header><div><span>{c.workspace}</span><h2>{c.settings}</h2></div><button aria-label={c.cancel} onClick={onClose}><X size={20} /></button></header><div className="settings-body"><nav aria-label={c.settings}><button className={tab === "general" ? "active" : ""} onClick={() => setTab("general")}><Settings2 size={17} /> {c.general}</button><button className={tab === "appearance" ? "active" : ""} onClick={() => setTab("appearance")}><Palette size={17} /> {c.appearance}</button>{admin && <button className={tab === "connection" ? "active" : ""} onClick={() => setTab("connection")}><Server size={17} /> {c.connection}</button>}{admin && <button className={tab === "tools" ? "active" : ""} onClick={() => setTab("tools")}><Wrench size={17} /> {c.toolsSettings}</button>}{admin && <button className={tab === "experimental" ? "active" : ""} onClick={() => setTab("experimental")}><FlaskConical size={17} /> {c.experimental}</button>}<button className={tab === "models" ? "active" : ""} onClick={() => setTab("models")}><NeuralMark size={18} /> {c.models}</button><button className={tab === "reasoning" ? "active" : ""} onClick={openReasoning}><Lightbulb size={17} /> {c.reasoningLevel}</button>{admin && <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}><Users size={17} /> {c.users}</button>}{admin&&<button className={tab==="plans"?"active":""} onClick={()=>setTab("plans")}><Gauge size={17}/>{draft.preferences.language==="ko"?"플랜":"Plans"}</button>}{admin&&<button className={tab==="data"?"active":""} onClick={()=>setTab("data")}><DatabaseBackup size={17}/>{draft.preferences.language==="ko"?"데이터 관리":"Data"}</button>}<button className={tab === "account" ? "active" : ""} onClick={() => setTab("account")}><UserRound size={17} /> {c.account}</button></nav><div className="settings-content">{tab === "general" && <GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving} />}{tab === "appearance" && <AppearanceSettings c={c} draft={draft} setDraft={setDraft} admin={admin} />}{tab === "connection" && admin && <ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} statusNonce={statusNonce} />}{tab === "tools" && admin && <><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><ToolsSettings c={c} draft={draft} setDraft={setDraft} /><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}{tab === "experimental" && admin && <ExperimentalSettings c={c} draft={draft} setDraft={setDraft} />}{tab === "models" && <ModelSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account} />}{tab === "reasoning" && <ReasoningSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account} />}{tab === "users" && admin && <UsersSettings c={c} />}{tab==="plans"&&admin&&<PlanSettings models={draft.models} ko={draft.preferences.language==="ko"}/>} {tab==="data"&&admin&&<DataManagementSettings ko={draft.preferences.language==="ko"}/>} {tab === "account" && <><AccountSettings c={c} account={initial.account} draft={draft} setDraft={setDraft} onLogout={onLogout} /><AccountBackupSettings ko={draft.preferences.language==="ko"}/></>}</div></div><footer><span>{notice}</span><div><button className="secondary-button" onClick={onClose}>{dirty ? c.cancel : c.close}</button>{!["users","plans","data"].includes(tab) && <button className="save-button" onClick={save} disabled={saving || !dirty}>{saving ? c.saving : c.saveChanges}</button>}</div></footer></section>{detectDialog}</div>, document.body);
+  return createPortal(<div ref={modalRef} tabIndex={-1} className="settings-layer" role="dialog" aria-modal="true" aria-label={c.settings}>
+    <button tabIndex={-1} className="settings-backdrop" onClick={onClose} aria-label={c.cancel}/>
+    <section className="settings-panel">
+      <header><div><span>{c.workspace}</span><h2>{c.settings}</h2></div><button aria-label={c.cancel} onClick={onClose}><X size={20}/></button></header>
+      <div className="settings-body">
+        <nav aria-label={c.settings}>
+          <button className={tab==="general"?"active":""} onClick={()=>setTab("general")}><Settings2 size={17}/>{c.general}</button>
+          <button className={tab==="appearance"?"active":""} onClick={()=>setTab("appearance")}><Palette size={17}/>{c.appearance}</button>
+          {admin&&<button className={tab==="connection"?"active":""} onClick={()=>setTab("connection")}><Server size={17}/>{c.connection}</button>}
+          <button className={tab==="mcp"?"active":""} onClick={()=>setTab("mcp")}><Cable size={17}/>{draft.preferences.language==="ko"?"MCP 연결":"MCP connections"}</button>
+          {admin&&<button className={tab==="tools"?"active":""} onClick={()=>setTab("tools")}><Wrench size={17}/>{c.toolsSettings}</button>}
+          {admin&&<button className={tab==="experimental"?"active":""} onClick={()=>setTab("experimental")}><FlaskConical size={17}/>{c.experimental}</button>}
+          <button className={tab==="models"?"active":""} onClick={()=>setTab("models")}><NeuralMark size={18}/>{c.models}</button>
+          <button className={tab==="reasoning"?"active":""} onClick={openReasoning}><Lightbulb size={17}/>{c.reasoningLevel}</button>
+          {admin&&<button className={tab==="users"?"active":""} onClick={()=>setTab("users")}><Users size={17}/>{c.users}</button>}
+          {admin&&<button className={tab==="plans"?"active":""} onClick={()=>setTab("plans")}><Gauge size={17}/>{draft.preferences.language==="ko"?"플랜":"Plans"}</button>}
+          {admin&&<button className={tab==="data"?"active":""} onClick={()=>setTab("data")}><DatabaseBackup size={17}/>{draft.preferences.language==="ko"?"데이터 관리":"Data"}</button>}
+          <button className={tab==="account"?"active":""} onClick={()=>setTab("account")}><UserRound size={17}/>{c.account}</button>
+        </nav>
+        <div className="settings-content">
+          {tab==="general"&&<GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving}/>}
+          {tab==="appearance"&&<AppearanceSettings c={c} draft={draft} setDraft={setDraft} admin={admin}/>}
+          {tab==="connection"&&admin&&<ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} statusNonce={statusNonce}/>}
+          {tab==="mcp"&&<McpSettings ko={draft.preferences.language==="ko"} connections={draft.mcpConnections} entitlement={draft.mcpEntitlement} onChanged={(connections,entitlement)=>{setDraft(current=>({...current,mcpConnections:connections,mcpEntitlement:entitlement}));onSaved({...initial,mcpConnections:connections,mcpEntitlement:entitlement});}}/>}
+          {tab==="tools"&&admin&&<><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><ToolsSettings c={c} draft={draft} setDraft={setDraft}/><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}
+          {tab==="experimental"&&admin&&<ExperimentalSettings c={c} draft={draft} setDraft={setDraft}/>}
+          {tab==="models"&&<ModelSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account}/>}
+          {tab==="reasoning"&&<ReasoningSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account}/>}
+          {tab==="users"&&admin&&<UsersSettings c={c}/>} {tab==="plans"&&admin&&<PlanSettings models={draft.models} ko={draft.preferences.language==="ko"}/>} {tab==="data"&&admin&&<DataManagementSettings ko={draft.preferences.language==="ko"}/>} {tab==="account"&&<><AccountSettings c={c} account={initial.account} draft={draft} setDraft={setDraft} onLogout={onLogout}/><AccountBackupSettings ko={draft.preferences.language==="ko"}/></>}
+        </div>
+      </div>
+      <footer><span>{notice}</span><div><button className="secondary-button" onClick={onClose}>{dirty?c.cancel:c.close}</button>{!["users","plans","data","mcp"].includes(tab)&&<button className="save-button" onClick={save} disabled={saving||!dirty}>{saving?c.saving:c.saveChanges}</button>}</div></footer>
+    </section>{detectDialog}
+  </div>,document.body);
 }
 
 function ExperimentalSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>> }) {

@@ -8,7 +8,7 @@ import { classifyDocument, cleanupTemporaryDocuments, decodeTextDocument, pdfMod
 import { pageVisitHeaders } from "./page-visit-request";
 import type { ToolSettings } from "./types";
 
-export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; browser?: boolean; storageAccess?: boolean; currentTime?: boolean; location?: boolean; multipleChoice?: boolean; hostComputer?: boolean };
+export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; browser?: boolean; storageAccess?: boolean; currentTime?: boolean; location?: boolean; multipleChoice?: boolean; hostComputer?: boolean; mcpConnectionIds?: string[] };
 export type WebToolExecution = { result: unknown; content?: ModelContentPart[] };
 
 export function toolDefinitions(enabled: EnabledWebTools, settings: ToolSettings) {

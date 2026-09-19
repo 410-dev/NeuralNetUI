@@ -118,7 +118,7 @@ try {
   // Upgrade: plans arrive without changing anyone's capacity.
   await json("owner", "/api/usage");
   const migrated = read(connection => ({ version: connection.prepare("SELECT MAX(version) AS version FROM schema_migrations").get().version, plans: connection.prepare("SELECT * FROM plans").all(), users: connection.prepare("SELECT id,username,role,storage_quota_bytes,trash_quota_bytes,storage_quota_uses_default,trash_quota_uses_default,plan_id FROM users ORDER BY id").all(), config: JSON.parse(connection.prepare("SELECT value FROM app_config WHERE id=1").get()?.value || "{}") }));
-  assert.equal(migrated.version, 18, `migrated from ${migratedBefore} to ${migrated.version}`);
+  assert.equal(migrated.version, 19, `migrated from ${migratedBefore} to ${migrated.version}`);
   assert.ok(migrated.plans.length >= 1);
   if (migratedBefore < 16) { const settings = migrated.config.userStorageSettings || {}; const free = migrated.plans.find(plan => plan.id === "default-free"); assert.equal(free.storage_quota_bytes, settings.defaultQuotaBytes ?? 536870912); assert.equal(free.trash_quota_bytes, settings.defaultTrashQuotaBytes ?? 2 * free.storage_quota_bytes); }
   for (const user of migrated.users) { const before = accountsBefore.find(item => item.id === user.id); assert.deepEqual({ ...user, plan_id: undefined }, { ...before, plan_id: undefined }, `${user.username} keeps its account settings`); assert.ok(user.plan_id, `${user.username} has a plan`); }
@@ -228,7 +228,7 @@ try {
 
   const serverErrors = logs.split(/\r?\n/).filter(line => /EACCES|FOREIGN KEY|SQLITE_|Unhandled|TypeError/.test(line));
   assert.deepEqual(serverErrors, [], "server log is clean");
-  console.log(`Beta 16 encrypted backup integration passed (${source ? "source data" : "fixture"}, schema ${migratedBefore} -> 18).`);
+  console.log(`Beta 16 encrypted backup integration passed (${source ? "source data" : "fixture"}, schema ${migratedBefore} -> 19).`);
 } finally {
   server.kill(); await once(server, "exit").catch(() => {});
   await rm(root, { recursive: true, force: true }).catch(() => {});

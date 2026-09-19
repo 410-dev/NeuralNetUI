@@ -419,6 +419,28 @@ function openDatabase() {
     else connection.prepare("UPDATE plans SET trash_quota_bytes=MIN(storage_quota_bytes*2,21990232555520)").run();
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(18, new Date().toISOString());
   })();
+  const mcpConnectionsVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (mcpConnectionsVersion.version < 19) connection.transaction(() => {
+    connection.exec(`
+      ALTER TABLE plans ADD COLUMN mcp_enabled INTEGER NOT NULL DEFAULT 0 CHECK (mcp_enabled IN (0, 1));
+      ALTER TABLE plans ADD COLUMN max_mcp_connections INTEGER NOT NULL DEFAULT 0 CHECK (max_mcp_connections >= 0 AND max_mcp_connections <= 100);
+      CREATE TABLE mcp_connections (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        url TEXT NOT NULL,
+        auth_type TEXT NOT NULL CHECK (auth_type IN ('oauth', 'api_key', 'none')),
+        credential TEXT NOT NULL DEFAULT '',
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(user_id, name)
+      );
+      CREATE INDEX mcp_connections_user_idx ON mcp_connections(user_id, created_at);
+    `);
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(19, new Date().toISOString());
+  })();
   return connection;
 }
 

@@ -25,6 +25,7 @@ import type { ChatWaitPhase, Conversation, HarnessSettings, MessageStep, ModelCo
 import type { ModelContentPart } from "./document-processing";
 import { promises as fs } from "node:fs";
 import { acquirePlanAdmission, assertPlanAccess, clearLiveTokenUsage, recordTokenUsage, releasePlanAdmission, remainingPlanOutputTokens, setLiveTokenUsage } from "./plans";
+import { executeMcpTool, mcpToolDefinitions, type McpToolBinding } from "./mcp";
 
 type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
 type UpstreamMessage = { role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string };
@@ -414,8 +415,10 @@ function validateQuestions(value: unknown, maximum: number) {
 
 type ToolExecution = { result: unknown; content?: ModelContentPart[] };
 
-async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings, hostPolicy: HostExecutionPolicy, model: ModelConfig): Promise<ToolExecution> {
+async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings, hostPolicy: HostExecutionPolicy, model: ModelConfig, mcpBindings: Map<string, McpToolBinding>): Promise<ToolExecution> {
   const args = parseArguments(call.function.arguments);
+  const mcpBinding = mcpBindings.get(call.function.name);
+  if (mcpBinding) return executeMcpTool(job.userId, mcpBinding, args, job.controller.signal);
   if (call.function.name === "get_current_time" && enabled.currentTime) return { result: currentTime(job.input.clientContext?.timeZone, job.input.clientContext?.locale || "en-US") };
   if (call.function.name === "get_current_location" && enabled.location) {
     const browserResult = await waitForBrowser(job, call);
@@ -470,8 +473,11 @@ async function run(job: ChatJob) {
       storageAccess: job.input.tools?.storageAccess === true,
       currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
       hostComputer: job.input.tools?.hostComputer === true && canUseHostComputer(job.userRole, config.experimental?.hostComputerTool === true),
+      mcpConnectionIds: Array.isArray(job.input.tools?.mcpConnectionIds) ? job.input.tools.mcpConnectionIds : [],
     };
     const tools = toolDefinitions(enabled, config.toolSettings);
+    const mcpTools = await mcpToolDefinitions(job.userId, enabled.mcpConnectionIds || [], job.controller.signal);
+    tools.push(...mcpTools.definitions);
     if (enabled.storageAccess) tools.push(storageAccessToolDefinition());
     const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
     const harnessContext = { config, model, userId: job.userId, signal: job.controller.signal, onPhase: (phase: ChatWaitPhase) => setWaitPhase(job, phase) };
@@ -653,7 +659,7 @@ async function run(job: ChatJob) {
         // A host action may wait for approval or run an isolated assessment model. Do not hold
         // this chat's residency lease through either operation (serial policy would self-deadlock).
         if (call.function.name === "host_computer") { releaseModel?.(); releaseModel = undefined; }
-        try { execution = await executeTool(job, call, enabled, config.toolSettings, hostPolicy, model); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
+        try { execution = await executeTool(job, call, enabled, config.toolSettings, hostPolicy, model, mcpTools.bindings); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
         catch (error) {
           if ((error as Error).name === "AbortError") throw error;
           execution = { result: { error: error instanceof Error ? error.message : "Tool execution failed." } };

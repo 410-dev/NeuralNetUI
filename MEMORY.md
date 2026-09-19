@@ -1,5 +1,6 @@
 # Project Memory
 
+- MCP support uses the official `@modelcontextprotocol/client` Streamable HTTP client. Migration 19 adds per-user `mcp_connections` plus plan-level `mcp_enabled` and `max_mcp_connections`. `lib/mcp.ts` owns entitlement-aware CRUD, connection tests, tool discovery/calls, credential redaction, result conversion, and SSRF guards; `mcp_<provider>_<tool>` aliases prevent provider collisions. OAuth currently means a user-supplied access token sent as Bearer authentication, not an interactive browser authorization flow. Existing records remain stored when a plan disables MCP, but they disappear from chat and cannot be used until re-enabled. Encrypted personal/user and account backup images include MCP records; cross-user restore remaps their ids and saved selections.
 - NeuralNetUI is a Next.js 16 TypeScript chat application with SQLite-backed authentication, settings, conversations, uploads, and tool-event persistence.
 - Docker builds exclude the host `.python` virtual environment because Linux virtualenv interpreter symlinks point outside the build root and cause Turbopack tracing to fail.
 - The UI supports English and Korean. Technical tool events use a collapsed message-level group with active tool names or completed/failure totals, nested per-call rows, and display-only localized call markers in reasoning.
