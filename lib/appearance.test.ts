@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ACCENT_PALETTES, accentColorOf, accentVariables, defaultReasoningNote, DEFAULT_LOGIN_APPEARANCE, normalizeAppearance, normalizeHexColor, normalizeLoginAppearance, normalizeReasoningNotes, reasoningNote, reasoningNoteKey, revealStep } from "./appearance.ts";
+import { ACCENT_PALETTES, accentColorOf, accentVariables, defaultReasoningNote, DEFAULT_LOGIN_APPEARANCE, normalizeAppearance, normalizeHexColor, normalizeLoginAppearance, normalizeReasoningNotes, reasoningNote, reasoningNoteKey } from "./appearance.ts";
 
 test("hex normalization accepts short forms and rejects anything else", () => {
   assert.equal(normalizeHexColor("#ABCDEF"), "#abcdef");
@@ -28,15 +28,6 @@ test("accent variables expose channel triples and a brighter companion", () => {
   assert.equal(r, g); assert.equal(g, b);
 });
 
-test("chunked reveal advances by the chunk size and resynchronises on rewrites", () => {
-  assert.equal(revealStep("", "hello world", 4), "hell");
-  assert.equal(revealStep("hell", "hello world", 4), "hello wo");
-  assert.equal(revealStep("hello world", "hello world", 4), "hello world");
-  assert.equal(revealStep("", "abc", 0), "a");
-  // A regenerated response no longer extends the shown prefix, so it replaces it outright.
-  assert.equal(revealStep("old text", "brand new", 3), "brand new");
-});
-
 test("reasoning notes fall back per language and honour overrides", () => {
   assert.equal(reasoningNoteKey("none"), "off");
   assert.equal(reasoningNoteKey("off"), "off");
@@ -56,12 +47,12 @@ test("stored notes keep only known keys and trim them", () => {
   assert.equal(normalizeReasoningNotes({ high: "x".repeat(400) }).high.length, 200);
 });
 
-test("appearance preferences fall back to defaults and clamp the chunk size", () => {
-  assert.deepEqual(normalizeAppearance(undefined), { lmStudioProgress: "both", accentPalette: "blue", accentColor: "#4d7fd8", streamReveal: "instant", streamPacing: "immediate", streamChunkSize: 3, showReasoningNotes: true, reasoningNotes: {}, greetings: {} });
-  const normalized = normalizeAppearance({ accentPalette: "nope" as never, streamReveal: "fade", streamPacing: "chunked", streamChunkSize: 999 });
+test("appearance preferences fall back to defaults and clamp the per-fragment fade duration", () => {
+  assert.deepEqual(normalizeAppearance(undefined), { lmStudioProgress: "both", accentPalette: "blue", accentColor: "#4d7fd8", streamReveal: "instant", streamFadeDurationMs: 240, showReasoningNotes: true, reasoningNotes: {}, greetings: {} });
+  const normalized = normalizeAppearance({ accentPalette: "nope" as never, streamReveal: "fade", streamFadeDurationMs: 999 });
   assert.equal(normalized.accentPalette, "blue");
-  assert.equal(normalized.streamChunkSize, 24);
-  assert.equal(normalizeAppearance({ streamChunkSize: 0 } as never).streamChunkSize, 3);
+  assert.equal(normalized.streamFadeDurationMs, 800);
+  assert.equal(normalizeAppearance({ streamFadeDurationMs: 1 } as never).streamFadeDurationMs, 80);
 });
 
 

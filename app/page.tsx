@@ -20,7 +20,7 @@ import { DEFAULT_ENABLED_TOOLS } from "@/lib/enabled-tools";
 import { SectionTitle } from "./section-title";
 import { SelectMenu, usePopoverPresence } from "./select-menu";
 import { NeuralMark } from "./neural-mark";
-import { ACCENT_PALETTES, accentColorOf, accentVariables, DEFAULT_APPEARANCE, DEFAULT_LOGIN_APPEARANCE, defaultReasoningNote, normalizeHexColor, reasoningNote, REASONING_NOTE_KEYS, revealStep } from "@/lib/appearance";
+import { ACCENT_PALETTES, accentColorOf, accentVariables, DEFAULT_APPEARANCE, DEFAULT_LOGIN_APPEARANCE, defaultReasoningNote, normalizeHexColor, reasoningNote, REASONING_NOTE_KEYS } from "@/lib/appearance";
 import { capabilitySummary, driverCapabilities } from "@/lib/driver-capabilities";
 import { lastContentStep, reasoningStepIsWhole, replaceAssistantContent, stepToolEvents, transcriptSteps } from "@/lib/transcript";
 import { greetingFor, greetingsFor, BAND_STARTS, timeBandFor } from "@/lib/greetings";
@@ -34,7 +34,7 @@ import {
   LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload, HardDrive, ShieldAlert,
   Palette, PanelLeftClose, PanelLeftOpen, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge, Cable,
 } from "lucide-react";
-import { createContext, FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Children, cloneElement, createContext, CSSProperties, FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -57,7 +57,7 @@ import { hasMobileComposerInput, shouldSubmitComposerOnEnter } from "@/lib/compo
 import { literalStrikethroughSource } from "@/lib/markdown-rendering";
 import { saveConversationRequest } from "@/lib/client-persistence";
 import { useModalFocus } from "@/lib/use-modal-focus";
-import { resolveConnectionModels, reconcileConnectionEdits } from "@/lib/connection-drivers";
+import { connectionForModel, resolveConnectionModels, reconcileConnectionEdits } from "@/lib/connection-drivers";
 import { modelServerState, onlineReplacement, selectableState, type ServerState } from "@/lib/model-availability";
 import { useKeyboardReturn } from "@/lib/use-keyboard-return";
 import { describeConnectionFailure, isConnectionFailureCode } from "@/lib/connection-errors";
@@ -139,8 +139,7 @@ const translations = {
     applyToEveryone: "Apply to everyone", applyingToEveryone: "Applying…", appliedToEveryone: "Applied to every account.",
     servedReasoningLocked: "Reasoning templates for served models are an administrator's to change. Add a custom model to keep templates of your own.",
     accentTitle: "Accent colour", accentHelp: "Buttons, switches and selected states use this colour. Text and input fields stay white and grey.", accentBlue: "Blue", accentViolet: "Violet", accentTeal: "Teal", accentAmber: "Amber", accentRose: "Rose", accentGraphite: "Graphite", accentCustom: "Custom", accentHex: "Hex value",
-    streamRevealTitle: "Response appearance", streamRevealHelp: "How finished text settles into the thread while a response streams.", streamInstant: "Plain", streamInstantDesc: "Text appears as soon as it arrives.", streamFade: "Soft fade", streamFadeDesc: "New passages fade in and the leading edge stays soft.",
-    streamPacingTitle: "Response pacing", streamPacingHelp: "Servers deliver text in bursts. Pacing spreads each burst out evenly.", streamImmediate: "Every token", streamImmediateDesc: "Show everything the moment it arrives.", streamChunked: "Even pace", streamChunkedDesc: "Release a fixed slice per frame so text reads as steady typing.", streamChunkSize: "Characters per step",
+    streamRevealTitle: "Response appearance", streamRevealHelp: "Choose whether each newly received text fragment appears immediately or fades in.", streamInstant: "Plain", streamInstantDesc: "Every token appears immediately with a fixed 0 ms duration.", streamFade: "Soft fade", streamFadeDesc: "Each incoming token fades in independently without flashing existing content.", streamFadeDuration: "Fade duration per token", streamFadeDurationHelp: "Longer durations make each incoming token settle more gently.",
     nativePresetNote: "Built-in native levels cannot be renamed or removed, so they are offered only in the chat reasoning picker.",
     hideActivity: "Hide tool and thinking history", showActivity: "Show tool and thinking history", scrollToBottom: "Resume automatic scrolling",
     temporaryChat: "Temporary chat", saveChat: "Save this chat", savingChat: "Saving…", chatSaved: "Saved to your history.", chatSaveFailed: "This chat could not be saved.",
@@ -190,8 +189,7 @@ const translations = {
     applyToEveryone: "전체 적용", applyingToEveryone: "적용하는 중…", appliedToEveryone: "모든 계정에 적용했습니다.",
     servedReasoningLocked: "서빙 모델의 추론 템플릿은 관리자만 변경할 수 있습니다. 직접 관리하려면 커스텀 모델을 추가하세요.",
     accentTitle: "액센트 색상", accentHelp: "버튼, 스위치, 선택 상태에 이 색을 사용합니다. 텍스트와 입력 필드는 흰색과 회색을 유지합니다.", accentBlue: "블루", accentViolet: "바이올렛", accentTeal: "틸", accentAmber: "앰버", accentRose: "로즈", accentGraphite: "그라파이트", accentCustom: "커스텀", accentHex: "HEX 값",
-    streamRevealTitle: "응답 표시 방식", streamRevealHelp: "응답이 스트리밍되는 동안 글자가 화면에 자리 잡는 방식입니다.", streamInstant: "기본", streamInstantDesc: "도착한 글자를 그대로 즉시 표시합니다.", streamFade: "부드러운 페이드", streamFadeDesc: "새 문단이 서서히 나타나고 끝부분이 부드럽게 이어집니다.",
-    streamPacingTitle: "응답 표시 속도", streamPacingHelp: "서버는 글자를 뭉치로 보냅니다. 속도 조절은 그 뭉치를 고르게 나눠 표시합니다.", streamImmediate: "전부 표시", streamImmediateDesc: "도착한 내용을 한 번에 모두 표시합니다.", streamChunked: "일정한 속도", streamChunkedDesc: "프레임마다 정해진 만큼만 내보내 타이핑처럼 보이게 합니다.", streamChunkSize: "한 번에 표시할 글자 수",
+    streamRevealTitle: "응답 표시 방식", streamRevealHelp: "새로 들어오는 각 토큰을 즉시 표시하거나 개별적으로 페이드 인합니다.", streamInstant: "기본", streamInstantDesc: "모든 토큰을 0ms 고정으로 즉시 표시합니다.", streamFade: "부드러운 페이드", streamFadeDesc: "기존 내용은 그대로 두고 새 토큰만 각각 부드럽게 나타납니다.", streamFadeDuration: "토큰별 페이드 시간", streamFadeDurationHelp: "값이 클수록 새 토큰이 더 천천히 선명해집니다.",
     nativePresetNote: "기본 제공 Native 추론 수준은 이름 변경과 삭제가 불가능하므로 채팅의 추론 선택 창에서만 제공됩니다.",
     hideActivity: "도구 / 사고 기록 숨기기", showActivity: "도구 / 사고 기록 표시", scrollToBottom: "자동 스크롤 다시 시작",
     temporaryChat: "임시 채팅", saveChat: "이 채팅 저장", savingChat: "저장 중…", chatSaved: "채팅 기록에 저장했습니다.", chatSaveFailed: "채팅을 저장하지 못했습니다.",
@@ -1168,7 +1166,7 @@ export default function Home() {
         <div className="ambient-glow" />
         <div className="model-switcher">
           <button className="model-trigger" onClick={() => { if (!modelMenuOpen) setModelControlNotice(null); setModelMenuOpen((value) => !value); }}><span>{serversOffline ? c.serverOffline : selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
-          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span>{checkingModelServers ? <LoaderCircle className="spin" size={13} aria-label={c.checkingModelServers} /> : <small>{onlineModels.length}</small>}</div>{!checkingModelServers && serversOffline && <p className="model-popover-empty">{c.noOnlineModels}</p>}{pickerModels.map((model) => { const weight = showModelWeights ? config.modelWeights?.[model.id] : undefined; const weightHint = weight ? c.modelWeightHint.replace("{weight}", formatModelWeight(weight)) : ""; const state = modelServerState(model, config.connections, serverStates); const offline = state === "offline"; const stateHint = offline ? c.modelServerOffline : state === "error" ? c.modelServerError : undefined; return <button className={`model-option ${offline ? "offline" : state === "error" ? "server-error" : ""}`} key={model.id} aria-disabled={offline || undefined} data-tooltip={stateHint} aria-description={stateHint} onClick={() => { if (!offline) chooseModel(model); }}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}<em>{model.description}</em></span>{(model.isAlias || weight) && <span className="model-option-badges">{model.isAlias && <b>ALIAS</b>}{weight && <b className="model-weight-badge" data-tooltip={weightHint} aria-label={weightHint}>x{formatModelWeight(weight)}</b>}</span>}</button>; })}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{isAdmin && <button className="default-choice-action" disabled={!selectedModel || applyingDefault === "model"} onClick={() => void applyDefaultToEveryone("model")}>{applyingDefault === "model" ? <LoaderCircle className="spin" size={14} /> : <Users size={14} />}{applyingDefault === "model" ? c.applyingToEveryone : c.applyToEveryone}</button>}{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
+          {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span>{checkingModelServers ? <LoaderCircle className="spin" size={13} aria-label={c.checkingModelServers} /> : <small>{onlineModels.length}</small>}</div>{!checkingModelServers && serversOffline && <p className="model-popover-empty">{c.noOnlineModels}</p>}{pickerModels.map((model) => { const weight = showModelWeights ? config.modelWeights?.[model.id] : undefined; const weightHint = weight ? c.modelWeightHint.replace("{weight}", formatModelWeight(weight)) : ""; const state = modelServerState(model, config.connections, serverStates); const offline = state === "offline"; const stateHint = offline ? c.modelServerOffline : state === "error" ? c.modelServerError : undefined; const connectionName = connectionForModel(config.connections as ConnectionConfig[], model)?.name; const location = [connectionName, model.description].filter(Boolean).join(" · "); return <button className={`model-option ${offline ? "offline" : state === "error" ? "server-error" : ""}`} key={model.id} aria-disabled={offline || undefined} data-tooltip={stateHint} aria-description={stateHint} onClick={() => { if (!offline) chooseModel(model); }}><span className="selection-dot">{model.id === selectedModel?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{config.preferences.showModelIdentifiers !== false && <small>{model.sourceModel}</small>}{location && <em>{location}</em>}</span>{(model.isAlias || weight) && <span className="model-option-badges">{model.isAlias && <b>ALIAS</b>}{weight && <b className="model-weight-badge" data-tooltip={weightHint} aria-label={weightHint}>x{formatModelWeight(weight)}</b>}</span>}</button>; })}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{isAdmin && <button className="default-choice-action" disabled={!selectedModel || applyingDefault === "model"} onClick={() => void applyDefaultToEveryone("model")}>{applyingDefault === "model" ? <LoaderCircle className="spin" size={14} /> : <Users size={14} />}{applyingDefault === "model" ? c.applyingToEveryone : c.applyToEveryone}</button>}{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
         </div>
 
         <div className="surface-actions">
@@ -1457,12 +1455,15 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
   </div>;
 }
 
-function CodeSnippet({ c, children }: { c: CopySet; children: ReactNode }) {
+function CodeSnippet({ c, children, fadeDurationMs = 0 }: { c: CopySet; children: ReactNode; fadeDurationMs?: number }) {
   const [wrapping, setWrapping] = useState(false);
   const [copied, setCopied] = useState(false);
+  const previousCode = useRef("");
   const codeElement = isValidElement<{ className?: string; children?: ReactNode }>(children) ? children : null;
   const code = String(codeElement?.props.children ?? children).replace(/\n$/, "");
   const language = codeElement?.props.className?.match(/language-([^\s]+)/)?.[1];
+  const fadeFrom = fadeDurationMs > 0 && code.startsWith(previousCode.current) ? previousCode.current.length : code.length;
+  useLayoutEffect(() => { previousCode.current = code; }, [code]);
 
   async function copySnippet() {
     if (await copyTextToClipboard(code)) {
@@ -1479,7 +1480,7 @@ function CodeSnippet({ c, children }: { c: CopySet; children: ReactNode }) {
         <button type="button" className="copy-snippet" onClick={() => void copySnippet()} aria-label={c.copy} title={c.copy}>{copied ? <Check size={13} /> : <Copy size={13} />}<span>{copied ? c.copied : c.copy}</span></button>
       </div>
     </div>
-    <pre><code className={codeElement?.props.className}>{code}</code></pre>
+    <pre><code className={codeElement?.props.className}>{code.slice(0, fadeFrom)}{fadeFrom < code.length && <span className="stream-token" style={{ "--stream-fade-duration": `${fadeDurationMs}ms` } as CSSProperties}>{code.slice(fadeFrom)}</span>}</code></pre>
   </div>;
 }
 
@@ -1655,24 +1656,37 @@ function ToolActivityGroup({ c, locale, events }: { c: CopySet; locale: Locale; 
   </details>;
 }
 
-/**
- * Releases streamed text at the configured pace. Snapshots arrive in bursts, so chunked pacing
- * hands out a fixed number of characters per frame; immediate pacing renders what has arrived.
- */
-function useRevealedText(target: string, active: boolean, pacing: AppearancePreferences["streamPacing"], chunkSize: number) {
-  const [shown, setShown] = useState(target);
-  const paced = pacing === "chunked" && active;
-  useEffect(() => {
-    if (!paced) { setShown(target); return; }
-    let timer = 0;
-    const step = () => {
-      setShown((current) => revealStep(current, target, chunkSize));
-      timer = window.setTimeout(step, 16);
-    };
-    timer = window.setTimeout(step, 16);
-    return () => window.clearTimeout(timer);
-  }, [paced, target, chunkSize]);
-  return paced ? (target.startsWith(shown) ? shown : target) : target;
+function renderedText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(renderedText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) return renderedText(node.props.children);
+  return "";
+}
+
+/** Wrap only the appended part of a rendered Markdown block, leaving every settled token alone. */
+function fadeAfterOffset(node: ReactNode, offset: number, cursor: { value: number }, durationMs: number, key: { value: number }): ReactNode {
+  if (typeof node === "string" || typeof node === "number") {
+    const text = String(node), start = cursor.value, end = start + text.length;
+    cursor.value = end;
+    if (end <= offset || !text) return node;
+    const split = Math.max(0, offset - start), prefix = text.slice(0, split), suffix = text.slice(split);
+    return <>{prefix}<span key={`stream-${key.value++}`} className="stream-token" style={{ "--stream-fade-duration": `${durationMs}ms` } as CSSProperties}>{suffix}</span></>;
+  }
+  if (Array.isArray(node)) return Children.map(node, child => fadeAfterOffset(child, offset, cursor, durationMs, key));
+  if (isValidElement<{ children?: ReactNode }>(node) && node.props.children !== undefined) {
+    return cloneElement(node, undefined, fadeAfterOffset(node.props.children, offset, cursor, durationMs, key));
+  }
+  return node;
+}
+
+function StreamingTextElement({ as, children, fadeDurationMs, ...props }: { as: "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "li" | "blockquote" | "td" | "th"; children?: ReactNode; fadeDurationMs: number; [key: string]: unknown }) {
+  const previous = useRef("");
+  const current = renderedText(children);
+  const fadeFrom = fadeDurationMs > 0 && current.startsWith(previous.current) ? previous.current.length : current.length;
+  useLayoutEffect(() => { previous.current = current; }, [current]);
+  const Tag = as;
+  const decorated = fadeFrom < current.length ? fadeAfterOffset(children, fadeFrom, { value: 0 }, fadeDurationMs, { value: 0 }) : children;
+  return <Tag {...props}>{decorated}</Tag>;
 }
 
 /**
@@ -1680,7 +1694,9 @@ function useRevealedText(target: string, active: boolean, pacing: AppearancePref
  * the renderer functions would remount large images; authenticated no-store sources would then be
  * downloaded again, which is especially visible under mobile memory pressure.
  */
-function ChatMarkdown({ text, c, renderStrikethrough, onImagePreview }: { text: string; c: CopySet; renderStrikethrough: boolean; onImagePreview: (value: { src: string; alt: string }) => void }) {
+function ChatMarkdown({ text, c, renderStrikethrough, onImagePreview, fadeDurationMs = 0 }: { text: string; c: CopySet; renderStrikethrough: boolean; onImagePreview: (value: { src: string; alt: string }) => void; fadeDurationMs?: number }) {
+  const sourceRef = useRef(text);
+  sourceRef.current = text;
   const components = useMemo(() => ({
     a: (props) => <a {...props} target="_blank" rel="noreferrer" />,
     img: ({ src, alt, ...props }) => {
@@ -1688,9 +1704,20 @@ function ChatMarkdown({ text, c, renderStrikethrough, onImagePreview }: { text: 
       const open = () => source && onImagePreview({ src: source, alt: alt || "" });
       return <img {...props} src={source} alt={alt || ""} role="button" tabIndex={0} className="chat-expandable-image" onClick={open} onKeyDown={event => { if (source && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); open(); } }} />;
     },
-    pre: ({ children }) => <CodeSnippet c={c}>{children}</CodeSnippet>,
-    del: ({ node, children, ...props }) => renderStrikethrough ? <del {...props}>{children}</del> : <>{literalStrikethroughSource(text, node, String(children))}</>,
-  } satisfies Components), [c, onImagePreview, renderStrikethrough, text]);
+    pre: ({ children }) => <CodeSnippet c={c} fadeDurationMs={fadeDurationMs}>{children}</CodeSnippet>,
+    p: ({ node: _node, children, ...props }) => <StreamingTextElement as="p" fadeDurationMs={fadeDurationMs} {...props}>{children}</StreamingTextElement>,
+    h1: ({ node: _node, children, ...props }) => <StreamingTextElement as="h1" fadeDurationMs={fadeDurationMs} {...props}>{children}</StreamingTextElement>,
+    h2: ({ node: _node, children, ...props }) => <StreamingTextElement as="h2" fadeDurationMs={fadeDurationMs} {...props}>{children}</StreamingTextElement>,
+    h3: ({ node: _node, children, ...props }) => <StreamingTextElement as="h3" fadeDurationMs={fadeDurationMs} {...props}>{children}</StreamingTextElement>,
+    h4: ({ node: _node, children, ...props }) => <StreamingTextElement as="h4" fadeDurationMs={fadeDurationMs} {...props}>{children}</StreamingTextElement>,
+    h5: ({ node: _node, children, ...props }) => <StreamingTextElement as="h5" fadeDurationMs={fadeDurationMs} {...props}>{children}</StreamingTextElement>,
+    h6: ({ node: _node, children, ...props }) => <StreamingTextElement as="h6" fadeDurationMs={fadeDurationMs} {...props}>{children}</StreamingTextElement>,
+    li: ({ node: _node, children, ...props }) => <StreamingTextElement as="li" fadeDurationMs={fadeDurationMs} {...props}>{children}</StreamingTextElement>,
+    blockquote: ({ node: _node, children, ...props }) => <StreamingTextElement as="blockquote" fadeDurationMs={fadeDurationMs} {...props}>{children}</StreamingTextElement>,
+    td: ({ node: _node, children, ...props }) => <StreamingTextElement as="td" fadeDurationMs={fadeDurationMs} {...props}>{children}</StreamingTextElement>,
+    th: ({ node: _node, children, ...props }) => <StreamingTextElement as="th" fadeDurationMs={fadeDurationMs} {...props}>{children}</StreamingTextElement>,
+    del: ({ node, children, ...props }) => renderStrikethrough ? <del {...props}>{children}</del> : <>{literalStrikethroughSource(sourceRef.current, node, String(children))}</>,
+  } satisfies Components), [c, fadeDurationMs, onImagePreview, renderStrikethrough]);
   return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: true }], remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>{text}</ReactMarkdown>;
 }
 
@@ -1702,8 +1729,6 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
   const displayedReasoning = formatReasoningForDisplay(message.reasoning || "", message.toolEvents || [], locale);
   const waitingForChoice = (message.toolEvents || []).some((event) => ["ask_multiple_choice", "host_computer"].includes(event.name) && event.status === "waiting");
   const longPress = useLongPress(() => setMobileActionsOpen(true), pending || editing);
-  const shownContent = useRevealedText(message.content, pending && message.role === "assistant", appearance.streamPacing, appearance.streamChunkSize);
-  const fading = pending && appearance.streamReveal === "fade" && Boolean(shownContent);
   const copyMessage = async () => { await copyTextToClipboard(message.content); setMobileActionsOpen(false); };
   const editMessage = () => { setMobileActionsOpen(false); setEditing(true); };
   const regenerateMessage = () => { setMobileActionsOpen(false); message.role === "user" ? onRegenerateUser(message.id) : onRegenerate(message.id); };
@@ -1727,8 +1752,9 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
         return <div key={index} className="transcript-tools">{tools.length ? <ToolActivityGroup c={c} locale={locale} events={tools} /> : null}{answered.map((event) => <MultipleChoiceResponse key={event.id} event={event} />)}</div>;
       }
       const live = index === liveContentIndex && pending;
-      const body = live ? shownContent : step.text;
-      return <div key={index} className={`assistant-copy markdown-body ${live && fading ? "stream-fade" : ""}`}>{body ? <ChatMarkdown text={body} c={c} renderStrikethrough={renderStrikethrough} onImagePreview={setImagePreview} /> : null}</div>;
+      const body = step.text;
+      const fadeDurationMs = live && appearance.streamReveal === "fade" ? appearance.streamFadeDurationMs : 0;
+      return <div key={index} className="assistant-copy markdown-body">{body ? <ChatMarkdown text={body} c={c} renderStrikethrough={renderStrikethrough} onImagePreview={setImagePreview} fadeDurationMs={fadeDurationMs} /> : null}</div>;
     })}
     {waitStatus}
     {!steps.length && (pending && !waitingForChoice && !waitPhase ? <div className="assistant-copy markdown-body"><span className="typing"><i /><i /><i /></span></div> : null)}
@@ -1844,6 +1870,9 @@ function SettingsPanel({ initial, onClose, onSaved, onLogout, onAccentPreview }:
   const dirty = JSON.stringify(draft) !== saved;
   const draftAppearance = draft.preferences.appearance || DEFAULT_APPEARANCE;
   useEffect(() => { onAccentPreview(accentColorOf(draftAppearance)); }, [draftAppearance.accentPalette, draftAppearance.accentColor]);
+  useEffect(() => {
+    if (!draft.models.some(model => model.id === activeModelId)) setActiveModelId(draft.models[0]?.id || "");
+  }, [activeModelId, draft.models]);
   function updateModel(patch: Partial<ModelConfig>) { setDraft((current) => {
     const models = current.models.map(model => model.id === activeModelId ? normalizeReasoning({ ...model, ...patch }) : model);
     const connections = reconcileConnectionEdits(current.connections, models);
@@ -1909,7 +1938,7 @@ ${c.detectFailedDetail}: ${failure.detail}` : ""}` });
           <button className={tab==="general"?"active":""} onClick={()=>setTab("general")}><Settings2 size={17}/>{c.general}</button>
           <button className={tab==="appearance"?"active":""} onClick={()=>setTab("appearance")}><Palette size={17}/>{c.appearance}</button>
           {admin&&<button className={tab==="connection"?"active":""} onClick={()=>setTab("connection")}><Server size={17}/>{c.connection}</button>}
-          <button className={tab==="mcp"?"active":""} onClick={()=>setTab("mcp")}><Cable size={17}/>{draft.preferences.language==="ko"?"MCP 연결":"MCP connections"}</button>
+          {draft.mcpEntitlement.enabled&&<button className={tab==="mcp"?"active":""} onClick={()=>setTab("mcp")}><Cable size={17}/>{draft.preferences.language==="ko"?"MCP 연결":"MCP connections"}</button>}
           {admin&&<button className={tab==="tools"?"active":""} onClick={()=>setTab("tools")}><Wrench size={17}/>{c.toolsSettings}</button>}
           {admin&&<button className={tab==="experimental"?"active":""} onClick={()=>setTab("experimental")}><FlaskConical size={17}/>{c.experimental}</button>}
           <button className={tab==="models"?"active":""} onClick={()=>setTab("models")}><NeuralMark size={18}/>{c.models}</button>
@@ -1923,7 +1952,7 @@ ${c.detectFailedDetail}: ${failure.detail}` : ""}` });
           {tab==="general"&&<GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving}/>}
           {tab==="appearance"&&<AppearanceSettings c={c} draft={draft} setDraft={setDraft} admin={admin}/>}
           {tab==="connection"&&admin&&<ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} statusNonce={statusNonce}/>}
-          {tab==="mcp"&&<McpSettings ko={draft.preferences.language==="ko"} connections={draft.mcpConnections} entitlement={draft.mcpEntitlement} onChanged={(connections,entitlement)=>{setDraft(current=>({...current,mcpConnections:connections,mcpEntitlement:entitlement}));onSaved({...initial,mcpConnections:connections,mcpEntitlement:entitlement});}}/>}
+          {tab==="mcp"&&draft.mcpEntitlement.enabled&&<McpSettings ko={draft.preferences.language==="ko"} connections={draft.mcpConnections} entitlement={draft.mcpEntitlement} onChanged={(connections,entitlement)=>{setDraft(current=>({...current,mcpConnections:connections,mcpEntitlement:entitlement}));onSaved({...initial,mcpConnections:connections,mcpEntitlement:entitlement});}}/>}
           {tab==="tools"&&admin&&<><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><ToolsSettings c={c} draft={draft} setDraft={setDraft}/><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}
           {tab==="experimental"&&admin&&<ExperimentalSettings c={c} draft={draft} setDraft={setDraft}/>}
           {tab==="models"&&<ModelSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account}/>}
@@ -2087,14 +2116,7 @@ function AppearanceSettings({ c, draft, setDraft, admin }: { c: CopySet; draft: 
         { id: "instant", icon: <Zap size={17} />, title: c.streamInstant, description: c.streamInstantDesc },
         { id: "fade", icon: <Type size={17} />, title: c.streamFade, description: c.streamFadeDesc },
       ], (id) => patch({ streamReveal: id as AppearancePreferences["streamReveal"] }))}
-    </div>
-    <div className="general-setting-card">
-      <div><strong>{c.streamPacingTitle}</strong><small>{c.streamPacingHelp}</small></div>
-      {cards(c.streamPacingTitle, appearance.streamPacing, [
-        { id: "immediate", icon: <ArrowUp size={17} />, title: c.streamImmediate, description: c.streamImmediateDesc },
-        { id: "chunked", icon: <Clock3 size={17} />, title: c.streamChunked, description: c.streamChunkedDesc },
-      ], (id) => patch({ streamPacing: id as AppearancePreferences["streamPacing"] }))}
-      {appearance.streamPacing === "chunked" && <><p className="settings-help">{c.streamChunkSize}</p><div className="appearance-slider"><input type="range" min={1} max={24} step={1} aria-label={c.streamChunkSize} value={appearance.streamChunkSize} onChange={(event) => patch({ streamChunkSize: Number(event.target.value) })} /><b>{appearance.streamChunkSize}</b></div></>}
+      {appearance.streamReveal === "fade" && <><p className="settings-help">{c.streamFadeDurationHelp}</p><div className="appearance-slider"><input type="range" min={80} max={800} step={20} aria-label={c.streamFadeDuration} value={appearance.streamFadeDurationMs} onChange={(event) => patch({ streamFadeDurationMs: Number(event.target.value) })} /><b>{appearance.streamFadeDurationMs} ms</b></div></>}
     </div>
   </div>;
 }
@@ -2129,7 +2151,15 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
     if (draft.connections.length < 2) return;
     if (await askConfirm({ tone: "danger", title: c.removeConnection, message: c.confirmRemoveConnection, detail: `${connection.name} · ${c.removeConnectionDetail}`, confirmLabel: c.confirmDelete })) removeConnection(connection.id);
   }
-  function removeConnection(id: string) { if (draft.connections.length < 2) return; const index = draft.connections.findIndex((connection) => connection.id === id); const next = draft.connections.filter((connection) => connection.id !== id); replaceConnections(next); setActiveConnectionId(next[Math.min(Math.max(index, 0), next.length - 1)]?.id || ""); }
+  function removeConnection(id: string) {
+    if (draft.connections.length < 2) return;
+    const index = draft.connections.findIndex((connection) => connection.id === id);
+    const next = draft.connections.filter((connection) => connection.id !== id);
+    const merged = reconcileConnectionEdits(next, draft.models);
+    const models = resolveConnectionModels(merged, draft.models.filter(model => model.isAlias), draft.models.map(model => model.id));
+    setDraft(current => ({ ...current, connections: merged, models }));
+    setActiveConnectionId(next[Math.min(Math.max(index, 0), next.length - 1)]?.id || "");
+  }
   function moveConnection(sourceId: string, targetId: string) { replaceConnections(moveItemById(draft.connections, sourceId, targetId)); setActiveConnectionId(sourceId); }
   function nudgeConnection(offset: -1 | 1) { if (!activeConnection) return; replaceConnections(nudgeItemById(draft.connections, activeConnection.id, offset)); }
   const actions = <OrderActions c={c} onAdd={addConnection} addLabel={c.addConnection} onUp={() => nudgeConnection(-1)} onDown={() => nudgeConnection(1)} disableUp={activeIndex <= 0} disableDown={activeIndex < 0 || activeIndex === draft.connections.length - 1} />;
@@ -2160,8 +2190,8 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
 type ModelEditorProps = { draft: PublicConfig; activeModelId: string; setActiveModelId: (id: string) => void; activeModel?: ModelConfig };
 type ColumnItem = { id: string; name: string; detail?: string; icon: React.ReactNode; hidden?: boolean; status?: ServerState; statusLabel?: string };
 function OrderActions({ c, onAdd, addLabel, disableAdd, onUp, onDown, disableUp, disableDown }: { c: CopySet; onAdd?: () => void; addLabel?: string; disableAdd?: boolean; onUp: () => void; onDown: () => void; disableUp: boolean; disableDown: boolean }) { return <span className="order-actions">{onAdd && <button onClick={onAdd} disabled={disableAdd} title={addLabel} aria-label={addLabel}><Plus size={15} /></button>}<button onClick={onUp} title={c.moveUp} aria-label={c.moveUp} disabled={disableUp}><ChevronUp size={15} /></button><button onClick={onDown} title={c.moveDown} aria-label={c.moveDown} disabled={disableDown}><ChevronDown size={15} /></button></span>; }
-function ModelColumn({ c, models, items, label, active, onChange, showIdentifiers = false, onMove, action }: { c: CopySet; models?: ModelConfig[]; items?: ColumnItem[]; label?: string; active: string; onChange: (id: string) => void; showIdentifiers?: boolean; onMove?: (sourceId: string, targetId: string) => void; action?: React.ReactNode }) {
-  const rows: ColumnItem[] = items || (models || []).map((model) => ({ id: model.id, name: model.name, detail: showIdentifiers ? model.sourceModel : undefined, icon: model.isAlias ? <Pencil size={14} /> : <NeuralMark size={17} />, hidden: model.visible === false }));
+function ModelColumn({ c, models, connections, items, label, active, onChange, showIdentifiers = false, onMove, action }: { c: CopySet; models?: ModelConfig[]; connections?: PublicConfig["connections"]; items?: ColumnItem[]; label?: string; active: string; onChange: (id: string) => void; showIdentifiers?: boolean; onMove?: (sourceId: string, targetId: string) => void; action?: React.ReactNode }) {
+  const rows: ColumnItem[] = items || (models || []).map((model) => ({ id: model.id, name: model.name, detail: [showIdentifiers ? model.sourceModel : "", connections ? connectionForModel(connections as ConnectionConfig[], model)?.name : ""].filter(Boolean).join(" · ") || undefined, icon: model.isAlias ? <Pencil size={14} /> : <NeuralMark size={17} />, hidden: model.visible === false }));
   return <aside className="model-column"><div className="model-column-head"><span>{label || c.models}</span>{action}</div><div className="model-column-list">{rows.map((item) => <button key={item.id} draggable={Boolean(onMove)} className={item.id === active ? "active" : ""} onClick={() => onChange(item.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", item.id); }} onDragOver={(event) => { if (onMove) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }} onDrop={(event) => { if (!onMove) return; event.preventDefault(); onMove(event.dataTransfer.getData("text/plain"), item.id); }}><span className="model-type-icon">{item.icon}{item.status && <i className={`server-status-dot ${item.status}`} role="img" aria-label={item.statusLabel} title={item.statusLabel} />}</span><span><strong>{item.name}</strong>{item.detail && <small>{item.detail}</small>}</span>{item.hidden && <i className="hidden-model-dot" />}</button>)}</div></aside>;
 }
 
@@ -2188,7 +2218,7 @@ function ModelSettings({ c, draft, setDraft, activeModelId, setActiveModelId, ac
   return <div className="settings-section wide">
     <SectionTitle icon={<NeuralMark size={21} />} title={c.modelsTitle} description={c.modelsDesc} />
     <div className="split-model-editor">
-      <ModelColumn c={c} models={shownModels} active={activeModelId} onChange={setActiveModelId} showIdentifiers={draft.preferences.showModelIdentifiers !== false} onMove={moveModel} action={<OrderActions c={c} onAdd={addAlias} addLabel={c.newAlias} onUp={() => nudgeModel(-1)} onDown={() => nudgeModel(1)} disableUp={activeShownIndex <= 0} disableDown={activeShownIndex < 0 || activeShownIndex === shownModels.length - 1} />} />
+      <ModelColumn c={c} models={shownModels} connections={draft.connections} active={activeModelId} onChange={setActiveModelId} showIdentifiers={draft.preferences.showModelIdentifiers !== false} onMove={moveModel} action={<OrderActions c={c} onAdd={addAlias} addLabel={c.newAlias} onUp={() => nudgeModel(-1)} onDown={() => nudgeModel(1)} disableUp={activeShownIndex <= 0} disableDown={activeShownIndex < 0 || activeShownIndex === shownModels.length - 1} />} />
       <div className="model-editor-pane">{activeModel && shownModels.some((model) => model.id === activeModel.id) ? <div className="editor-card">
         {activeModel.isAlias && <div className="model-visibility-row"><div><strong>{c.publicModel}</strong><small>{c.publicModelDesc}</small></div><button role="switch" aria-label={c.publicModel} aria-checked={activeModel.isPublic === true} className={`toggle ${activeModel.isPublic ? "on" : ""}`} onClick={() => updateModel({ isPublic: !activeModel.isPublic })}><i /></button></div>}
         <div className="model-visibility-row"><div><strong>{c.showMain}</strong><small>{c.showMainDesc}</small></div><button role="switch" aria-label={c.showMain} aria-checked={activeModel.visible !== false} className={`toggle ${activeModel.visible !== false ? "on" : ""}`} onClick={() => updateModel({ visible: activeModel.visible === false })}><i /></button></div>
@@ -2234,7 +2264,7 @@ function ReasoningSettings({ c, draft, setDraft, activeModelId, setActiveModelId
     if (activeModel && selectedPreset && target) updateModel({ reasoningPresets: moveItemById(activeModel.reasoningPresets, selectedPreset.id, target.id) });
   }
   const presetActions = <OrderActions c={c} onAdd={() => { if (canEditModel) setActivePresetId(addPreset()); }} addLabel={c.addTemplate} disableAdd={!canEditModel} onUp={() => nudgePreset(-1)} onDown={() => nudgePreset(1)} disableUp={!canEditModel || activePresetIndex <= 0} disableDown={!canEditModel || activePresetIndex < 0 || activePresetIndex === editablePresets.length - 1} />;
-  return <div className="settings-section wide"><SectionTitle icon={<Lightbulb size={19} />} title={c.reasoningTitle} description={c.reasoningDesc} action={presetActions} /><div className="split-model-editor"><ModelColumn c={c} models={visibleModels} active={activeModelId} onChange={(id) => { setActiveModelId(id); setActivePresetId(draft.models.find((model) => model.id === id)?.reasoningPresets[0]?.id || ""); }} showIdentifiers={draft.preferences.showModelIdentifiers !== false} onMove={privileged ? moveModel : undefined} action={<OrderActions c={c} onUp={() => nudgeModel(-1)} onDown={() => nudgeModel(1)} disableUp={!privileged || activeModelIndex <= 0} disableDown={!privileged || activeModelIndex < 0 || activeModelIndex === visibleModels.length - 1} />} /><div className="model-editor-pane reasoning-pane">{activeModel ? <><div className="reason-capability"><div><strong>{c.nativeSupport}</strong><small>{activeModel.reasoningEfforts?.length ? `${hasEffort ? "Effort" : "Toggle"}: ${activeModel.reasoningEfforts.map(reasoningOptionName).join(", ")}` : c.noEffortMetadata}</small></div><button role="switch" aria-label={c.nativeSupport} aria-checked={activeModel.reasoningSupported} disabled={activeModel.isAlias || !privileged || !efforts.length} className={`toggle ${activeModel.reasoningSupported ? "on" : ""}`} onClick={() => updateModel({ reasoningSupported: !activeModel.reasoningSupported })}><i /></button></div><div className="preset-list">{editablePresets.map((preset) => <div className={`preset-editor ${preset.id === selectedPreset?.id ? "active" : ""}`} key={preset.id} onClick={() => setActivePresetId(preset.id)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }} onDrop={(event) => { event.preventDefault(); movePreset(event.dataTransfer.getData("text/plain"), preset.id); }}><div className="preset-editor-head"><span className={`kind-icon ${preset.kind}`} draggable title={c.priorityHelp} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", preset.id); }}><GripVertical size={15} /></span><input disabled={!canEditPreset(preset)} value={preset.name} onChange={(event) => patchPreset(preset.id, { name: event.target.value })} aria-label={c.reasoningPreset} /><button aria-label={`${draft.preferences.language === "ko" ? "추론 프리셋 삭제" : "Delete reasoning preset"}: ${preset.name}`} disabled={!canEditPreset(preset)} onClick={() => removePreset(preset.id)}><Trash2 size={15} /></button></div><div className="preset-editor-body">{activeModel.reasoningSupported && <label><span>{hasEffort ? c.nativeEffort : c.reasoningLevel}</span><SelectMenu label={hasEffort ? c.nativeEffort : c.reasoningLevel} disabled={!canEditPreset(preset)} value={efforts.includes(preset.effort || "") ? preset.effort || "" : ""} options={[{ value: "", label: c.doNotSend }, ...efforts.map((effort) => ({ value: effort, label: reasoningOptionName(effort) }))]} onChange={(value) => patchPreset(preset.id, { effort: value })} /></label>}<label><span>{c.promptHandling}</span><SelectMenu label={c.promptHandling} disabled={!canEditPreset(preset)} value={preset.systemPromptMode || "append"} options={[{ value: "replace", label: c.replace }, { value: "prepend", label: c.prepend }, { value: "append", label: c.append }]} onChange={(value) => patchPreset(preset.id, { systemPromptMode: value as ReasoningPreset["systemPromptMode"] })} /></label><div className="locked-field preset-prompt-field"><span>{c.additionalPrompt}</span><textarea rows={3} readOnly aria-label={c.additionalPrompt} value={preset.systemPrompt || ""} placeholder={c.systemPromptPlaceholder} /><button type="button" className="subtle-action" disabled={!canEditPreset(preset)} onClick={() => setPromptPresetId(preset.id)}><Pencil size={15} />{c.editPrompt}</button></div></div></div>)}{!editablePresets.length && <EmptyState text={c.noPresets} />}{!canEditModel && <p className="settings-help">{c.servedReasoningLocked}</p>}<p className="settings-help">{c.nativePresetNote}</p></div></> : <EmptyState text={c.noModel} />}</div></div>{promptPreset && <TextDialog ko={draft.preferences.language === "ko"} title={`${promptPreset.name} · ${c.additionalPrompt}`} value={promptPreset.systemPrompt || ""} multiline allowEmpty placeholder={c.systemPromptPlaceholder} saveLabel={c.saveEdit} cancelLabel={c.cancel} onClose={() => setPromptPresetId("")} onSave={(value) => { patchPreset(promptPreset.id, { systemPrompt: value }); setPromptPresetId(""); }} />}</div>;
+  return <div className="settings-section wide"><SectionTitle icon={<Lightbulb size={19} />} title={c.reasoningTitle} description={c.reasoningDesc} action={presetActions} /><div className="split-model-editor"><ModelColumn c={c} models={visibleModels} connections={draft.connections} active={activeModelId} onChange={(id) => { setActiveModelId(id); setActivePresetId(draft.models.find((model) => model.id === id)?.reasoningPresets[0]?.id || ""); }} showIdentifiers={draft.preferences.showModelIdentifiers !== false} onMove={privileged ? moveModel : undefined} action={<OrderActions c={c} onUp={() => nudgeModel(-1)} onDown={() => nudgeModel(1)} disableUp={!privileged || activeModelIndex <= 0} disableDown={!privileged || activeModelIndex < 0 || activeModelIndex === visibleModels.length - 1} />} /><div className="model-editor-pane reasoning-pane">{activeModel ? <><div className="reason-capability"><div><strong>{c.nativeSupport}</strong><small>{activeModel.reasoningEfforts?.length ? `${hasEffort ? "Effort" : "Toggle"}: ${activeModel.reasoningEfforts.map(reasoningOptionName).join(", ")}` : c.noEffortMetadata}</small></div><button role="switch" aria-label={c.nativeSupport} aria-checked={activeModel.reasoningSupported} disabled={activeModel.isAlias || !privileged || !efforts.length} className={`toggle ${activeModel.reasoningSupported ? "on" : ""}`} onClick={() => updateModel({ reasoningSupported: !activeModel.reasoningSupported })}><i /></button></div><div className="preset-list">{editablePresets.map((preset) => <div className={`preset-editor ${preset.id === selectedPreset?.id ? "active" : ""}`} key={preset.id} onClick={() => setActivePresetId(preset.id)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }} onDrop={(event) => { event.preventDefault(); movePreset(event.dataTransfer.getData("text/plain"), preset.id); }}><div className="preset-editor-head"><span className={`kind-icon ${preset.kind}`} draggable title={c.priorityHelp} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", preset.id); }}><GripVertical size={15} /></span><input disabled={!canEditPreset(preset)} value={preset.name} onChange={(event) => patchPreset(preset.id, { name: event.target.value })} aria-label={c.reasoningPreset} /><button aria-label={`${draft.preferences.language === "ko" ? "추론 프리셋 삭제" : "Delete reasoning preset"}: ${preset.name}`} disabled={!canEditPreset(preset)} onClick={() => removePreset(preset.id)}><Trash2 size={15} /></button></div><div className="preset-editor-body">{activeModel.reasoningSupported && <label><span>{hasEffort ? c.nativeEffort : c.reasoningLevel}</span><SelectMenu label={hasEffort ? c.nativeEffort : c.reasoningLevel} disabled={!canEditPreset(preset)} value={efforts.includes(preset.effort || "") ? preset.effort || "" : ""} options={[{ value: "", label: c.doNotSend }, ...efforts.map((effort) => ({ value: effort, label: reasoningOptionName(effort) }))]} onChange={(value) => patchPreset(preset.id, { effort: value })} /></label>}<label><span>{c.promptHandling}</span><SelectMenu label={c.promptHandling} disabled={!canEditPreset(preset)} value={preset.systemPromptMode || "append"} options={[{ value: "replace", label: c.replace }, { value: "prepend", label: c.prepend }, { value: "append", label: c.append }]} onChange={(value) => patchPreset(preset.id, { systemPromptMode: value as ReasoningPreset["systemPromptMode"] })} /></label><div className="locked-field preset-prompt-field"><span>{c.additionalPrompt}</span><textarea rows={3} readOnly aria-label={c.additionalPrompt} value={preset.systemPrompt || ""} placeholder={c.systemPromptPlaceholder} /><button type="button" className="subtle-action" disabled={!canEditPreset(preset)} onClick={() => setPromptPresetId(preset.id)}><Pencil size={15} />{c.editPrompt}</button></div></div></div>)}{!editablePresets.length && <EmptyState text={c.noPresets} />}{!canEditModel && <p className="settings-help">{c.servedReasoningLocked}</p>}<p className="settings-help">{c.nativePresetNote}</p></div></> : <EmptyState text={c.noModel} />}</div></div>{promptPreset && <TextDialog ko={draft.preferences.language === "ko"} title={`${promptPreset.name} · ${c.additionalPrompt}`} value={promptPreset.systemPrompt || ""} multiline allowEmpty placeholder={c.systemPromptPlaceholder} saveLabel={c.saveEdit} cancelLabel={c.cancel} onClose={() => setPromptPresetId("")} onSave={(value) => { patchPreset(promptPreset.id, { systemPrompt: value }); setPromptPresetId(""); }} />}</div>;
 }
 
 const storageBytesLabel=(bytes:number)=>bytes>=1024**3?`${(bytes/1024**3).toFixed(2)} GB`:`${(bytes/1024**2).toFixed(1)} MB`;

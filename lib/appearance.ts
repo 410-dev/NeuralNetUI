@@ -16,8 +16,7 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   accentPalette: "blue",
   accentColor: "#4d7fd8",
   streamReveal: "instant",
-  streamPacing: "immediate",
-  streamChunkSize: 3,
+  streamFadeDurationMs: 240,
   showReasoningNotes: true,
   reasoningNotes: {},
   greetings: {},
@@ -123,16 +122,6 @@ export function accentVariables(hex: string): Record<string, string> {
   };
 }
 
-/**
- * Next slice of text to show. Chunked pacing releases a fixed number of characters per step so
- * bursty snapshots read as even typing; rewritten content resynchronises immediately.
- */
-export function revealStep(shown: string, target: string, chunkSize: number): string {
-  if (!target.startsWith(shown)) return target;
-  if (shown.length >= target.length) return target;
-  return target.slice(0, Math.min(target.length, shown.length + Math.max(1, Math.floor(chunkSize))));
-}
-
 const knownPalette = (value: string | undefined): value is AccentPaletteId =>
   value === "custom" || ACCENT_PALETTES.some((entry) => entry.id === value);
 
@@ -150,8 +139,7 @@ export function normalizeAppearance(input: Partial<AppearancePreferences> | unde
     accentPalette: palette,
     accentColor: normalizeHexColor(input?.accentColor),
     streamReveal: input?.streamReveal === "fade" ? "fade" : "instant",
-    streamPacing: input?.streamPacing === "chunked" ? "chunked" : "immediate",
-    streamChunkSize: clamp(Math.floor(Number(input?.streamChunkSize) || DEFAULT_APPEARANCE.streamChunkSize), 1, 24),
+    streamFadeDurationMs: clamp(Math.floor(Number(input?.streamFadeDurationMs) || DEFAULT_APPEARANCE.streamFadeDurationMs), 80, 800),
     showReasoningNotes: input?.showReasoningNotes !== false,
     reasoningNotes: normalizeReasoningNotes(input?.reasoningNotes),
     greetings: normalizeGreetings(input?.greetings),

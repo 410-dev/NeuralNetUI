@@ -29,8 +29,7 @@ const appearanceSchema = z.object({
   accentPalette: z.enum(["blue", "violet", "teal", "amber", "rose", "graphite", "custom"]).default("blue"),
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).default(DEFAULT_APPEARANCE.accentColor),
   streamReveal: z.enum(["instant", "fade"]).default("instant"),
-  streamPacing: z.enum(["immediate", "chunked"]).default("immediate"),
-  streamChunkSize: z.number().int().min(1).max(24).default(DEFAULT_APPEARANCE.streamChunkSize),
+  streamFadeDurationMs: z.number().int().min(80).max(800).default(DEFAULT_APPEARANCE.streamFadeDurationMs),
   showReasoningNotes: z.boolean().default(true),
   greetings: z.object({
     ko: z.partialRecord(z.enum(["earlyDawn", "morning", "midday", "afternoon", "evening", "night", "lateNight"]), z.array(z.string().max(200)).max(5)).optional(),

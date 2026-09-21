@@ -4,7 +4,7 @@
 
 ![NeuralNetUI](neuralnetui.png)
 
-`3.0.0-rc1-b20` · Node.js 22+ · Next.js 16 · SQLite
+`3.0.0-rc2-b21` · Node.js 22+ · Next.js 16 · SQLite
 
 ## 주요 기능
 

@@ -37,3 +37,12 @@ test("saved model order remains independent from connection priority", () => {
   ];
   assert.deepEqual(resolveConnectionModels(connections, [], ["c", "a", "b"]).map(({ id }) => id), ["c", "a", "b"]);
 });
+
+test("removing a connection immediately drops its models and reveals lower-priority duplicates", () => {
+  const top: ConnectionConfig = { id: "top", name: "Top", driver: "openai", baseUrl: "http://top/v1", apiKey: "", models: [model("same", "top", "Top model"), model("removed", "top")] };
+  const lower: ConnectionConfig = { id: "lower", name: "Lower", driver: "lmstudio", baseUrl: "http://lower", apiKey: "", models: [model("same", "lower", "Lower model"), model("kept", "lower")] };
+  const before = resolveConnectionModels([top, lower]);
+  const after = resolveConnectionModels([lower], [], before.map(item => item.id));
+  assert.deepEqual(after.map(({ name, connectionId }) => [name, connectionId]), [["Lower model", "lower"], ["kept", "lower"]]);
+  assert.equal(after.some(item => item.id === "removed"), false);
+});

@@ -227,7 +227,7 @@
 ## Appearance choices
 
 - Accent palettes are named swatches plus one custom colour. The settings panel previews the chosen accent live and restores the saved one if the panel is dismissed.
-- Streaming has two independent presentation choices: whether newly settled text fades in, and whether bursts of tokens are released immediately or spread evenly.
+- Streaming always displays every received token immediately. The presentation choice controls whether each newly received text fragment uses a 0ms reveal or an adjustable per-fragment fade; settled Markdown and code-snippet chrome must never reanimate.
 - Presentation preferences never change what is sent to a model, and never alter stored conversation content.
 
 ## Progress and context (2.1.1)

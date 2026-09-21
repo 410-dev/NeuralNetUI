@@ -10,7 +10,6 @@ export type ModelWaitPolicy = "capacity" | "serial";
 export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response" | "processing-prompt" | "compacting-context";
 export type AccentPaletteId = "blue" | "violet" | "teal" | "amber" | "rose" | "graphite" | "custom";
 export type StreamReveal = "instant" | "fade";
-export type StreamPacing = "immediate" | "chunked";
 
 /** Per-user presentation choices that never affect what is sent to a model. */
 export interface AppearancePreferences {
@@ -19,9 +18,8 @@ export interface AppearancePreferences {
   /** Used when the palette is "custom". */
   accentColor: string;
   streamReveal: StreamReveal;
-  streamPacing: StreamPacing;
-  /** Characters released per step while pacing is "chunked". */
-  streamChunkSize: number;
+  /** Duration of the fade applied independently to each newly received text fragment. */
+  streamFadeDurationMs: number;
   /** Show each reasoning choice's description in the chat picker. */
   showReasoningNotes: boolean;
   /** Per-effort description overrides. An absent key falls back to the built-in wording. */

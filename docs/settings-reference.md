@@ -39,8 +39,7 @@
 | 커스텀 액센트 색 | — | `#RRGGBB` |
 | 로그인 화면 액센트 (관리자) | blue | 위와 동일 |
 | 스트리밍 표시 방식 | `instant` | `instant`, `fade` |
-| 스트리밍 속도 | `immediate` | `immediate`, `chunked` |
-| 조각 크기 | 3 | 1 ~ 24 |
+| 토큰별 페이드 시간 | 240ms | 80 ~ 800ms (`instant`는 항상 0ms) |
 | 진행률 표시 | `both` | `text`, `percent`, `donut`, `both` |
 | 추론 설명 표시 | 켜짐 | — |
 | 추론 설명 덮어쓰기 | 기본 문구 | 강도별 200자 |
