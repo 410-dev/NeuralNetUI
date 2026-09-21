@@ -4,11 +4,11 @@ import { isIP } from "node:net";
 import path from "node:path";
 import { existsSync, promises as fs } from "node:fs";
 import os from "node:os";
-import { classifyDocument, cleanupTemporaryDocuments, decodeTextDocument, pdfModelContent, sniffDocument, sniffRasterMimeType, type ModelContentPart } from "./document-processing";
-import { pageVisitHeaders } from "./page-visit-request";
-import type { ToolSettings } from "./types";
+import { classifyDocument, cleanupTemporaryDocuments, decodeTextDocument, pdfModelContent, sniffDocument, sniffRasterMimeType, type ModelContentPart } from "./document-processing.ts";
+import { pageVisitHeaders } from "./page-visit-request.ts";
+import type { ToolSettings } from "./types.ts";
 
-export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; browser?: boolean; storageAccess?: boolean; currentTime?: boolean; location?: boolean; multipleChoice?: boolean; hostComputer?: boolean; mcpConnectionIds?: string[] };
+export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; browser?: boolean; storageAccess?: boolean; currentTime?: boolean; location?: boolean; multipleChoice?: boolean; artifact?: boolean; hostComputer?: boolean; mcpConnectionIds?: string[]; mcpToolNames?: Record<string,string[]> };
 export type WebToolExecution = { result: unknown; content?: ModelContentPart[] };
 
 export function toolDefinitions(enabled: EnabledWebTools, settings: ToolSettings) {
@@ -96,6 +96,14 @@ export function toolDefinitions(enabled: EnabledWebTools, settings: ToolSettings
         },
         required: ["questions"], additionalProperties: false,
       },
+    },
+  });
+  if (enabled.artifact) tools.push({
+    type:"function",
+    function:{
+      name:"create_artifact",
+      description:"Create a rich artifact that the user can open beside the conversation. Use HTML for interactive mini-apps or visual documents, CSV for datasets, JSON or XML for structured data, and Markdown for formatted documents. Put the complete source in content.",
+      parameters:{type:"object",properties:{title:{type:"string",description:"Short artifact title"},kind:{type:"string",enum:["html","csv","json","xml","markdown"]},content:{type:"string",description:"Complete artifact source"}},required:["title","kind","content"],additionalProperties:false},
     },
   });
   return tools;
@@ -265,6 +273,12 @@ export async function executeWebTool(name: string, rawArguments: string, enabled
   signal?.throwIfAborted();
   let args: Record<string, unknown> = {};
   try { args = JSON.parse(rawArguments || "{}"); } catch { throw new Error("Tool arguments were not valid JSON."); }
+  if(name==="create_artifact"&&enabled.artifact){
+    const kind=String(args.kind||"");const title=String(args.title||"").trim().slice(0,160),content=String(args.content??"");
+    if(!["html","csv","json","xml","markdown"].includes(kind)||!title)throw new Error("Artifact title and kind are required.");
+    if(Buffer.byteLength(content,"utf8")>1_000_000)throw new Error("Artifacts are limited to 1 MB.");
+    return {result:{artifact:{title,kind,content,updatedAt:new Date().toISOString()}}};
+  }
   if (name === "internet_search" && enabled.internetSearch) return { result: await internetSearch(String(args.query || ""), Number(args.max_results || 5), signal) };
   if (name === "visit_page" && enabled.pageVisit) return visitPage(String(args.url || ""), settings, signal);
   throw new Error(`Tool ${name} is not enabled.`);

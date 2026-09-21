@@ -6,6 +6,8 @@ export type SystemPromptMode = "replace" | "prepend" | "append";
 export type Locale = "en" | "ko";
 export type ConnectionDriver = "openai" | "lmstudio" | "nnui";
 export type McpAuthType = "oauth" | "api_key" | "none";
+export type McpToolPolicy = "blocked" | "always_ask" | "session_ask" | "always_allow";
+export type ArtifactKind = "html" | "csv" | "json" | "xml" | "markdown";
 export type ModelWaitPolicy = "capacity" | "serial";
 export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response" | "processing-prompt" | "compacting-context";
 export type AccentPaletteId = "blue" | "violet" | "teal" | "amber" | "rose" | "graphite" | "custom";
@@ -139,6 +141,20 @@ export interface McpConnection {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface McpToolInfo {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+  policy: McpToolPolicy;
+}
+
+export interface ArtifactDocument {
+  title: string;
+  kind: ArtifactKind;
+  content: string;
+  updatedAt?: string;
 }
 
 export interface McpEntitlement {
@@ -323,8 +339,11 @@ export interface EnabledTools {
   currentTime: boolean;
   location: boolean;
   multipleChoice: boolean;
+  artifact: boolean;
   hostComputer: boolean;
   mcpConnectionIds: string[];
+  /** Per-chat MCP tool allow-list. Missing connections use every non-blocked tool. */
+  mcpToolNames: Record<string, string[]>;
 }
 
 export interface StoredAttachment {

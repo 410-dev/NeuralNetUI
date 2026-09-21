@@ -4,12 +4,13 @@ import { Client, StreamableHTTPClientTransport, type AuthProvider, type Tool } f
 import { z } from "zod";
 import { AuthError } from "./auth";
 import { db } from "./database";
-import type { McpAuthType, McpConnection, McpEntitlement } from "./types";
+import type { McpAuthType, McpConnection, McpEntitlement, McpToolInfo, McpToolPolicy } from "./types";
 import type { ModelContentPart } from "./document-processing";
 import { classifyMcpAddress, mcpToolAlias } from "./mcp-utils";
 
 const MAX_RESULT_CHARS = 100_000;
 const CONNECTION_TIMEOUT_MS = 20_000;
+const DEFAULT_TOOL_POLICY: McpToolPolicy = "session_ask";
 
 type McpRow = {
   id: string; user_id: string; name: string; description: string; url: string;
@@ -111,6 +112,31 @@ async function connectedClient(row: McpRow, signal?: AbortSignal) {
   return client;
 }
 
+function toolPolicies(connectionId: string) {
+  return new Map((db.prepare("SELECT tool_name,policy FROM mcp_tool_policies WHERE connection_id=?").all(connectionId) as Array<{tool_name:string;policy:McpToolPolicy}>).map(item=>[item.tool_name,item.policy]));
+}
+
+export async function listMcpTools(userId: string, connectionId: string, signal?: AbortSignal): Promise<McpToolInfo[]> {
+  assertEntitled(userId);
+  const row=ownedRow(userId,connectionId);
+  if(!row.enabled)throw new AuthError("이 MCP 연결은 비활성화되어 있습니다.",403);
+  const policies=toolPolicies(connectionId),client=await connectedClient(row,signal);
+  try {
+    const result=await client.listTools(undefined,{signal:requestSignal(signal),cacheMode:"bypass"});
+    return result.tools.map(tool=>({name:tool.name,description:tool.description,inputSchema:tool.inputSchema,policy:policies.get(tool.name)||DEFAULT_TOOL_POLICY}));
+  } finally { await client.close().catch(()=>undefined); }
+}
+
+export function saveMcpToolPolicies(userId:string,connectionId:string,input:unknown){
+  assertEntitled(userId);ownedRow(userId,connectionId);
+  const source=input&&typeof input==="object"?input as Record<string,unknown>:{};
+  const entries=Array.isArray(source.tools)?source.tools:[];
+  const parsed=entries.map(item=>{const value=item&&typeof item==="object"?item as Record<string,unknown>:{};const name=String(value.name||"").trim(),policy=String(value.policy||"") as McpToolPolicy;if(!name||name.length>200||!["blocked","always_ask","session_ask","always_allow"].includes(policy))throw new AuthError("올바르지 않은 MCP 도구 정책입니다.",400);return{name,policy};});
+  const stamp=new Date().toISOString(),statement=db.prepare("INSERT INTO mcp_tool_policies(connection_id,tool_name,policy,updated_at) VALUES(?,?,?,?) ON CONFLICT(connection_id,tool_name) DO UPDATE SET policy=excluded.policy,updated_at=excluded.updated_at");
+  db.transaction(()=>{for(const item of parsed)statement.run(connectionId,item.name,item.policy,stamp);})();
+  return {saved:parsed.length};
+}
+
 export async function testMcpConnection(userId: string, input: unknown & { id?: string }, signal?: AbortSignal) {
   assertEntitled(userId);
   const source = input && typeof input === "object" ? input as Record<string, unknown> : {};
@@ -124,23 +150,25 @@ export async function testMcpConnection(userId: string, input: unknown & { id?: 
   finally { await client.close().catch(() => undefined); }
 }
 
-export type McpToolBinding = { advertisedName: string; connectionId: string; connectionName: string; toolName: string; tool: Tool };
+export type McpToolBinding = { advertisedName: string; connectionId: string; connectionName: string; toolName: string; tool: Tool; policy: McpToolPolicy };
 
-export async function mcpToolDefinitions(userId: string, selectedIds: string[], signal?: AbortSignal): Promise<{ definitions: Array<Record<string, unknown>>; bindings: Map<string, McpToolBinding> }> {
+export async function mcpToolDefinitions(userId: string, selectedIds: string[], selectedTools: Record<string,string[]> = {}, signal?: AbortSignal): Promise<{ definitions: Array<Record<string, unknown>>; bindings: Map<string, McpToolBinding> }> {
   if (!selectedIds.length) return { definitions: [], bindings: new Map() };
   assertEntitled(userId);
   const ids = [...new Set(selectedIds)].slice(0, 100);
   const rows = ids.map(id => ownedRow(userId, id)).filter(row => row.enabled === 1);
   const listed = await Promise.all(rows.map(async row => {
     const client = await connectedClient(row, signal);
-    try { return { row, tools: (await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" })).tools }; }
+    try { return { row, tools: (await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" })).tools, policies:toolPolicies(row.id) }; }
     finally { await client.close().catch(() => undefined); }
   }));
   const definitions: Array<Record<string, unknown>> = [], bindings = new Map<string, McpToolBinding>();
-  for (const { row, tools } of listed) for (const tool of tools) {
+  for (const { row, tools, policies } of listed) for (const tool of tools) {
+    const policy=policies.get(tool.name)||DEFAULT_TOOL_POLICY;
+    if(policy==="blocked"||(Object.hasOwn(selectedTools,row.id)&&!selectedTools[row.id].includes(tool.name)))continue;
     let advertisedName = mcpToolAlias(row.id, tool.name), suffix = 2;
     while (bindings.has(advertisedName)) advertisedName = `${mcpToolAlias(row.id, tool.name).slice(0, 60)}_${suffix++}`;
-    bindings.set(advertisedName, { advertisedName, connectionId: row.id, connectionName: row.name, toolName: tool.name, tool });
+    bindings.set(advertisedName, { advertisedName, connectionId: row.id, connectionName: row.name, toolName: tool.name, tool, policy });
     definitions.push({ type: "function", function: { name: advertisedName, description: `[MCP: ${row.name}] ${tool.description || tool.name}`, parameters: tool.inputSchema || { type: "object", properties: {} } } });
   }
   return { definitions, bindings };

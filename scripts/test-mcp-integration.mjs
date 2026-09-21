@@ -71,6 +71,10 @@ try {
   assert.equal(overLimit.status, 409);
   const listed = await json("/api/mcp-connections");
   assert.equal(listed.connections.length, 2); assert.ok(listed.connections.every(item => !("credential" in item)));
+  const toolInventory=await json(`/api/mcp-connections/${first.id}/tools`);
+  assert.equal(toolInventory.tools[0].policy,"session_ask");
+  await json(`/api/mcp-connections/${first.id}/tools`,"PUT",{tools:[{name:"echo",policy:"always_allow"}]});
+  assert.equal((await json(`/api/mcp-connections/${first.id}/tools`)).tools[0].policy,"always_allow");
 
   const backupCredentials = encodeURIComponent(JSON.stringify({ username: "mcpqa", password: "Mcp-QA-Password-2026" }));
   const backupResponse = await fetch(`${root}/api/backup?scope=personal`, { headers: { cookie, "X-Backup-Credentials": backupCredentials }, signal: AbortSignal.timeout(60_000) });
@@ -82,6 +86,7 @@ try {
   assert.equal(restore.status, 200, await restore.text());
   const restored = await json("/api/mcp-connections");
   assert.equal(restored.connections.length, 2); assert.ok(restored.connections.every(item => !("credential" in item)));
+  assert.equal((await json(`/api/mcp-connections/${first.id}/tools`)).tools[0].policy,"always_allow","tool policy survives backup restore");
   assert.equal((await json("/api/mcp-connections/test", "POST", { ...base, id: first.id, credential: "" })).toolCount, 1, "restored credentials remain usable");
 
   const changedAuth = await request(`/api/mcp-connections/${first.id}`, "PUT", { ...base, id: first.id, authType: "oauth", credential: "" });

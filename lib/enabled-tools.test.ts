@@ -12,7 +12,13 @@ test("saved tool switches override defaults and ignore unknown values", () => {
 });
 
 test("MCP selections are deduplicated, bounded, and reject malformed values", () => {
-  const tools = normalizeEnabledTools({ mcpConnectionIds: ["one", "one", 4, "", "two"] });
+  const tools = normalizeEnabledTools({ mcpConnectionIds: ["one", "one", 4, "", "two"],mcpToolNames:{one:["search","search",4,""],two:"bad"} });
   assert.deepEqual(tools.mcpConnectionIds, ["one", "two"]);
+  assert.deepEqual(tools.mcpToolNames,{one:["search"]});
   assert.deepEqual(normalizeEnabledTools({ mcpConnectionIds: "one" }).mcpConnectionIds, []);
+});
+
+test("artifact is enabled by default and can be disabled",()=>{
+  assert.equal(normalizeEnabledTools(undefined).artifact,true);
+  assert.equal(normalizeEnabledTools({artifact:false}).artifact,false);
 });

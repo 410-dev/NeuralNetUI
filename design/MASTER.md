@@ -56,6 +56,8 @@
 - Keep host-approval explanations inside the card width and preserve authored line breaks while wrapping long paths and commands. Let the explanation grow through six lines, then scroll it vertically. The argument disclosure must end at the card's inner edge and scroll independently in both axes.
 - Keep user-message bubbles within the conversation column. Long URLs and other unbroken text must wrap inside the bubble without creating page-level horizontal overflow.
 - Stopping generation while a tool is active must propagate cancellation to that operation, including long-running host commands and agent waits.
+- MCP connection rows reveal per-session tools in place. Keep the connection switch on the far right and put the fold immediately to its left; blocked tools remain visible but disabled so policy and session state cannot be confused.
+- Artifact results leave the technical tool disclosure and become quiet message cards. Open them into one near-viewport work surface: isolated HTML, tabular CSV, foldable structured data, or rendered Markdown. Non-HTML editing keeps source and live rendering visible together.
 
 ## Shared browser surface
 

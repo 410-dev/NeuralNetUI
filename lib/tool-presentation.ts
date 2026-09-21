@@ -11,6 +11,7 @@ const TOOL_NAMES: Record<string, Record<Locale, string>> = {
   get_current_time: { en: "Current time", ko: "현재 시간" },
   get_current_location: { en: "Current location", ko: "현재 위치" },
   ask_multiple_choice: { en: "Multiple choice", ko: "다중 선택" },
+  create_artifact: { en: "Artifact", ko: "아티팩트" },
 };
 
 export function getToolDisplayName(name: string, locale: Locale) {

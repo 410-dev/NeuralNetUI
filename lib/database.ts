@@ -441,6 +441,19 @@ function openDatabase() {
     `);
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(19, new Date().toISOString());
   })();
+  const mcpToolPolicyVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (mcpToolPolicyVersion.version < 20) connection.transaction(() => {
+    connection.exec(`
+      CREATE TABLE mcp_tool_policies (
+        connection_id TEXT NOT NULL REFERENCES mcp_connections(id) ON DELETE CASCADE,
+        tool_name TEXT NOT NULL,
+        policy TEXT NOT NULL CHECK (policy IN ('blocked', 'always_ask', 'session_ask', 'always_allow')),
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (connection_id, tool_name)
+      );
+    `);
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(20, new Date().toISOString());
+  })();
   return connection;
 }
 

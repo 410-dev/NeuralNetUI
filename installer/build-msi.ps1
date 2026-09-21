@@ -113,7 +113,7 @@ try {
         -ext WixToolset.UI.wixext `
         -d "StagePath=$stageRoot" `
         -intermediatefolder (Join-Path $buildRoot "wixobj") `
-        -o (Join-Path $outputRoot "NeuralNetUI-3.0.0-rc2-b21-x64.msi")
+        -o (Join-Path $outputRoot "NeuralNetUI-3.0.0-rc3-b22-x64.msi")
     if ($LASTEXITCODE -ne 0) { throw "The MSI build failed." }
 } finally {
     Pop-Location

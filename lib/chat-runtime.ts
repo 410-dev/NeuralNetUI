@@ -426,10 +426,24 @@ function validateQuestions(value: unknown, maximum: number) {
 
 type ToolExecution = { result: unknown; content?: ModelContentPart[] };
 
+const approvedMcpSessions=new Map<string,number>();
+export function clearMcpSessionApprovals(userId:string,conversationId:string){const prefix=`${userId}:${conversationId}:`;for(const key of approvedMcpSessions.keys())if(key.startsWith(prefix))approvedMcpSessions.delete(key);}
+function pruneMcpSessionApprovals(){const cutoff=Date.now()-12*60*60*1000;for(const[key,stamp]of approvedMcpSessions)if(stamp<cutoff)approvedMcpSessions.delete(key);}
+
 async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings, hostPolicy: HostExecutionPolicy, model: ModelConfig, mcpBindings: Map<string, McpToolBinding>): Promise<ToolExecution> {
   const args = parseArguments(call.function.arguments);
   const mcpBinding = mcpBindings.get(call.function.name);
-  if (mcpBinding) return executeMcpTool(job.userId, mcpBinding, args, job.controller.signal);
+  if (mcpBinding) {
+    const approvalKey=`${job.userId}:${job.input.conversationId}:${mcpBinding.connectionId}:${mcpBinding.toolName}`;
+    pruneMcpSessionApprovals();
+    if(mcpBinding.policy==="always_ask"||(mcpBinding.policy==="session_ask"&&!approvedMcpSessions.has(approvalKey))){
+      updateToolEvent(job,call.id,{arguments:{...args,_mcpApproval:{connectionName:mcpBinding.connectionName,toolName:mcpBinding.toolName,policy:mcpBinding.policy}}});
+      const response=await waitForBrowser(job,call);const decision=response&&typeof response==="object"?String((response as Record<string,unknown>).decision||"reject"):"reject";
+      if(decision!=="approve")return {result:{executed:false,rejected:true,connection:mcpBinding.connectionName,tool:mcpBinding.toolName}};
+      if(mcpBinding.policy==="session_ask")approvedMcpSessions.set(approvalKey,Date.now());
+    }
+    return executeMcpTool(job.userId, mcpBinding, args, job.controller.signal);
+  }
   if (call.function.name === "get_current_time" && enabled.currentTime) return { result: currentTime(job.input.clientContext?.timeZone, job.input.clientContext?.locale || "en-US") };
   if (call.function.name === "get_current_location" && enabled.location) {
     const browserResult = await waitForBrowser(job, call);
@@ -483,11 +497,13 @@ async function run(job: ChatJob) {
       browser: job.input.tools?.browser === true && config.experimental?.browserTool === true,
       storageAccess: job.input.tools?.storageAccess === true,
       currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
+      artifact: job.input.tools?.artifact === true,
       hostComputer: job.input.tools?.hostComputer === true && canUseHostComputer(job.userRole, config.experimental?.hostComputerTool === true),
       mcpConnectionIds: Array.isArray(job.input.tools?.mcpConnectionIds) ? job.input.tools.mcpConnectionIds : [],
+      mcpToolNames: job.input.tools?.mcpToolNames&&typeof job.input.tools.mcpToolNames==="object"?job.input.tools.mcpToolNames:{},
     };
     const tools = toolDefinitions(enabled, config.toolSettings);
-    const mcpTools = await mcpToolDefinitions(job.userId, enabled.mcpConnectionIds || [], job.controller.signal);
+    const mcpTools = await mcpToolDefinitions(job.userId, enabled.mcpConnectionIds || [], enabled.mcpToolNames||{}, job.controller.signal);
     tools.push(...mcpTools.definitions);
     if (enabled.storageAccess) tools.push(storageAccessToolDefinition());
     const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
