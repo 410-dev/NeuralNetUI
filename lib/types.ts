@@ -219,6 +219,8 @@ export interface AppConfig {
   loginAppearance: LoginAppearance;
   /** Workspace-wide: every account sees its plan's model weight badges in the chat picker. */
   showModelWeights: boolean;
+  /** Workspace-wide: show connection/server names below models in the chat picker. */
+  showModelConnectionNames: boolean;
   userStorageSettings: UserStorageSettings;
   harnessSettings?: HarnessSettings;
   toolSettings: ToolSettings;
@@ -336,6 +338,11 @@ export interface EnabledTools {
   pageVisit: boolean;
   browser: boolean;
   storageAccess: boolean;
+  /** Fine-grained private-storage permissions for the current chat session. */
+  storageRead: boolean;
+  storageWrite: boolean;
+  /** Maximum text files the storage tool may create in one conversation. */
+  storageWriteMaxFiles: number;
   currentTime: boolean;
   location: boolean;
   multipleChoice: boolean;
@@ -407,6 +414,8 @@ export type PublicConfig = Omit<AppConfig, "connections"> & {
   hostComputerAvailable?: boolean;
   /** Present while weight badges are enabled: the account's plan weights other than 1, keyed by picker model id. */
   modelWeights?: Record<string, number>;
+  /** Runtime-only plan allow-list used by the chat picker, including for administrators. */
+  planModelIds: string[];
   /** Runtime-only, user-owned MCP records. Credentials are never included. */
   mcpConnections: McpConnection[];
   mcpEntitlement: McpEntitlement;

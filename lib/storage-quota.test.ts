@@ -35,4 +35,13 @@ test("user storage quota is enforced atomically and generated images are retaine
   await assert.rejects(saveGeneratedImage(Buffer.concat([pngHeader,Buffer.alloc(1024*1024)]),id),/quota exceeded/i);
 });
 
+test("storage tool writes only text formats and enforces the conversation limit",async()=>{
+  const id=crypto.randomUUID(),stamp=new Date().toISOString();db.prepare("INSERT INTO users(id,username,display_name,password_hash,role,preferences,storage_quota_bytes,created_at,updated_at) VALUES(?,?,?,?,?,'{}',?,?,?)").run(id,`writer-${id}`,"Writer","unused","user",1024*1024,stamp,stamp);
+  const written=await executeStorageAccessTool({action:"write",name:"notes",kind:"markdown",content:"# Hello"},id,toolSettings,{read:false,write:true,maxWrites:2,writesUsed:0}) as {result:{file:{name:string;mimeType:string};remaining:number}};
+  assert.equal(written.result.file.name,"notes.md");assert.equal(written.result.file.mimeType,"text/markdown");assert.equal(written.result.remaining,1);
+  await assert.rejects(executeStorageAccessTool({action:"write",name:"blocked",kind:"markdown",content:"x"},id,toolSettings,{read:false,write:true,maxWrites:1,writesUsed:1}),/write limit/i);
+  await assert.rejects(executeStorageAccessTool({action:"write",name:"binary",kind:"html",content:"<b>x</b>"},id,toolSettings,{read:false,write:true,maxWrites:2,writesUsed:0}),/only plain text and Markdown/i);
+  await assert.rejects(executeStorageAccessTool({action:"search"},id,toolSettings,{read:false,write:true,maxWrites:2}),/read access is disabled/i);
+});
+
 test.after(async()=>{db.close();await rm(root,{recursive:true,force:true});});

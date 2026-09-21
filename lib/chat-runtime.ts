@@ -8,6 +8,7 @@ import { db } from "./database";
 import { registerChatDisposal } from "./chat-disposal";
 import { reasoningEffort } from "./model-edits";
 import { restoreToolHistory, settlePendingTools } from "./conversation-messages";
+import { describeMcpApproval } from "./mcp-approval";
 import { readSsePayload } from "./stream-protocol";
 import { canUseModel, readConfig } from "./config";
 import { readConversation, writeConversation, renameConversation } from "./conversations";
@@ -430,6 +431,17 @@ const approvedMcpSessions=new Map<string,number>();
 export function clearMcpSessionApprovals(userId:string,conversationId:string){const prefix=`${userId}:${conversationId}:`;for(const key of approvedMcpSessions.keys())if(key.startsWith(prefix))approvedMcpSessions.delete(key);}
 function pruneMcpSessionApprovals(){const cutoff=Date.now()-12*60*60*1000;for(const[key,stamp]of approvedMcpSessions)if(stamp<cutoff)approvedMcpSessions.delete(key);}
 
+function storageWriteCount(job:ChatJob){
+  const seen=new Set<string>();let count=0;
+  const messages=[...job.conversation.branches.flatMap(branch=>branch.messages),job.message];
+  for(const message of messages)for(const event of message.toolEvents||[]){
+    if(seen.has(event.id)||event.name!=="storage_access"||event.status!=="completed")continue;seen.add(event.id);
+    const args=event.arguments&&typeof event.arguments==="object"?event.arguments as Record<string,unknown>:{};
+    if(String(args.action||"").toLowerCase()==="write")count++;
+  }
+  return count;
+}
+
 async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings, hostPolicy: HostExecutionPolicy, model: ModelConfig, mcpBindings: Map<string, McpToolBinding>): Promise<ToolExecution> {
   const args = parseArguments(call.function.arguments);
   const mcpBinding = mcpBindings.get(call.function.name);
@@ -437,7 +449,8 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
     const approvalKey=`${job.userId}:${job.input.conversationId}:${mcpBinding.connectionId}:${mcpBinding.toolName}`;
     pruneMcpSessionApprovals();
     if(mcpBinding.policy==="always_ask"||(mcpBinding.policy==="session_ask"&&!approvedMcpSessions.has(approvalKey))){
-      updateToolEvent(job,call.id,{arguments:{...args,_mcpApproval:{connectionName:mcpBinding.connectionName,toolName:mcpBinding.toolName,policy:mcpBinding.policy}}});
+      const locale=job.input.clientContext?.language==="ko"||job.input.clientContext?.locale?.toLowerCase().startsWith("ko")?"ko":"en";
+      updateToolEvent(job,call.id,{arguments:{...args,_mcpApproval:{connectionName:mcpBinding.connectionName,toolName:mcpBinding.toolName,policy:mcpBinding.policy,explanation:describeMcpApproval(mcpBinding.toolName,mcpBinding.tool.description,args,locale)}}});
       const response=await waitForBrowser(job,call);const decision=response&&typeof response==="object"?String((response as Record<string,unknown>).decision||"reject"):"reject";
       if(decision!=="approve")return {result:{executed:false,rejected:true,connection:mcpBinding.connectionName,tool:mcpBinding.toolName}};
       if(mcpBinding.policy==="session_ask")approvedMcpSessions.set(approvalKey,Date.now());
@@ -470,7 +483,7 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
     if (!authorization.approved) return { result: authorization.result };
     return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args, job.userId, settings, model, job.controller.signal);
   }
-  if (call.function.name === "storage_access" && enabled.storageAccess) return executeStorageAccessTool(args, job.userId, settings, model, job.controller.signal);
+  if (call.function.name === "storage_access" && enabled.storageAccess) return executeStorageAccessTool(args,job.userId,settings,{read:enabled.storageRead===true,write:enabled.storageWrite===true,maxWrites:enabled.storageWriteMaxFiles||5,writesUsed:storageWriteCount(job)},model,job.controller.signal);
   return executeWebTool(call.function.name, call.function.arguments, enabled, settings, job.controller.signal);
 }
 
@@ -496,6 +509,9 @@ async function run(job: ChatJob) {
       internetSearch: job.input.tools?.internetSearch === true, pageVisit: job.input.tools?.pageVisit === true,
       browser: job.input.tools?.browser === true && config.experimental?.browserTool === true,
       storageAccess: job.input.tools?.storageAccess === true,
+      storageRead:job.input.tools?.storageRead===true,
+      storageWrite:job.input.tools?.storageWrite===true,
+      storageWriteMaxFiles:Math.max(1,Math.min(20,Math.floor(Number(job.input.tools?.storageWriteMaxFiles)||5))),
       currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
       artifact: job.input.tools?.artifact === true,
       hostComputer: job.input.tools?.hostComputer === true && canUseHostComputer(job.userRole, config.experimental?.hostComputerTool === true),
@@ -505,7 +521,7 @@ async function run(job: ChatJob) {
     const tools = toolDefinitions(enabled, config.toolSettings);
     const mcpTools = await mcpToolDefinitions(job.userId, enabled.mcpConnectionIds || [], enabled.mcpToolNames||{}, job.controller.signal);
     tools.push(...mcpTools.definitions);
-    if (enabled.storageAccess) tools.push(storageAccessToolDefinition());
+    if (enabled.storageAccess&&(enabled.storageRead||enabled.storageWrite)) tools.push(storageAccessToolDefinition({read:enabled.storageRead===true,write:enabled.storageWrite===true,maxWrites:enabled.storageWriteMaxFiles||5,writesUsed:storageWriteCount(job)}));
     const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
     const harnessContext = { config, model, userId: job.userId, sessionId: job.input.conversationId, signal: job.controller.signal, onPhase: (phase: ChatWaitPhase) => setWaitPhase(job, phase) };
     if (enabled.hostComputer) tools.push(hostComputerToolDefinition());

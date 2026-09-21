@@ -8,7 +8,7 @@ import { classifyDocument, cleanupTemporaryDocuments, decodeTextDocument, pdfMod
 import { pageVisitHeaders } from "./page-visit-request.ts";
 import type { ToolSettings } from "./types.ts";
 
-export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; browser?: boolean; storageAccess?: boolean; currentTime?: boolean; location?: boolean; multipleChoice?: boolean; artifact?: boolean; hostComputer?: boolean; mcpConnectionIds?: string[]; mcpToolNames?: Record<string,string[]> };
+export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; browser?: boolean; storageAccess?: boolean; storageRead?: boolean; storageWrite?: boolean; storageWriteMaxFiles?: number; currentTime?: boolean; location?: boolean; multipleChoice?: boolean; artifact?: boolean; hostComputer?: boolean; mcpConnectionIds?: string[]; mcpToolNames?: Record<string,string[]> };
 export type WebToolExecution = { result: unknown; content?: ModelContentPart[] };
 
 export function toolDefinitions(enabled: EnabledWebTools, settings: ToolSettings) {

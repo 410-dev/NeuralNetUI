@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { anchoredWindow, firstUseAt, formatModelWeight, hasTwoDecimalPlaces, normalizeModelWeight, weightedTokenUsage } from "./plan-usage.ts";
+import { anchoredWindow, firstUseAt, formatModelWeight, hasTwoDecimalPlaces, modelAllowedByPlan, normalizeModelWeight, weightedTokenUsage } from "./plan-usage.ts";
 
 test("plan usage applies per-model weights to the selected token direction",()=>{const events=[{modelId:"fast",inputTokens:40,outputTokens:10},{modelId:"heavy",inputTokens:20,outputTokens:30}];assert.equal(weightedTokenUsage(events,"input",{heavy:2}),80);assert.equal(weightedTokenUsage(events,"output",{heavy:2}),70);assert.equal(weightedTokenUsage(events,"both",{heavy:2}),150);});
 test("usage windows stay anchored to first use",()=>{const first=Date.UTC(2026,0,1),threeHours=3*3600;assert.deepEqual(anchoredWindow(first,first+7*3600_000,threeHours),{startsAt:first+6*3600_000,resetsAt:first+9*3600_000});});
@@ -10,3 +10,4 @@ test("model weights accept two decimal places",()=>{assert.equal(hasTwoDecimalPl
 test("live usage counts toward the window and can anchor it",()=>{const live=[{modelId:"m",inputTokens:10,outputTokens:5,startedAt:500}];assert.equal(firstUseAt(undefined,live),500);assert.equal(firstUseAt(300,live),300);assert.equal(firstUseAt(undefined,live,600),undefined);assert.equal(weightedTokenUsage(live,"both",{m:1.75}),27);});
 
 test("a reset window restarts at the first use after the reset",()=>{const reset=Date.UTC(2026,0,1,4),next=reset+30*60_000,hour=3600_000;assert.equal(firstUseAt(undefined,[{modelId:"m",inputTokens:1,outputTokens:0,startedAt:next}],reset),next);assert.deepEqual(anchoredWindow(next,next+hour,3*3600),{startsAt:next,resetsAt:next+3*hour});});
+test("a plan allows only explicitly assigned model or source ids",()=>{assert.equal(modelAllowedByPlan([],"model"),false);assert.equal(modelAllowedByPlan(["model"],"model"),true);assert.equal(modelAllowedByPlan(["base"],"alias","base"),true);assert.equal(modelAllowedByPlan(["other"],"model","base"),false);});

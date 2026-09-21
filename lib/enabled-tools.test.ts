@@ -22,3 +22,9 @@ test("artifact is enabled by default and can be disabled",()=>{
   assert.equal(normalizeEnabledTools(undefined).artifact,true);
   assert.equal(normalizeEnabledTools({artifact:false}).artifact,false);
 });
+
+test("storage permissions default safely and clamp the per-session write limit",()=>{
+  const defaults=normalizeEnabledTools(undefined);assert.equal(defaults.storageRead,true);assert.equal(defaults.storageWrite,false);assert.equal(defaults.storageWriteMaxFiles,5);
+  assert.equal(normalizeEnabledTools({storageRead:false,storageWrite:true,storageWriteMaxFiles:999}).storageWriteMaxFiles,20);
+  assert.equal(normalizeEnabledTools({storageWriteMaxFiles:-4}).storageWriteMaxFiles,1);
+});
