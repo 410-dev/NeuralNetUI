@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chatEndpoint, chatHeaders, modelsEndpoint, resolveConnectionModels } from "./connection-drivers.ts";
+import { chatEndpoint, chatHeaders, imageEditEndpoint, imageGenerationEndpoint, modelsEndpoint, resolveConnectionModels } from "./connection-drivers.ts";
 import type { ConnectionConfig, ModelConfig } from "./types.ts";
 
 const model = (id: string, connectionId: string, name = id): ModelConfig => ({ id, name, sourceModel: id, description: "", isAlias: false, visible: true, reasoningSupported: false, reasoningPresets: [], connectionId });
@@ -12,6 +12,8 @@ test("driver endpoints distinguish OpenAI, LM Studio, and NNUI Server", () => {
   assert.equal(modelsEndpoint("nnui", "http://localhost:11435"), "http://localhost:11435/v1/models");
   assert.equal(modelsEndpoint("nnui", "http://localhost:11435/v1"), "http://localhost:11435/v1/models");
   assert.equal(chatEndpoint("nnui", "http://localhost:11435"), "http://localhost:11435/v1/chat/completions");
+  assert.equal(imageGenerationEndpoint("http://host:8000/v1/"), "http://host:8000/v1/images/generations");
+  assert.equal(imageEditEndpoint("http://host:8000/v1/"), "http://host:8000/v1/images/edits");
 });
 
 test("only NNUI chat requests carry the stable server session header", () => {

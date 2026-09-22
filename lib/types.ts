@@ -65,6 +65,10 @@ export interface ModelConfig {
   visionImageMode?: "original" | "max-resolution";
   /** Long-edge pixel limit used only when visionImageMode is max-resolution. */
   visionMaxEdgePixels?: number;
+  /** Route prompts through the OpenAI-compatible Images API instead of Chat Completions. */
+  imageGeneration?: boolean;
+  /** Whether this model accepts image attachments as input. Missing legacy values mean enabled. */
+  imageInput?: boolean;
   ownerId?: string;
   isPublic?: boolean;
   /** Connection that serves this model. Aliases inherit their base model connection. */

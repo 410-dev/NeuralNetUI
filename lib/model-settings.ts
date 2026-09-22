@@ -25,6 +25,8 @@ const modelSchema = z.object({
   apiContextWindowTokens: z.number().int().positive().optional(),
   visionImageMode: z.enum(["original", "max-resolution"]).optional(),
   visionMaxEdgePixels: z.number().int().min(128).max(8192).optional(),
+  imageGeneration: z.boolean().optional(),
+  imageInput: z.boolean().optional(),
   isPublic: z.boolean().optional(),
 }).strict();
 

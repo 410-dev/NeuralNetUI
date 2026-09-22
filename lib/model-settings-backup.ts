@@ -62,6 +62,8 @@ export function readModelSettingsLeniently(value: unknown): { models: Portable[]
       ...(positiveInt(item.contextWindowTokens) ? { contextWindowTokens: positiveInt(item.contextWindowTokens) } : {}),
       ...(item.visionImageMode === "original" || item.visionImageMode === "max-resolution" ? { visionImageMode: item.visionImageMode } : {}),
       ...(edge ? { visionMaxEdgePixels: edge } : {}),
+      ...(typeof item.imageGeneration === "boolean" ? { imageGeneration: item.imageGeneration } : {}),
+      ...(typeof item.imageInput === "boolean" ? { imageInput: item.imageInput } : {}),
       ...(typeof item.isPublic === "boolean" ? { isPublic: item.isPublic } : {}),
     });
   }
@@ -135,6 +137,7 @@ export function applyModelSettingsImage(models: ModelConfig[], image: unknown, t
       next[index] = current.isAlias ? { ...current, reasoningPresets: merged.presets } : {
         ...current, name: model.name, description: model.description, systemPrompt: model.systemPrompt, visible: model.visible,
         contextWindowTokens: model.contextWindowTokens, visionImageMode: model.visionImageMode ?? current.visionImageMode, visionMaxEdgePixels: model.visionMaxEdgePixels ?? current.visionMaxEdgePixels,
+        imageGeneration: model.imageGeneration ?? current.imageGeneration, imageInput: model.imageInput ?? current.imageInput,
         reasoningPresets: merged.presets,
       };
       if (!current.isAlias) report.servedModels++;

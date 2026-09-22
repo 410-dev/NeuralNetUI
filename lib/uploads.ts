@@ -318,13 +318,13 @@ export async function saveUpload(file: File, thumbnail: File | undefined, userId
 export async function saveGeneratedImage(buffer: Buffer, userId: string, name = `host-screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`, dimensions?: { width?: number; height?: number }, mimeType = "image/png") {
   assertUploadSignature(buffer, mimeType);
   const id = randomUUID(); const paths = pathsFor(id);
-  const metadata: StoredAttachment = { id, name: name.slice(0, 240), mimeType, size: buffer.length, width: dimensions?.width, height: dimensions?.height, url: `/api/uploads/${id}`, thumbnailUrl: `/api/uploads/${id}?variant=thumbnail` };
   await fs.mkdir(uploadsDir, { recursive: true });
   const temporary = `${paths.original}.${randomUUID()}.tmp`;
   try {
     await fs.writeFile(temporary, buffer, { mode: 0o600 });
     await fs.rename(temporary, paths.original);
-    await createStoredThumbnail(paths.original,paths.thumbnail);
+    const measured = await createStoredThumbnail(paths.original,paths.thumbnail);
+    const metadata: StoredAttachment = { id, name: name.slice(0, 240), mimeType, size: buffer.length, width: measured?.width ?? dimensions?.width, height: measured?.height ?? dimensions?.height, url: `/api/uploads/${id}`, thumbnailUrl: `/api/uploads/${id}?variant=thumbnail` };
     insertWithinQuota({ ...metadata, userId, retained: true });
     return { metadata, path: paths.original };
   } catch (error) {

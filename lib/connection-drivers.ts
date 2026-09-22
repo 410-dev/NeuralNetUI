@@ -21,6 +21,14 @@ export function chatEndpoint(driver: ConnectionDriver, baseUrl: string) {
   return driver === "lmstudio" || driver === "nnui" ? `${connectionRoot(baseUrl)}/v1/chat/completions` : `${base}/chat/completions`;
 }
 
+export function imageGenerationEndpoint(baseUrl: string) {
+  return `${baseUrl.replace(/\/$/, "")}/images/generations`;
+}
+
+export function imageEditEndpoint(baseUrl: string) {
+  return `${baseUrl.replace(/\/$/, "")}/images/edits`;
+}
+
 export function lmStudioEndpoint(baseUrl: string, action: "load" | "unload") {
   return `${connectionRoot(baseUrl)}/api/v1/models/${action}`;
 }

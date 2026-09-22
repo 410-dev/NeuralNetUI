@@ -6,7 +6,7 @@
 
 | 드라이버 | 기본 주소 | 모델 목록 | 채팅 | 로드/언로드 |
 | --- | --- | --- | --- | --- |
-| OpenAI API | `http://localhost:8888/v1` | `/models` | `/v1/chat/completions` 스트림 | LM Studio 관리 API를 먼저 시도하고, 없으면 `/api/inference` |
+| OpenAI API | `http://localhost:8888/v1` | `/models` | `/v1/chat/completions` 스트림, 이미지 모델은 `/v1/images/generations`·`/v1/images/edits` | LM Studio 관리 API를 먼저 시도하고, 없으면 `/api/inference` |
 | LM Studio | `http://localhost:1234` | `/api/v1/models` | 네이티브 SDK 추론, 미지원 요청은 `/v1/chat/completions` | `/api/v1/models/load`, `/unload` |
 | NNUI Server | `http://127.0.0.1:11435` | `/v1/models` | `/v1/chat/completions` 스트림과 대화별 세션 고정 | `/api/models/status`, `/{id}/load`, `/{id}/unload` |
 
@@ -36,13 +36,23 @@ NNUI Server 드라이버는 Base URL에 `/v1`을 쓰지 않아도 자동으로 �
 | 설명 | 모델 선택기에 표시되는 한 줄 설명 |
 | 시스템 프롬프트 | 이 모델로 보낼 때 앞에 붙는 지시 |
 | 컨텍스트 길이 | 사용자가 지정한 값. API가 알려준 값(`apiContextWindowTokens`)과 별도로 저장되어 감지로 덮어써지지 않습니다 |
-| 이미지 입력 | 아래 참고 |
+| 이미지 생성 모델 | 켜면 OpenAI Compatible Images API로 요청하고 생성 결과를 개인 저장소에 보관 |
+| 이미지 입력 모델 | 끄면 해당 모델을 선택한 채팅에서 이미지 첨부를 차단 |
+| 이미지 입력 | 아래 해상도 처리 참고 |
 
 숨긴 서빙 모델은 커스텀 alias의 기반 모델 선택 목록에서도 제외됩니다.
 
 채팅 모델 선택기는 현재 계정 플랜의 `servedModelIds`에 모델 ID 또는 기반 모델 ID가 명시된 모델만 표시합니다. 이 규칙은 관리자와 슈퍼 관리자에게도 같으며, 빈 목록은 사용할 수 있는 모델이 없다는 뜻입니다. 서버의 채팅 실행 경로도 같은 규칙을 다시 검사하므로 클라이언트 요청을 직접 바꿔 우회할 수 없습니다.
 
-### 이미지 입력
+### 이미지 생성 모델과 이미지 입력 모델
+
+**이미지 생성 모델**을 켜면 일반 Chat Completions 스트림 대신 비스트리밍 Images API를 사용합니다. 텍스트 프롬프트만 있으면 `/images/generations`, PNG·JPEG·WebP 입력 이미지가 있으면 `/images/edits`로 요청합니다. 응답의 첫 `data[].b64_json`을 크기 제한 안에서 디코딩하고 실제 PNG·JPEG·WebP 시그니처를 확인한 뒤, 계정별 할당량을 적용해 개인 저장소에 원자적으로 저장합니다. 채팅에는 외부 URL이나 base64를 직접 넣지 않고 인증된 `/api/uploads/{id}` 주소로 저장소 원본을 표시합니다.
+
+OpenAI 연결에서 감지한 `gpt-image-2`와 날짜가 붙은 snapshot은 이미지 생성 모델로 자동 표시되며, 관리자가 다른 OpenAI Compatible 모델도 직접 켤 수 있습니다. 모델 선택 목록에서는 토큰 가중치 왼쪽의 원형 그림 배지로 구분합니다.
+
+**이미지 입력 모델**을 끄면 업로드·저장소 선택·붙여넣기·전송 단계에서 이미지 파일을 차단하고 서버도 다시 검증합니다. 이미지 생성 모델에서 이 옵션이 꺼져 있으면 그림 배지가 X가 그어진 모양으로 바뀝니다. 기존 설정 파일에 이 값이 없으면 이전 첨부 동작을 보존하기 위해 켜짐으로 간주합니다.
+
+### 이미지 입력 해상도
 
 모델 카드의 **이미지 입력** 그룹은 입력란과 스위치 한 줄로 되어 있습니다.
 

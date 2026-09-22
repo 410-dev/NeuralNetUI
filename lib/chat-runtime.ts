@@ -13,7 +13,7 @@ import { readSsePayload } from "./stream-protocol";
 import { canUseModel, readConfig } from "./config";
 import { aliasBaseModel, aliasWithBaseModel } from "./alias-base-model";
 import { readConversation, writeConversation, renameConversation } from "./conversations";
-import { readUploadModelContent, saveArtifactFile } from "./uploads";
+import { readUpload, readUploadModelContent, saveArtifactFile, saveGeneratedImage } from "./uploads";
 import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, nnuiEventsEndpoint } from "./connection-drivers";
 import { createResidencyAdapter } from "./residency-adapter";
 import { nnuiEventProgress, startNnuiEventObserver } from "./nnui-driver";
@@ -29,6 +29,7 @@ import type { ModelContentPart } from "./document-processing";
 import { promises as fs } from "node:fs";
 import { acquirePlanAdmission, assertPlanAccess, clearLiveTokenUsage, recordTokenUsage, releasePlanAdmission, remainingPlanOutputTokens, setLiveTokenUsage } from "./plans";
 import { executeMcpTool, mcpToolDefinitions, type McpToolBinding } from "./mcp";
+import { generateCompatibleImage } from "./image-generation";
 
 type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
 type UpstreamMessage = { role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string };
@@ -237,10 +238,9 @@ function finishSubscribers(job: ChatJob) {
 async function upstreamMessages(input: StartChatJobInput, userId: string, systemPrompt: string, settings: ToolSettings, model: ModelConfig): Promise<UpstreamMessage[]> {
   const converted = await Promise.all(input.messages.filter((message) => message.content || message.attachments?.length || message.toolEvents?.length).map(async (message) => {
     const attachments = message.role === "user" ? message.attachments || [] : [];
-    const content = attachments.length ? [
-      ...(message.content ? [{ type: "text", text: message.content }] : []),
-      ...(await Promise.all(attachments.map(({ id }) => readUploadModelContent(id, userId, settings, model)))).flat(),
-    ] : message.content;
+    const attachmentContent = attachments.length ? (await Promise.all(attachments.map(({ id }) => readUploadModelContent(id, userId, settings, model)))).flat() : [];
+    if (model.imageInput === false && attachmentContent.some(part => part.type === "image_file" || part.type === "image_url")) throw new Error("The selected model does not accept image input.");
+    const content = attachments.length ? [...(message.content ? [{ type: "text", text: message.content }] : []), ...attachmentContent] : message.content;
     return restoreToolHistory({ role: message.role, content, toolEvents: message.toolEvents, ...(input.sendReasoning && message.role === "assistant" && message.reasoning_content ? { reasoning_content: message.reasoning_content } : {}) });
   }));
   return [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...converted.flat()];
@@ -525,6 +525,40 @@ async function run(job: ChatJob) {
     const modelPrompt = model.systemPrompt?.trim() || ""; const presetPrompt = preset?.kind === "custom" ? preset.systemPrompt?.trim() || "" : "";
     let systemPrompt = modelPrompt;
     if (presetPrompt) systemPrompt = preset?.systemPromptMode === "replace" ? presetPrompt : preset?.systemPromptMode === "prepend" ? [presetPrompt, modelPrompt].filter(Boolean).join("\n\n") : [modelPrompt, presetPrompt].filter(Boolean).join("\n\n");
+    if (model.imageGeneration === true) {
+      if (connection.driver !== "openai") throw new Error("Image generation currently requires an OpenAI-compatible connection.");
+      const latest = job.input.messages.findLast(message => message.role === "user");
+      const userPrompt = latest?.content.trim() || "";
+      if (!userPrompt) throw new Error("GPT Image 2 requires a text prompt.");
+      if (model.imageInput === false && latest?.attachments?.length) throw new Error("The selected image-generation model does not accept image input.");
+      const sourceImages = await Promise.all((latest?.attachments || []).map(async attachment => {
+        const stored = await readUpload(attachment.id, job.userId);
+        if (!["image/png", "image/jpeg", "image/webp"].includes(stored.metadata.mimeType)) throw new Error("Image editing accepts PNG, JPEG, and WebP attachments only.");
+        return { data: await fs.readFile(stored.paths.original), name: stored.metadata.name, mimeType: stored.metadata.mimeType as "image/png" | "image/jpeg" | "image/webp" };
+      }));
+      assertPlanAccess(job.userId, model.id, model.sourceModel);
+      const headers = chatHeaders(connection, process.env.OPENAI_API_KEY || "", job.input.conversationId);
+      const prompt = [systemPrompt, userPrompt].filter(Boolean).join("\n\n");
+      const generated = await withSlowProgress(() => generateCompatibleImage({
+        baseUrl: connection.baseUrl, headers, model: model.sourceModel, prompt,
+        maximumBytes: config.toolSettings.imageUploadLimitMb * 1024 * 1024,
+        sourceImages,
+        signal: job.controller.signal,
+      }), () => setWaitPhase(job, "waiting-server"), SERVER_RESPONSE_TIMEOUT_MS);
+      job.controller.signal.throwIfAborted();
+      const stored = await saveGeneratedImage(generated.image, job.userId,
+        `generated-image-${new Date().toISOString().replace(/[:.]/g, "-")}.${generated.extension}`, undefined, generated.mimeType);
+      const elapsedSeconds = Math.max(.001, (performance.now() - requestStartedAt) / 1000);
+      job.message = {
+        ...job.message, attachments: [stored.metadata],
+        ...generated.usage,
+        contextTokens: (generated.usage.inputTokens || 0) + (generated.usage.outputTokens || 0),
+        completionDurationSeconds: elapsedSeconds,
+      };
+      recordTokenUsage(job.userId, chargeModelId, generated.usage.inputTokens, generated.usage.outputTokens);
+      job.waitPhase = undefined; job.waitProgress = undefined; job.status = "completed";
+      await persist(job); broadcast(job, true); finishSubscribers(job); return;
+    }
     let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt, config.toolSettings, model);
     const enabled: EnabledWebTools = {
       internetSearch: job.input.tools?.internetSearch === true, pageVisit: job.input.tools?.pageVisit === true,

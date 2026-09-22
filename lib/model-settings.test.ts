@@ -13,6 +13,8 @@ const model: ModelConfig = {
   reasoningEfforts: ["low", "high"],
   visionImageMode: "max-resolution",
   visionMaxEdgePixels: 1024,
+  imageGeneration: true,
+  imageInput: false,
   reasoningPresets: [{ id: "high", name: "High", kind: "builtin", effort: "high", ownerId: "private-preset-owner" }],
   ownerId: "private-model-owner",
   connectionId: "private-connection-id",
@@ -27,6 +29,8 @@ test("model settings export is two-space JSON and strips ownership metadata", ()
   assert.equal(parseModelSettings(text).models[0].reasoningPresets[0].effort, "high");
   assert.equal(parseModelSettings(text).models[0].visionImageMode, "max-resolution");
   assert.equal(parseModelSettings(text).models[0].visionMaxEdgePixels, 1024);
+  assert.equal(parseModelSettings(text).models[0].imageGeneration, true);
+  assert.equal(parseModelSettings(text).models[0].imageInput, false);
 });
 
 test("model settings import rejects unknown fields and unsupported formats", () => {
