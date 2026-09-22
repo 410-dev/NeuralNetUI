@@ -1,6 +1,7 @@
 import type { TokenScope } from "./types.ts";
 
 export type TokenUsageEvent={modelId:string;inputTokens:number;outputTokens:number};
+export const MAX_MODEL_WEIGHT=2_147_483_647;
 
 export function modelAllowedByPlan(servedModelIds:string[],modelId:string,sourceModelId?:string){return servedModelIds.includes(modelId)||Boolean(sourceModelId&&servedModelIds.includes(sourceModelId));}
 
@@ -9,7 +10,7 @@ export function weightedTokenUsage(events:TokenUsageEvent[],scope:TokenScope,wei
 export function anchoredWindow(firstUseMs:number,nowMs:number,durationSeconds:number){const duration=Math.max(3600,durationSeconds)*1000;const elapsed=Math.max(0,nowMs-firstUseMs);const startsAt=firstUseMs+Math.floor(elapsed/duration)*duration;return{startsAt,resetsAt:startsAt+duration};}
 
 /** Weights are stored with at most two decimal places, e.g. 1.75. */
-export function normalizeModelWeight(value:unknown){const number=Number(value);if(!Number.isFinite(number))return 1;return Math.min(100,Math.max(.01,Math.round(number*100)/100));}
+export function normalizeModelWeight(value:unknown){const number=Number(value);if(!Number.isFinite(number))return 1;return Math.min(MAX_MODEL_WEIGHT,Math.max(.01,Math.round(number*100)/100));}
 export function hasTwoDecimalPlaces(value:number){return Math.abs(value*100-Math.round(value*100))<1e-6;}
 /** "1.75", "2", "0.5" — the shortest form without trailing zeros. */
 export function formatModelWeight(value:number){return String(Number(normalizeModelWeight(value).toFixed(2)));}

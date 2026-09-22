@@ -6,13 +6,13 @@ import { SectionTitle } from "./section-title";
 import { SelectMenu } from "./select-menu";
 import { useMessageDialog } from "./message-dialog";
 import { PlanUsersDialog, UserPickerDialog, type PickedUser } from "./user-directory";
-import { formatModelWeight, normalizeModelWeight } from "@/lib/plan-usage";
+import { formatModelWeight, MAX_MODEL_WEIGHT, normalizeModelWeight } from "@/lib/plan-usage";
 
 /** Accepts weights such as 1.75 while typing; the stored value is rounded to two decimal places. */
 function WeightInput({value,onChange}:{value:number;onChange:(value:number)=>void}){
   const [text,setText]=useState(formatModelWeight(value));
   useEffect(()=>{setText(current=>current!==""&&normalizeModelWeight(current)===value?current:formatModelWeight(value));},[value]);
-  return <input type="number" inputMode="decimal" min={.01} max={100} step={.01} value={text} onChange={event=>{setText(event.target.value);const number=Number(event.target.value);if(event.target.value.trim()&&Number.isFinite(number)&&number>0)onChange(normalizeModelWeight(number));}} onBlur={()=>setText(formatModelWeight(value))}/>;
+  return <input type="number" inputMode="decimal" min={.01} max={MAX_MODEL_WEIGHT} step={.01} value={text} onChange={event=>{setText(event.target.value);const number=Number(event.target.value);if(event.target.value.trim()&&Number.isFinite(number)&&number>0)onChange(normalizeModelWeight(number));}} onBlur={()=>setText(formatModelWeight(value))}/>;
 }
 
 const GB=1024**3;

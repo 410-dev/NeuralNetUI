@@ -3,12 +3,12 @@ import { z } from "zod";
 import { AuthError, type AuthUser, logAdminAudit } from "./auth";
 import { db } from "./database";
 import type { ResetCredit, TokenScope, UsagePlan, UsageStatus, UsageWindowStatus } from "./types";
-import { anchoredWindow, firstUseAt, hasTwoDecimalPlaces, type LiveTokenUsage, modelAllowedByPlan, normalizeModelWeight, weightedTokenUsage } from "./plan-usage";
+import { anchoredWindow, firstUseAt, hasTwoDecimalPlaces, type LiveTokenUsage, MAX_MODEL_WEIGHT, modelAllowedByPlan, normalizeModelWeight, weightedTokenUsage } from "./plan-usage";
 
 type PlanRow={id:string;name:string;storage_quota_bytes:number;trash_quota_bytes:number;served_model_ids:string;model_weights:string;mcp_enabled:number;max_mcp_connections:number;user_count?:number};
 type LimitRow={id:string;plan_id:string;duration_seconds:number;token_limit:number;token_scope:TokenScope;position:number};
 const limitSchema=z.object({id:z.string().min(1).max(100).optional(),durationSeconds:z.number().int().min(3600).max(31536000),tokenLimit:z.number().int().positive().max(10_000_000_000),tokenScope:z.enum(["input","output","both"])});
-const planSchema=z.object({name:z.string().trim().min(1).max(80),storageQuotaBytes:z.number().int().min(1024**2).max(10*1024**4),trashQuotaBytes:z.number().int().min(1024**2).max(20*1024**4).optional(),servedModelIds:z.array(z.string().min(1).max(500)).max(500),modelWeights:z.record(z.string(),z.number().min(.01).max(100).refine(hasTwoDecimalPlaces,"가중치는 소수점 둘째 자리까지 입력할 수 있습니다.")).default({}),tokenLimits:z.array(limitSchema).max(32),mcpEnabled:z.boolean().default(false),maxMcpConnections:z.number().int().min(0).max(100).default(0)});
+const planSchema=z.object({name:z.string().trim().min(1).max(80),storageQuotaBytes:z.number().int().min(1024**2).max(10*1024**4),trashQuotaBytes:z.number().int().min(1024**2).max(20*1024**4).optional(),servedModelIds:z.array(z.string().min(1).max(500)).max(500),modelWeights:z.record(z.string(),z.number().min(.01).max(MAX_MODEL_WEIGHT).refine(hasTwoDecimalPlaces,"가중치는 소수점 둘째 자리까지 입력할 수 있습니다.")).default({}),tokenLimits:z.array(limitSchema).max(32),mcpEnabled:z.boolean().default(false),maxMcpConnections:z.number().int().min(0).max(100).default(0)});
 
 declare global { var neuralLiveTokenUsage: Map<string,Map<string,LiveTokenUsage>>|undefined; }
 const liveUsage=globalThis.neuralLiveTokenUsage??new Map<string,Map<string,LiveTokenUsage>>();
