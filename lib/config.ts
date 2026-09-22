@@ -48,6 +48,7 @@ const harnessSettingsValuesSchema = z.object({
   compactModelId: z.string().max(500), compactEffort: z.string().max(40), compactPrompt: z.string().trim().min(1).max(32000),
   titleEnabled: z.boolean(), titleTiming: z.enum(["before", "after"]), titleModelId: z.string().max(500),
   titleEffort: z.string().max(40), titlePrompt: z.string().trim().min(1).max(32000),
+  artifactAutoSaveToStorage: z.boolean().default(DEFAULT_HARNESS_SETTINGS.artifactAutoSaveToStorage),
   hostTrustMode: z.enum(["full", "partial", "none"]).default(DEFAULT_HARNESS_SETTINGS.hostTrustMode),
   hostTrustedPermissions: hostTrustedPermissionsSchema.default(DEFAULT_HARNESS_SETTINGS.hostTrustedPermissions),
   hostCommandModelId: z.string().max(500).default(DEFAULT_HARNESS_SETTINGS.hostCommandModelId),

@@ -245,6 +245,8 @@ export interface HarnessSettings {
   titleModelId: string;
   titleEffort: string;
   titlePrompt: string;
+  /** Automatically keep artifact-tool output in the creator's private storage. */
+  artifactAutoSaveToStorage: boolean;
   /** Confirmation policy for the Superadmin-only host computer tool. */
   hostTrustMode: "full" | "partial" | "none";
   /** Per-operation automatic approval choices. Used only in partial trust mode. */

@@ -1,9 +1,9 @@
-import { constants, promises as fs } from "node:fs";
+import { constants, promises as fs, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { assertUploadSignature, extractPdf, isSupportedUploadMimeType, pdfModelContent, sniffRasterMimeType, type ModelContentPart, type PdfExtraction } from "./document-processing.ts";
-import type { ModelConfig, StorageFile, StoredAttachment, ToolSettings } from "./types.ts";
+import type { ArtifactKind, ModelConfig, StorageFile, StoredAttachment, ToolSettings } from "./types.ts";
 import { completeStorageMigration, dataDir, db, storageMigrationCompleted } from "./database.ts";
 import { resolvedVisionSettings } from "./vision-settings.ts";
 import { isEditableStorageFile } from "./storage-file-view.ts";
@@ -136,6 +136,25 @@ function safeStoredName(value:string){
   return name.slice(0,240);
 }
 
+const ARTIFACT_EXTENSIONS:Record<ArtifactKind,string>={html:".html",csv:".csv",json:".json",xml:".xml",markdown:".md"};
+
+/** Turn an artifact title into a safe filename without duplicating its format extension. */
+export function artifactStoredName(title:string,kind:ArtifactKind){
+  const extension=ARTIFACT_EXTENSIONS[kind],clean=safeStoredName(title);
+  if(clean.toLowerCase().endsWith(extension))return clean;
+  return `${clean.slice(0,Math.max(1,240-extension.length)).trimEnd()}${extension}`;
+}
+
+function availableArtifactName(requested:string,names:Set<string>){
+  if(!names.has(requested.toLowerCase()))return requested;
+  const extension=path.extname(requested),stem=requested.slice(0,requested.length-extension.length);
+  for(let index=1;index<1_000_000;index++){
+    const suffix=` (${index})`,candidate=`${stem.slice(0,Math.max(1,240-extension.length-suffix.length)).trimEnd()}${suffix}${extension}`;
+    if(!names.has(candidate.toLowerCase()))return candidate;
+  }
+  throw new Error("A unique artifact filename could not be allocated.");
+}
+
 async function createStoredThumbnail(source:string,destination:string){
   const temporary=`${destination}.${randomUUID()}.tmp`;
   try{
@@ -195,6 +214,62 @@ export async function saveTextFile(nameInput:string,kind:"markdown"|"text",conte
   const metadata:StoredAttachment={id,name,mimeType,size:data.length,url:`/api/uploads/${id}`};await fs.mkdir(uploadsDir,{recursive:true});
   try{await fs.writeFile(temporary,data,{mode:0o600,flag:"wx"});await fs.rename(temporary,paths.original);insertWithinQuota({...metadata,userId,retained:true});return metadata;}
   catch(error){await Promise.all([temporary,paths.original].map(target=>fs.unlink(target).catch(()=>undefined)));throw error;}
+}
+
+export type ArtifactStorageResult={attachment:StoredAttachment;requestedName:string;fileName:string;action:"created"|"updated";nameChanged:boolean};
+
+/**
+ * Keep one storage object per canonical artifact name and conversation. The SQLite write
+ * transaction chooses collision suffixes and swaps the UTF-8 body while holding the same lock,
+ * so concurrent artifact calls cannot claim the same active filename.
+ */
+export async function saveArtifactFile(title:string,kind:ArtifactKind,content:string,userId:string,conversationId:string):Promise<ArtifactStorageResult>{
+  await ensureLegacyUploadsMigrated();
+  if(!conversationId||conversationId.length>200)throw new Error("A valid artifact conversation is required.");
+  const requestedName=artifactStoredName(title,kind),artifactKey=requestedName.normalize("NFC").toLowerCase();
+  const data=Buffer.from(content,"utf8"),mimeType=FILE_MIME_TYPES[ARTIFACT_EXTENSIONS[kind]];
+  const temporary=path.join(uploadsDir,`.artifact-${randomUUID()}.tmp`);
+  await fs.mkdir(uploadsDir,{recursive:true});await fs.writeFile(temporary,data,{mode:0o600,flag:"wx"});
+  let targetOriginal="",backup="",replacementInstalled=false;
+  try{
+    const saved=db.transaction(()=>{
+      const conversation=db.prepare("SELECT 1 FROM conversations WHERE id=? AND user_id=? AND deleted_at IS NULL").get(conversationId,userId);
+      if(!conversation)throw new Error("Artifact conversation not found.");
+      const account=db.prepare("SELECT storage_quota_bytes AS quota FROM users WHERE id=?").get(userId) as {quota:number}|undefined;
+      if(!account)throw new Error("Storage owner not found.");
+      const used=(db.prepare("SELECT COALESCE(SUM(size),0) AS bytes FROM uploads WHERE user_id=? AND deleted_at IS NULL").get(userId) as {bytes:number}).bytes;
+      const pending=(db.prepare("SELECT COALESCE(SUM(size),0) AS bytes FROM storage_upload_sessions WHERE user_id=? AND completed_upload_id IS NULL").get(userId) as {bytes:number}).bytes;
+      const linked=db.prepare(`SELECT u.id,u.name,u.mime_type,u.size,u.width,u.height FROM artifact_storage_links l JOIN uploads u ON u.id=l.upload_id WHERE l.user_id=? AND l.conversation_id=? AND l.artifact_key=? AND u.user_id=? AND u.deleted_at IS NULL`).get(userId,conversationId,artifactKey,userId) as UploadRow|undefined;
+      const stamp=new Date().toISOString();
+      if(linked){
+        if(used-linked.size+pending+data.length>account.quota)throw new Error("Storage quota exceeded by the updated artifact.");
+        const paths=pathsFor(linked.id);targetOriginal=paths.original;backup=`${paths.original}.${randomUUID()}.bak`;
+        renameSync(paths.original,backup);renameSync(temporary,paths.original);replacementInstalled=true;
+        db.prepare("UPDATE uploads SET mime_type=?,size=? WHERE id=? AND user_id=? AND deleted_at IS NULL").run(mimeType,data.length,linked.id,userId);
+        db.prepare("UPDATE artifact_storage_links SET updated_at=? WHERE user_id=? AND conversation_id=? AND artifact_key=?").run(stamp,userId,conversationId,artifactKey);
+        const attachment=toAttachment({...linked,mime_type:mimeType,size:data.length});
+        return{attachment,requestedName,fileName:attachment.name,action:"updated" as const,nameChanged:attachment.name!==requestedName};
+      }
+      if(used+pending+data.length>account.quota)throw new Error("Storage quota exceeded by the artifact.");
+      const activeNames=new Set((db.prepare("SELECT name FROM uploads WHERE user_id=? AND deleted_at IS NULL").all(userId) as Array<{name:string}>).map(row=>row.name.toLowerCase()));
+      for(const row of db.prepare(`SELECT l.artifact_key AS name FROM artifact_storage_links l JOIN uploads u ON u.id=l.upload_id WHERE l.user_id=? AND u.deleted_at IS NULL`).all(userId) as Array<{name:string}>)activeNames.add(row.name.toLowerCase());
+      const name=availableArtifactName(requestedName,activeNames),id=randomUUID(),paths=pathsFor(id);
+      targetOriginal=paths.original;renameSync(temporary,paths.original);replacementInstalled=true;
+      db.prepare("INSERT INTO uploads(id,name,mime_type,size,width,height,created_at,user_id,retained) VALUES(?,?,?,?,NULL,NULL,?,?,1)").run(id,name,mimeType,data.length,stamp,userId);
+      db.prepare(`INSERT INTO artifact_storage_links(user_id,conversation_id,artifact_key,upload_id,created_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,conversation_id,artifact_key) DO UPDATE SET upload_id=excluded.upload_id,updated_at=excluded.updated_at`).run(userId,conversationId,artifactKey,id,stamp,stamp);
+      const attachment:StoredAttachment={id,name,mimeType,size:data.length,url:`/api/uploads/${id}`};
+      return{attachment,requestedName,fileName:name,action:"created" as const,nameChanged:name!==requestedName};
+    })();
+    if(backup)rmSync(backup,{force:true});
+    return saved;
+  }catch(error){
+    if(replacementInstalled&&targetOriginal)try{rmSync(targetOriginal,{force:true});}catch{/* best-effort rollback */}
+    if(backup&&targetOriginal)try{renameSync(backup,targetOriginal);}catch{/* preserve the original error */}
+    throw error;
+  }finally{
+    try{rmSync(temporary,{force:true});}catch{/* best-effort cleanup */}
+    if(backup)try{rmSync(backup,{force:true});}catch{/* best-effort cleanup */}
+  }
 }
 
 export async function saveUpload(file: File, thumbnail: File | undefined, userId: string, settings: ToolSettings, dimensions?: { width?: number; height?: number }, retained = false): Promise<StoredAttachment> {

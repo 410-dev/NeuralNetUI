@@ -8,6 +8,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   maxCompactionResumes: 3,
   titleEnabled: false, titleTiming: "after", titleModelId: "", titleEffort: "off",
   titlePrompt: "Write a short, descriptive title for this conversation in the user's language. Return only the title, without quotes or formatting.",
+  artifactAutoSaveToStorage: true,
   hostTrustMode: "none",
   hostTrustedPermissions: createHostTrustedPermissions(),
   hostCommandModelId: "",

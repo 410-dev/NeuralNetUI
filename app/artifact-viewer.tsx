@@ -20,6 +20,13 @@ export function artifactFromEvent(event:ToolEvent):ArtifactDocument|undefined{
   return {title:String(value.title||"Artifact"),kind:kind as ArtifactDocument["kind"],content:String(value.content??""),updatedAt:typeof value.updatedAt==="string"?value.updatedAt:undefined};
 }
 
+function artifactStorageFromEvent(event:ToolEvent){
+  const result=event.result&&typeof event.result==="object"?event.result as Record<string,unknown>:undefined;
+  const value=result?.storage&&typeof result.storage==="object"?result.storage as Record<string,unknown>:undefined;
+  if(value?.saved!==true||typeof value.id!=="string"||typeof value.fileName!=="string")return undefined;
+  return{id:value.id,fileName:value.fileName,url:typeof value.url==="string"?value.url:`/api/uploads/${value.id}`};
+}
+
 function parseCsv(source:string){
   const rows:string[][]=[];let row:string[]=[],field="",quoted=false;
   for(let i=0;i<=source.length;i++){const char=source[i]??"\n";if(char==='"'){if(quoted&&source[i+1]==='"'){field+='"';i++;}else quoted=!quoted;}else if(char===","&&!quoted){row.push(field);field="";}else if((char==="\n"||char==="\r")&&!quoted){if(char==="\r"&&source[i+1]==="\n")i++;row.push(field);field="";if(row.some(value=>value.length))rows.push(row);row=[];}else field+=char;}
@@ -73,8 +80,8 @@ export function StorageFileDialog({file,locale,onClose,onUpdated}:{file:StorageF
   return <ArtifactDialog artifact={artifact} locale={locale} onClose={onClose} editable downloadUrl={`${file.url}${file.url.includes("?")?"&":"?"}download=1`} language={storageFileLanguage(file.name,file.mimeType)} loading={loading} loadError={loadError} onSave={async next=>{const response=await fetch(file.url,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:next.content})}),body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||`Request failed (${response.status}).`);setContent(next.content);onUpdated?.({...file,...body.attachment});}}/>;
 }
 
-export function ArtifactCard({event,locale,onSave}:{event:ToolEvent;locale:Locale;onSave?:(artifact:ArtifactDocument)=>void}){
-  const initial=artifactFromEvent(event),[open,setOpen]=useState(false),[local,setLocal]=useState(initial);if(!local)return null;
+export function ArtifactCard({event,locale,onSave}:{event:ToolEvent;locale:Locale;onSave?:(artifact:ArtifactDocument)=>void|Promise<void>}){
+  const initial=artifactFromEvent(event),storage=artifactStorageFromEvent(event),[open,setOpen]=useState(false),[local,setLocal]=useState(initial);if(!local)return null;
   const Icon=local.kind==="csv"?FileSpreadsheet:local.kind==="json"||local.kind==="xml"?FileJson:Code2;
-  return <><article className="artifact-card"><Icon size={20}/><div><strong>{local.title}</strong><small>{local.kind.toUpperCase()} · {locale==="ko"?"대화에서 생성됨":"Created in chat"}</small></div><button onClick={()=>setOpen(true)}>{locale==="ko"?"열기":"Open"}<Maximize2 size={15}/></button></article>{open&&<ArtifactDialog artifact={local} locale={locale} onClose={()=>setOpen(false)} onSave={next=>{const artifact=next as ArtifactDocument;setLocal(artifact);onSave?.(artifact);}}/>}</>;
+  return <><article className="artifact-card"><Icon size={20}/><div><strong>{local.title}</strong><small>{storage?(locale==="ko"?`${storage.fileName} · 저장소에 저장됨`:`${storage.fileName} · Saved to storage`):`${local.kind.toUpperCase()} · ${locale==="ko"?"대화에서 생성됨":"Created in chat"}`}</small></div><button onClick={()=>setOpen(true)}>{locale==="ko"?"열기":"Open"}<Maximize2 size={15}/></button></article>{open&&<ArtifactDialog artifact={local} locale={locale} onClose={()=>setOpen(false)} downloadUrl={storage?`${storage.url}?download=1`:undefined} onSave={async next=>{const artifact=next as ArtifactDocument;if(storage){const response=await fetch(storage.url,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:artifact.content})}),body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||`Request failed (${response.status}).`);}await onSave?.(artifact);setLocal(artifact);}}/>}</>;
 }

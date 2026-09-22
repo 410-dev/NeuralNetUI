@@ -23,6 +23,7 @@ test("multilingual estimate and conservative defaults", () => {
   assert.equal(DEFAULT_HARNESS_SETTINGS.maxOutputTokens,0);
   assert.equal(DEFAULT_HARNESS_SETTINGS.titleEnabled,false);
   assert.equal(DEFAULT_HARNESS_SETTINGS.titleEffort,"off");
+  assert.equal(DEFAULT_HARNESS_SETTINGS.artifactAutoSaveToStorage,true);
 });
 
 test("the compaction decision never uses the smaller of estimate and measurement", () => {

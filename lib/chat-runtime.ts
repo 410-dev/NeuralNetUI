@@ -13,7 +13,7 @@ import { readSsePayload } from "./stream-protocol";
 import { canUseModel, readConfig } from "./config";
 import { aliasBaseModel, aliasWithBaseModel } from "./alias-base-model";
 import { readConversation, writeConversation, renameConversation } from "./conversations";
-import { readUploadModelContent } from "./uploads";
+import { readUploadModelContent, saveArtifactFile } from "./uploads";
 import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, nnuiEventsEndpoint } from "./connection-drivers";
 import { createResidencyAdapter } from "./residency-adapter";
 import { nnuiEventProgress, startNnuiEventObserver } from "./nnui-driver";
@@ -24,7 +24,7 @@ import { assertOwnedBrowserSession, executeBrowserTool } from "./browser-tool";
 import { deterministicHostAssessment, executeHostComputerTool, hostActionRequiresApproval, hostComputerToolDefinition, isShellHostAction, type HostRiskAssessment } from "./host-computer-tool";
 import { canUseHostComputer } from "./host-environment";
 import { executeStorageAccessTool, storageAccessToolDefinition } from "./storage-tool";
-import type { ChatWaitPhase, Conversation, HarnessSettings, MessageStep, ModelConfig, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
+import type { ArtifactKind, ChatWaitPhase, Conversation, HarnessSettings, MessageStep, ModelConfig, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
 import type { ModelContentPart } from "./document-processing";
 import { promises as fs } from "node:fs";
 import { acquirePlanAdmission, assertPlanAccess, clearLiveTokenUsage, recordTokenUsage, releasePlanAdmission, remainingPlanOutputTokens, setLiveTokenUsage } from "./plans";
@@ -454,7 +454,7 @@ function storageWriteCount(job:ChatJob){
   return count;
 }
 
-async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings, hostPolicy: HostExecutionPolicy, model: ModelConfig, mcpBindings: Map<string, McpToolBinding>): Promise<ToolExecution> {
+async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings, hostPolicy: HostExecutionPolicy, model: ModelConfig, mcpBindings: Map<string, McpToolBinding>, artifactAutoSave:boolean): Promise<ToolExecution> {
   const args = parseArguments(call.function.arguments);
   const mcpBinding = mcpBindings.get(call.function.name);
   if (mcpBinding) {
@@ -496,7 +496,17 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
     return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args, job.userId, settings, model, job.controller.signal);
   }
   if (call.function.name === "storage_access" && enabled.storageAccess) return executeStorageAccessTool(args,job.userId,settings,{read:enabled.storageRead===true,write:enabled.storageWrite===true,maxWrites:enabled.storageWriteMaxFiles||5,writesUsed:storageWriteCount(job)},model,job.controller.signal);
-  return executeWebTool(call.function.name, call.function.arguments, enabled, settings, job.controller.signal);
+  const execution=await executeWebTool(call.function.name, call.function.arguments, enabled, settings, job.controller.signal);
+  if(call.function.name!=="create_artifact"||!enabled.artifact)return execution;
+  const result=execution.result&&typeof execution.result==="object"?execution.result as Record<string,unknown>:{};
+  const artifact=result.artifact&&typeof result.artifact==="object"?result.artifact as Record<string,unknown>:undefined;
+  if(!artifactAutoSave||!artifact)return{...execution,result:{...result,storage:{saved:false,autoSave:false}}};
+  try{
+    const stored=await saveArtifactFile(String(artifact.title||"Artifact"),String(artifact.kind||"") as ArtifactKind,String(artifact.content??""),job.userId,job.input.conversationId);
+    return{...execution,result:{...result,storage:{saved:true,autoSave:true,id:stored.attachment.id,url:stored.attachment.url,fileName:stored.fileName,requestedFileName:stored.requestedName,nameChanged:stored.nameChanged,action:stored.action,message:stored.action==="created"&&stored.nameChanged?`Artifact saved to storage as ${stored.fileName}. The requested name was already in use by another conversation.`:`Artifact ${stored.action==="updated"?"updated in":"saved to"} storage as ${stored.fileName}.`}}};
+  }catch(error){
+    return{...execution,result:{...result,storage:{saved:false,autoSave:true,error:error instanceof Error?error.message:"Artifact storage copy failed."}}};
+  }
 }
 
 async function run(job: ChatJob) {
@@ -715,7 +725,7 @@ async function run(job: ChatJob) {
         // A host action may wait for approval or run an isolated assessment model. Do not hold
         // this chat's residency lease through either operation (serial policy would self-deadlock).
         if (call.function.name === "host_computer") { releaseModel?.(); releaseModel = undefined; }
-        try { execution = await executeTool(job, call, enabled, config.toolSettings, hostPolicy, model, mcpTools.bindings); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
+        try { execution = await executeTool(job, call, enabled, config.toolSettings, hostPolicy, model, mcpTools.bindings, harness.artifactAutoSaveToStorage); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
         catch (error) {
           if ((error as Error).name === "AbortError") throw error;
           execution = { result: { error: error instanceof Error ? error.message : "Tool execution failed." } };

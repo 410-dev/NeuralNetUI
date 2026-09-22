@@ -76,14 +76,23 @@ function PermissionMatrixDialog({ ko, initial, onSave, onClose }: { ko:boolean; 
 
 export function StorageSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDraft:React.Dispatch<React.SetStateAction<PublicConfig>>}) {
   const ko=draft.preferences.language==="ko";
+  const harness=draft.harnessSettings||DEFAULT_HARNESS_SETTINGS;
   const quotaUnit=(bytes:number):"MB"|"GB"=>bytes>=1024**3&&bytes%1024**3===0?"GB":"MB";
   const [storageUnit,setStorageUnit]=useState<"MB"|"GB">(()=>quotaUnit(draft.userStorageSettings.defaultQuotaBytes));
   const [trashUnit,setTrashUnit]=useState<"MB"|"GB">(()=>quotaUnit(draft.userStorageSettings.defaultTrashQuotaBytes));
   const patchStorage=(value:Partial<PublicConfig["userStorageSettings"]>)=>setDraft(d=>({...d,userStorageSettings:{...d.userStorageSettings,...value}}));
+  const patchHarness=(value:Partial<HarnessSettings>)=>setDraft(d=>({...d,harnessSettings:{...(d.harnessSettings||DEFAULT_HARNESS_SETTINGS),...value}}));
   const quotaValue=(bytes:number,unit:"MB"|"GB")=>bytes/(unit==="GB"?1024**3:1024**2);
   const quotaBytes=(value:number,unit:"MB"|"GB")=>Math.round(value*(unit==="GB"?1024**3:1024**2));
   return <div className="settings-section wide storage-settings-section">
     <SectionTitle icon={<HardDrive size={19}/>} title={ko?"저장소 관리":"Storage management"} description={ko?<><span>사용자 저장소·휴지통의 기본 할당량과 삭제 보존 기간을 관리합니다.</span><span>할당량이 0인 사용자는 이 기본값을 자동으로 따릅니다.</span></>:<><span>Manage workspace defaults for user storage, trash, and deleted-item retention.</span><span>Users whose quota is set to zero automatically inherit these values.</span></>}/>
+    <div className="settings-group">
+      <h4>{ko?"아티팩트 저장":"Artifact storage"}</h4>
+      <div className="general-setting-card general-toggle-card">
+        <div><strong>{ko?"아티팩트를 저장소에 자동 저장":"Automatically save artifacts to storage"}</strong><small>{ko?"같은 대화의 동일한 아티팩트는 덮어쓰고, 다른 대화와 파일명이 겹치면 (n)을 붙여 별도 저장합니다.":"Overwrite the same artifact within a conversation; add (n) when its filename conflicts with another conversation."}</small></div>
+        <button type="button" role="switch" aria-label={ko?"아티팩트 자동 저장":"Artifact auto-save"} aria-checked={harness.artifactAutoSaveToStorage} className={`toggle ${harness.artifactAutoSaveToStorage?"on":""}`} onClick={()=>patchHarness({artifactAutoSaveToStorage:!harness.artifactAutoSaveToStorage})}><i/></button>
+      </div>
+    </div>
     <div className="settings-group">
       <h4>{ko?"기본 할당량":"Default quotas"}</h4>
       <div className="storage-default-grid">

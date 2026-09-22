@@ -454,6 +454,22 @@ function openDatabase() {
     `);
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(20, new Date().toISOString());
   })();
+  const artifactStorageVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (artifactStorageVersion.version < 21) connection.transaction(() => {
+    connection.exec(`
+      CREATE TABLE artifact_storage_links (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        artifact_key TEXT NOT NULL,
+        upload_id TEXT NOT NULL UNIQUE REFERENCES uploads(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, conversation_id, artifact_key)
+      );
+      CREATE INDEX artifact_storage_links_conversation_idx ON artifact_storage_links(conversation_id, updated_at DESC);
+    `);
+    connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(21, new Date().toISOString());
+  })();
   return connection;
 }
 

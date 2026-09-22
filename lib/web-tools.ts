@@ -102,7 +102,7 @@ export function toolDefinitions(enabled: EnabledWebTools, settings: ToolSettings
     type:"function",
     function:{
       name:"create_artifact",
-      description:"Create a rich artifact that the user can open beside the conversation. Use HTML for interactive mini-apps or visual documents, CSV for datasets, JSON or XML for structured data, and Markdown for formatted documents. Put the complete source in content.",
+      description:"Create a rich artifact that the user can open beside the conversation. Use HTML for interactive mini-apps or visual documents, CSV for datasets, JSON or XML for structured data, and Markdown for formatted documents. Put the complete source in content. When workspace artifact auto-save is enabled, the result reports the exact storage fileName. A collision with another conversation may append (n); keep using the original artifact title for later updates in this conversation, but use the returned fileName whenever referring to the stored file.",
       parameters:{type:"object",properties:{title:{type:"string",description:"Short artifact title"},kind:{type:"string",enum:["html","csv","json","xml","markdown"]},content:{type:"string",description:"Complete artifact source"}},required:["title","kind","content"],additionalProperties:false},
     },
   });
