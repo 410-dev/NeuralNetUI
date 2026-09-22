@@ -908,10 +908,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .mcp-connection-list article { display:grid; grid-template-columns:36px minmax(0,1fr) auto; align-items:center; gap:11px; min-height:68px; padding:11px 12px; border:1px solid var(--border); border-radius:var(--radius-md); background:rgba(255,255,255,.018); }
 .mcp-connection-list article.disabled { opacity:.58; }
 .mcp-connection-mark { width:32px; height:32px; display:grid; place-items:center; color:var(--text); }
-.mcp-connection-list article > div { min-width:0; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:3px 10px; align-items:center; }
-.mcp-connection-list article strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
-.mcp-connection-list article small { grid-column:1 / -1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); font-size:11px; }
-.mcp-connection-list article em { grid-column:2; grid-row:1 / -1; align-self:center; padding:2px 7px; border:1px solid var(--border-strong); border-radius:var(--radius-pill); color:var(--dim); font-size:10px; font-weight:500; font-style:normal; letter-spacing:0; line-height:1.35; text-transform:none; }
+.mcp-connection-list article > div { position:relative; min-width:0; padding-right:76px; }
+.mcp-connection-list article strong { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+.mcp-connection-list article small { display:block; min-width:0; margin-top:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); font-size:11px; }
+.mcp-connection-list article em { position:absolute; top:50%; right:0; transform:translateY(-50%); padding:2px 7px; border:1px solid var(--border-strong); border-radius:var(--radius-pill); color:var(--dim); font-size:10px; font-weight:500; font-style:normal; letter-spacing:0; line-height:1.35; text-transform:none; }
 .mcp-row-actions { display:flex; align-items:center; gap:2px; }
 .mcp-row-actions button { width:30px; height:30px; display:grid; place-items:center; border:0; background:transparent; color:var(--muted); }
 .mcp-row-actions button:hover { color:var(--text); transform:scale(1.04); }
