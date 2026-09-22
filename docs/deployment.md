@@ -104,11 +104,41 @@ NEURAL_CHAT_PORT=65500 ./deploy-docker-linux.sh
 
 호스트 PC에서 실행 중인 OpenAI 호환 서버에 연결할 때는 Base URL에 `http://host.docker.internal:8888/v1`처럼 `host.docker.internal`을 사용합니다. Windows와 Linux 모두 Compose에서 이 호스트 이름이 동작하도록 `extra_hosts`가 설정되어 있습니다.
 
+### Linux netsync Docker
+
+릴레이 서버가 Linux 호스트의 `127.0.0.1`/`localhost`에만 바인딩되어 있고, Web UI의 연결 설정에서도 `localhost:10531`을 그대로 사용해야 한다면 다음 전용 배포를 사용합니다.
+
+```bash
+chmod +x deploy-docker-linux-netsync.sh
+./deploy-docker-linux-netsync.sh
+```
+
+이 배포는 Docker의 `host` 네트워크 모드를 사용합니다. 따라서 컨테이너 내부의 `localhost`가 호스트 머신의 `localhost`와 같아지고, 릴레이 Base URL은 `http://localhost:10531`(OpenAI 호환 API가 `/v1` 경로를 요구하면 `http://localhost:10531/v1`)로 설정할 수 있습니다. 릴레이 포트가 다르면 실행 시 지정합니다.
+
+```bash
+NEURAL_CHAT_RELAY_PORT=10532 ./deploy-docker-linux-netsync.sh
+```
+
+Web UI 포트도 호스트에서 직접 점유하므로, 변경 시 해당 포트가 비어 있어야 합니다.
+
+```bash
+NEURAL_CHAT_PORT=3001 ./deploy-docker-linux-netsync.sh
+```
+
+`host` 네트워크 모드에서는 Docker의 포트 격리가 적용되지 않으며, Web UI는 기존 Docker 배포와 같이 기본적으로 모든 호스트 인터페이스(`0.0.0.0`)에서 수신합니다. 외부 접근이 불필요하면 호스트 방화벽에서 Web UI 포트를 제한하세요. 이 모드는 Linux Docker Engine 전용입니다.
+
 로그 확인과 종료:
 
 ```bash
 docker compose logs -f neural-chat
 docker compose down
+```
+
+netsync 배포의 로그 확인과 종료는 같은 Compose 파일을 사용합니다.
+
+```bash
+docker compose -f docker-compose.netsync.yml logs -f neural-chat
+docker compose -f docker-compose.netsync.yml down
 ```
 
 ## LXC / systemd

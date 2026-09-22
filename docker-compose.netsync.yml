@@ -1,0 +1,27 @@
+# Linux-only deployment for a relay that is bound to the host's loopback address.
+# `network_mode: host` makes 127.0.0.1/localhost in this container the host's
+# loopback interface, allowing the Web UI to reach a host relay at localhost:10531.
+services:
+  neural-chat:
+    container_name: neural-chat
+    image: neural-chat-ui:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    user: "${NEURAL_CHAT_UID:-1000}:${NEURAL_CHAT_GID:-1000}"
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "${NEURAL_CHAT_PORT:-3000}"
+      NEURAL_CHAT_DATA_DIR: /app/data
+    volumes:
+      - "${NEURAL_CHAT_DATA_PATH:-./data}:/app/data"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:' + process.env.PORT).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 6

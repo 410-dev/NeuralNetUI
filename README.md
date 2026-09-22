@@ -60,6 +60,8 @@ chmod +x deploy-docker-linux.sh
 ./deploy-docker-linux.sh
 ```
 
+호스트의 `localhost`에만 바인딩된 릴레이 서버와 함께 Linux Docker Engine에서 실행하려면 [netsync Docker 배포](docs/deployment.md#linux-netsync-docker)를 사용합니다.
+
 ### Windows 설치 프로그램
 
 MSI는 Node.js, Chromium, Python, Windows 서비스, 트레이 앱을 함께 설치하고 부팅 시 자동으로 시작합니다. 자세한 내용은 [배포 문서](docs/deployment.md#windows-msi)를 참고하세요.
