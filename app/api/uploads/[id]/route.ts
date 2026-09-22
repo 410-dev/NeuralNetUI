@@ -1,6 +1,6 @@
 import { createReadStream, existsSync } from "node:fs";
 import { Readable } from "node:stream";
-import { deleteUpload, purgeDeletedUploads, readUpload, replaceStoredTextFile } from "@/lib/uploads";
+import { deleteUpload, purgeDeletedUploads, readUpload, renameStoredFile, replaceStoredTextFile } from "@/lib/uploads";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { readConfig } from "@/lib/config";
 
@@ -44,6 +44,18 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
   } catch(error) {
     if(error&&typeof error==="object"&&"status" in error)return authErrorResponse(error);
     const message=error instanceof Error?error.message:"File update failed.";
+    return Response.json({error:message},{status:/not found/i.test(message)?404:400});
+  }
+}
+
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const {id}=await context.params,user=requireUser(request),body=await request.json();
+    if(typeof body.name!=="string")return Response.json({error:"File name must be text."},{status:400});
+    return Response.json({attachment:await renameStoredFile(id,user.id,body.name)});
+  } catch(error) {
+    if(error&&typeof error==="object"&&"status" in error)return authErrorResponse(error);
+    const message=error instanceof Error?error.message:"File rename failed.";
     return Response.json({error:message},{status:/not found/i.test(message)?404:400});
   }
 }

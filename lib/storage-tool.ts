@@ -11,7 +11,7 @@ export function storageAccessToolDefinition(permissions: StorageToolPermissions 
     type: "function",
     function: {
       name: "storage_access",
-      description: `${permissions.read ? "Search and read files in the current user's private NeuralNetUI storage. " : ""}${permissions.write ? `Create plain-text or Markdown files in private storage (at most ${permissions.maxWrites} files in this conversation). ` : ""}Files belonging to other users and deleted files are never accessible.`,
+      description: `${permissions.read ? "Search and read files in the current user's private NeuralNetUI storage. " : ""}${permissions.write ? `Create UTF-8 text-based files, including HTML, CSV, JSON, XML, source files, or Markdown, in private storage (at most ${permissions.maxWrites} files in this conversation). Use kind text with the desired filename extension for formats other than Markdown. ` : ""}Files belonging to other users and deleted files are never accessible.`,
       parameters: {
         type: "object",
         properties: {
@@ -20,8 +20,8 @@ export function storageAccessToolDefinition(permissions: StorageToolPermissions 
           file_id: { type: "string", description: "Private storage file id returned by search." },
           sort: { type: "string", enum: ["created_desc", "created_asc", "name_asc", "name_desc", "size_asc", "size_desc"], default: "name_asc" },
           limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
-          name: { type: "string", description: "Filename for write. A matching .txt or .md extension is added when omitted." },
-          kind: { type: "string", enum: ["text", "markdown"], description: "Text format for write." },
+          name: { type: "string", description: "Filename for write. For kind text, the name and custom extension are preserved exactly; no .txt suffix is added. For Markdown, .md is added when omitted." },
+          kind: { type: "string", enum: ["text", "markdown"], description: "Use text for any UTF-8 text-based format such as HTML, CSV, JSON, XML, or source code; use markdown for Markdown." },
           content: { type: "string", description: "Complete UTF-8 text content for write." },
         },
         required: ["action"],

@@ -189,8 +189,8 @@ export async function saveStagedUpload(sourcePath:string,nameInput:string,userId
 }
 
 export async function saveTextFile(nameInput:string,kind:"markdown"|"text",content:string,userId:string){
-  const extension=kind==="markdown"?".md":".txt";const mimeType=kind==="markdown"?"text/markdown":"text/plain";
-  let name=safeStoredName(nameInput);if(!name.toLowerCase().endsWith(extension))name=`${name.replace(/\.(?:md|txt)$/i,"")}${extension}`;
+  const extension=kind==="markdown"?".md":"";let name=safeStoredName(nameInput);if(extension&&!name.toLowerCase().endsWith(extension))name=`${name.replace(/\.(?:md|txt)$/i,"")}${extension}`;
+  const mimeType=kind==="markdown"?"text/markdown":FILE_MIME_TYPES[path.extname(name).toLowerCase()]||"text/plain";
   const data=Buffer.from(content,"utf8");assertQuotaPreflight(userId,data.length);const id=randomUUID();const paths=pathsFor(id);const temporary=`${paths.original}.${randomUUID()}.tmp`;
   const metadata:StoredAttachment={id,name,mimeType,size:data.length,url:`/api/uploads/${id}`};await fs.mkdir(uploadsDir,{recursive:true});
   try{await fs.writeFile(temporary,data,{mode:0o600,flag:"wx"});await fs.rename(temporary,paths.original);insertWithinQuota({...metadata,userId,retained:true});return metadata;}
@@ -294,6 +294,18 @@ export async function readUpload(id: string, userId: string) {
   const row = db.prepare("SELECT id, name, mime_type, size, width, height FROM uploads WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(id, userId) as UploadRow | undefined;
   if (!row) throw Object.assign(new Error("Attachment not found."), { code: "ENOENT" });
   return { metadata: toAttachment(row), paths: pathsFor(id) };
+}
+
+export async function renameStoredFile(id:string,userId:string,nameInput:string){
+  await ensureLegacyUploadsMigrated();assertId(id);const name=safeStoredName(nameInput);
+  return db.transaction(()=>{
+    const row=db.prepare("SELECT id,name,mime_type,size,width,height FROM uploads WHERE id=? AND user_id=? AND deleted_at IS NULL").get(id,userId) as UploadRow|undefined;
+    if(!row)throw Object.assign(new Error("Attachment not found."),{code:"ENOENT"});
+    const extensionMime=FILE_MIME_TYPES[path.extname(name).toLowerCase()];
+    const mimeType=isEditableStorageFile(row.name,row.mime_type)&&extensionMime&&isEditableStorageFile(name,extensionMime)?extensionMime:row.mime_type;
+    db.prepare("UPDATE uploads SET name=?,mime_type=? WHERE id=? AND user_id=? AND deleted_at IS NULL").run(name,mimeType,id,userId);
+    return{...toAttachment({...row,name,mime_type:mimeType})};
+  })();
 }
 
 async function replaceStoredTextFileUnlocked(id:string,userId:string,content:string){

@@ -8,7 +8,7 @@ const root=await mkdtemp(path.join(os.tmpdir(),"neural-chunk-upload-test-"));
 process.env.NEURAL_CHAT_DATA_DIR=root;
 const{db}=await import("./database.ts");
 const{beginStorageUpload,completeStorageUpload,STORAGE_UPLOAD_CHUNK_BYTES,writeStorageUploadChunk}=await import("./storage-chunk-upload.ts");
-const{readUpload,replaceStoredTextFile,saveTextFile}=await import("./uploads.ts");
+const{readUpload,renameStoredFile,replaceStoredTextFile,saveTextFile}=await import("./uploads.ts");
 
 function addUser(label:string){const id=crypto.randomUUID(),stamp=new Date().toISOString();db.prepare("INSERT INTO users(id,username,display_name,password_hash,role,preferences,storage_quota_bytes,created_at,updated_at) VALUES(?,?,?,?,?,'{}',?,?,?)").run(id,`${label}-${id}`,label,"unused","user",32*1024*1024,stamp,stamp);return id;}
 
@@ -27,7 +27,9 @@ test("atomically updates editable owner-scoped files and their recorded size",as
   const owner=addUser("editor"),other=addUser("other-editor"),saved=await saveTextFile("draft","markdown","old",owner),next="# 새 내용\n";
   const updated=await replaceStoredTextFile(saved.id,owner,next);const{paths}=await readUpload(saved.id,owner);
   assert.equal(updated.size,Buffer.byteLength(next));assert.equal(await readFile(paths.original,"utf8"),next);
+  const renamed=await renameStoredFile(saved.id,owner,"report.json");assert.equal(renamed.name,"report.json");assert.equal(renamed.mimeType,"application/json");
   await assert.rejects(replaceStoredTextFile(saved.id,other,"not allowed"),/not found/i);
+  await assert.rejects(renameStoredFile(saved.id,other,"stolen.json"),/not found/i);
 });
 
 test.after(async()=>{db.close();await rm(root,{recursive:true,force:true});});

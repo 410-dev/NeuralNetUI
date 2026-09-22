@@ -1054,7 +1054,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .storage-delete-toolbar > button.active { color:var(--text); background:rgb(var(--accent-rgb) / .16); }
 @media (max-width: 620px) { .storage-delete-toolbar { flex-wrap:wrap; padding:8px; } .storage-delete-toolbar > span { flex:1 0 100%; padding:2px 4px; } .storage-delete-toolbar > button { flex:1 1 auto; justify-content:center; } }
 .storage-loading { display:grid; place-items:center; min-height:90px; }
-.storage-file-grid { min-height:0; max-height:calc(var(--storage-rows,3) * 86px - 8px); overflow:auto; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-auto-rows:minmax(78px,auto); gap:8px; overscroll-behavior:contain; }
+.storage-file-grid { min-height:0; max-height:calc(var(--storage-rows,3) * 114px - 8px); overflow:auto; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-auto-rows:minmax(106px,auto); gap:8px; overscroll-behavior:contain; }
 .storage-file-grid article { min-width:0; display:grid; grid-template-columns:66px minmax(0,1fr) auto; align-items:center; gap:10px; padding:9px 10px; border:1px solid var(--border); border-radius:var(--radius-card); background:#ffffff04; }
 .storage-file-preview { width:66px; height:58px; display:grid; place-items:center; overflow:hidden; border:0; border-radius:var(--radius-xs); background:#101013; color:var(--muted); -webkit-touch-callout:none; user-select:none; }
 .storage-file-grid:not(.selecting) button.storage-file-preview{cursor:zoom-in;transition:color .18s ease,transform .18s var(--spring)}.storage-file-grid:not(.selecting) button.storage-file-preview:hover{color:var(--text);transform:scale(1.035)}
@@ -1065,12 +1065,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .storage-file-grid article small { margin-top:4px; color:var(--dim); font-size:9px; }
 .storage-file-grid article em { margin-top:4px; color:var(--muted); font-size:9px; font-style:normal; }
 .storage-file-grid article > span { display:flex; flex-direction:column; gap:4px; }
-.storage-file-grid article > span a,.storage-file-grid article > span button { width:30px; height:30px; display:grid; place-items:center; border-radius:50%; color:var(--muted); }
+.storage-file-grid article > span a,.storage-file-grid article > span button { width:28px; height:28px; display:grid; place-items:center; border-radius:50%; color:var(--muted); }
 .storage-file-grid article > span a:hover,.storage-file-grid article > span button:hover:not(:disabled) { color:var(--text); background:#ffffff0c; }
 .storage-file-grid article > span button:disabled { opacity:.35; }
 .storage-file-grid.selecting article { transition:border-color .15s ease,background .15s ease; }.storage-file-grid.selecting article.selected { border-color:rgba(var(--accent-rgb),.7); background:rgba(var(--accent-rgb),.08); }.storage-file-grid.selecting .storage-file-preview { border:0; padding:0; cursor:pointer; }.storage-selection-action { min-height:100%; display:grid !important; place-items:center; }.circle-check { width:28px !important; height:28px !important; display:grid; place-items:center; flex:0 0 auto; padding:0; border:1px solid var(--border-strong); border-radius:50%; color:white; background:#101013; }.circle-check:hover { border-color:rgb(var(--accent-rgb) / .7); background:#ffffff0b; }.circle-check.selected { border-color:transparent; background:var(--accent); }.storage-picker-footer { display:flex; align-items:center; justify-content:flex-end; gap:12px; padding-top:8px; border-top:1px solid var(--border); }.storage-picker-footer small { color:var(--dim); font-size:9px; }.storage-picker-footer .save-button { min-height:36px; }
 .storage-empty { grid-column:1/-1; padding:40px 15px; text-align:center; color:var(--dim); font-size:11px; }
 .storage-create-layer { z-index:240; }
+.storage-rename-layer { z-index:240; }
 .storage-create-dialog { width:min(760px,100%); max-height:min(88dvh,820px); overflow:hidden; }
 .storage-create-dialog > header { align-items:flex-start; }.storage-create-dialog > header > div { min-width:0; }.storage-create-dialog > header > button { flex:0 0 auto; }.storage-create-dialog > header p { margin:5px 0 0; color:var(--dim); font-size:11px; }
 .storage-create-fields { display:grid; grid-template-columns:minmax(0,1fr) minmax(180px,230px); align-items:end; gap:10px; }.storage-create-fields > label,.storage-content-field { min-width:0; display:grid; gap:7px; }.storage-create-fields label > span,.storage-content-field > span { color:var(--muted); font-size:9.5px; }.storage-create-fields input { height:40px; padding:0 15px; border-radius:var(--radius-pill); background:var(--field); }

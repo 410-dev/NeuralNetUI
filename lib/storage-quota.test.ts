@@ -39,6 +39,10 @@ test("storage tool writes only text formats and enforces the conversation limit"
   const id=crypto.randomUUID(),stamp=new Date().toISOString();db.prepare("INSERT INTO users(id,username,display_name,password_hash,role,preferences,storage_quota_bytes,created_at,updated_at) VALUES(?,?,?,?,?,'{}',?,?,?)").run(id,`writer-${id}`,"Writer","unused","user",1024*1024,stamp,stamp);
   const written=await executeStorageAccessTool({action:"write",name:"notes",kind:"markdown",content:"# Hello"},id,toolSettings,{read:false,write:true,maxWrites:2,writesUsed:0}) as {result:{file:{name:string;mimeType:string};remaining:number}};
   assert.equal(written.result.file.name,"notes.md");assert.equal(written.result.file.mimeType,"text/markdown");assert.equal(written.result.remaining,1);
+  const html=await executeStorageAccessTool({action:"write",name:"dashboard.html",kind:"text",content:"<h1>Hello</h1>"},id,toolSettings,{read:false,write:true,maxWrites:3,writesUsed:1}) as {result:{file:{name:string;mimeType:string}}};
+  assert.equal(html.result.file.name,"dashboard.html");assert.equal(html.result.file.mimeType,"text/html");
+  const extensionless=await executeStorageAccessTool({action:"write",name:"LICENSE",kind:"text",content:"Terms"},id,toolSettings,{read:false,write:true,maxWrites:3,writesUsed:2}) as {result:{file:{name:string;mimeType:string}}};
+  assert.equal(extensionless.result.file.name,"LICENSE");assert.equal(extensionless.result.file.mimeType,"text/plain");
   await assert.rejects(executeStorageAccessTool({action:"write",name:"blocked",kind:"markdown",content:"x"},id,toolSettings,{read:false,write:true,maxWrites:1,writesUsed:1}),/write limit/i);
   await assert.rejects(executeStorageAccessTool({action:"write",name:"binary",kind:"html",content:"<b>x</b>"},id,toolSettings,{read:false,write:true,maxWrites:2,writesUsed:0}),/only plain text and Markdown/i);
   await assert.rejects(executeStorageAccessTool({action:"search"},id,toolSettings,{read:false,write:true,maxWrites:2}),/read access is disabled/i);
