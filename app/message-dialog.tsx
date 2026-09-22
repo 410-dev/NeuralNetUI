@@ -2,7 +2,7 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-react";
-import { useModalFocus } from "@/lib/use-modal-focus";
+import { useModalTransition } from "@/lib/use-modal-focus";
 
 // Every question and announcement the app used to hand to the browser lives here instead, so a
 // message keeps the application's own surface, spacing and focus behaviour. The tone chooses the
@@ -19,16 +19,16 @@ const TONE_MARKS: Record<MessageTone, ReactNode> = {
 };
 
 export function MessageDialog({ tone = "info", title, message, detail, choices, cancelLabel, onChoose, onClose }: MessageRequest & { onChoose: (id: string) => void; onClose: () => void }) {
-  const ref = useModalFocus(onClose);
-  return createPortal(<div ref={ref} tabIndex={-1} className={`message-dialog-layer tone-${tone}`} role="alertdialog" aria-modal="true" aria-label={title}>
-    <button className="settings-backdrop" tabIndex={-1} onClick={onClose} aria-label={title} />
+  const { ref, close, closing } = useModalTransition(onClose);
+  return createPortal(<div ref={ref} tabIndex={-1} className={`message-dialog-layer tone-${tone} ${closing ? "modal-closing" : ""}`} role="alertdialog" aria-modal="true" aria-label={title}>
+    <button className="settings-backdrop" tabIndex={-1} onClick={() => close()} aria-label={title} />
     <section className="message-dialog">
       <header><span className="message-dialog-mark">{TONE_MARKS[tone]}</span><h2>{title}</h2></header>
       {message && <p className="message-dialog-body">{message}</p>}
       {detail && <p className="message-dialog-detail">{detail}</p>}
       <footer>
-        {cancelLabel && <button type="button" className="secondary-button" onClick={onClose}>{cancelLabel}</button>}
-        {(choices || []).map((choice) => <button key={choice.id} type="button" className={choice.quiet ? "secondary-button" : "message-dialog-confirm"} onClick={() => onChoose(choice.id)}>{choice.label}</button>)}
+        {cancelLabel && <button type="button" className="secondary-button" onClick={() => close()}>{cancelLabel}</button>}
+        {(choices || []).map((choice) => <button key={choice.id} type="button" className={choice.quiet ? "secondary-button" : "message-dialog-confirm"} onClick={() => close(() => onChoose(choice.id))}>{choice.label}</button>)}
       </footer>
     </section>
   </div>, document.body);

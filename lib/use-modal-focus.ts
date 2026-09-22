@@ -1,5 +1,7 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+export const MODAL_TRANSITION_MS = 190;
 
 export function useModalFocus(onClose: () => void) {
   const layer = useRef<HTMLDivElement>(null);
@@ -42,8 +44,36 @@ export function useModalFocus(onClose: () => void) {
     return () => {
       document.removeEventListener("keydown", keydown, true); document.removeEventListener("focusin", focusin);
       siblings.forEach((element, index) => { element.inert = inert[index]; });
+      // Legacy callers can still unmount immediately after invoking their close callback. Leave a
+      // non-interactive visual snapshot behind for one shared exit beat so every independent modal
+      // closes as smoothly as the settings panel while those callers migrate to useModalTransition.
+      if (!root.classList.contains("modal-closing") && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        const snapshot = root.cloneNode(true) as HTMLElement;
+        snapshot.removeAttribute("id"); snapshot.inert = true; snapshot.setAttribute("aria-hidden", "true");
+        snapshot.classList.add("modal-closing", "modal-exit-snapshot");
+        document.body.append(snapshot);
+        window.setTimeout(() => snapshot.remove(), MODAL_TRANSITION_MS);
+      }
       if (previous?.isConnected) previous.focus();
     };
   }, []);
   return layer;
+}
+
+/** Keeps a modal mounted long enough for the shared exit motion to finish. */
+export function useModalTransition(onClose: () => void) {
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const close = useCallback((after?: () => void) => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    const finish = () => { after?.(); onClose(); };
+    if (typeof window === "undefined" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) { finish(); return; }
+    setClosing(true);
+    timer.current = setTimeout(finish, MODAL_TRANSITION_MS);
+  }, [onClose]);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const ref = useModalFocus(() => close());
+  return { ref, close, closing };
 }

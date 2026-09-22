@@ -14,6 +14,7 @@ import { AccountBackupSettings, DataManagementSettings } from "./backup-settings
 import { PlanSettings } from "./plan-settings";
 import { McpSettings } from "./mcp-settings";
 import { ArtifactCard } from "./artifact-viewer";
+import { SyntaxHighlightedCode } from "./syntax-highlighted-code";
 import { UsageDonut } from "./usage-donut";
 import { USAGE_REFRESH_EVENT } from "@/lib/usage-popover";
 import { formatModelWeight } from "@/lib/plan-usage";
@@ -57,7 +58,7 @@ import { copyTextToClipboard, clipboardImages } from "@/lib/client-clipboard";
 import { hasMobileComposerInput, shouldSubmitComposerOnEnter } from "@/lib/composer-keyboard";
 import { literalStrikethroughSource } from "@/lib/markdown-rendering";
 import { saveConversationRequest } from "@/lib/client-persistence";
-import { useModalFocus } from "@/lib/use-modal-focus";
+import { useModalFocus, useModalTransition } from "@/lib/use-modal-focus";
 import { connectionForModel, resolveConnectionModels, reconcileConnectionEdits } from "@/lib/connection-drivers";
 import { modelServerState, onlineReplacement, selectableState, type ServerState } from "@/lib/model-availability";
 import { useKeyboardReturn } from "@/lib/use-keyboard-return";
@@ -1505,7 +1506,7 @@ function CodeSnippet({ c, children, fadeDurationMs = 0 }: { c: CopySet; children
         <button type="button" className="copy-snippet" onClick={() => void copySnippet()} aria-label={c.copy} title={c.copy}>{copied ? <Check size={13} /> : <Copy size={13} />}<span>{copied ? c.copied : c.copy}</span></button>
       </div>
     </div>
-    <pre><code className={codeElement?.props.className}>{code.slice(0, fadeFrom)}{fadeFrom < code.length && <span className="stream-token" style={{ "--stream-fade-duration": `${fadeDurationMs}ms` } as CSSProperties}>{code.slice(fadeFrom)}</span>}</code></pre>
+    <pre className={fadeFrom < code.length ? "syntax-streaming" : undefined} style={{ "--stream-fade-duration": `${fadeDurationMs}ms` } as CSSProperties}><SyntaxHighlightedCode code={code} language={language} className={codeElement?.props.className} /></pre>
   </div>;
 }
 
@@ -1539,11 +1540,11 @@ function useLongPress(onLongPress: () => void, disabled = false) {
 function MobileMessageActions({ c, locale, role, canCopy, onClose, onRegenerate, onEdit, onCopy, onDelete }: { c: CopySet; locale: Locale; role: StoredMessage["role"]; canCopy: boolean; onClose: () => void; onRegenerate: () => void; onEdit: () => void; onCopy: () => void; onDelete?: () => void }) {
   // The sheet announced itself as a modal dialog without behaving like one. It takes the same
   // trap, Escape and inert background as every other dialog in the app.
-  const ref = useModalFocus(onClose);
-  return <div ref={ref} tabIndex={-1} className="mobile-message-action-layer" role="dialog" aria-modal="true" aria-label={locale === "ko" ? "메시지 작업" : "Message actions"}>
-    <button className="mobile-message-action-scrim" tabIndex={-1} aria-label={c.cancel} onClick={onClose} />
+  const { ref, close, closing } = useModalTransition(onClose);
+  return <div ref={ref} tabIndex={-1} className={`mobile-message-action-layer ${closing ? "modal-closing" : ""}`} role="dialog" aria-modal="true" aria-label={locale === "ko" ? "메시지 작업" : "Message actions"}>
+    <button className="mobile-message-action-scrim" tabIndex={-1} aria-label={c.cancel} onClick={() => close()} />
     <section className="mobile-message-action-sheet">
-      <header><span>{role === "user" ? (locale === "ko" ? "내 메시지" : "Your message") : (locale === "ko" ? "모델 응답" : "Model response")}</span><button onClick={onClose} aria-label={c.cancel}><X size={18} /></button></header>
+      <header><span>{role === "user" ? (locale === "ko" ? "내 메시지" : "Your message") : (locale === "ko" ? "모델 응답" : "Model response")}</span><button onClick={() => close()} aria-label={c.cancel}><X size={18} /></button></header>
       <button onClick={onRegenerate}><RefreshCw size={18} /><span>{role === "user" ? c.regenerateRequest : c.regenerate}</span></button>
       <button onClick={onEdit}><Pencil size={18} /><span>{role === "user" ? c.editBranch : c.editResponse}</span></button>
       {canCopy && <button onClick={onCopy}><Copy size={18} /><span>{c.copy}</span></button>}
@@ -1860,6 +1861,7 @@ function AttachmentGrid({ attachments }: { attachments: StoredAttachment[] }) {
 }
 
 function ExportDialog({ c, conversation, initialIncludeReasoning, onClose, onPreference }: { c: CopySet; conversation?: Conversation; initialIncludeReasoning: boolean; onClose: () => void; onPreference: (value: boolean) => void }) {
+  const { ref, close, closing } = useModalTransition(onClose);
   const [includeReasoning, setIncludeReasoning] = useState(initialIncludeReasoning);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -1875,7 +1877,7 @@ function ExportDialog({ c, conversation, initialIncludeReasoning, onClose, onPre
       const response = await fetch(`/api/conversations?download=archive&reasoning=${includeReasoning ? "1" : "0"}`, { cache: "no-store" });
       if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || c.exportAllFailed); }
       save(await response.blob(), "application/zip", `neuralnetui-chats-${new Date().toISOString().slice(0, 10)}.zip`);
-      onPreference(includeReasoning); onClose();
+      onPreference(includeReasoning); close();
     } catch (error) { setNotice(error instanceof Error ? error.message : c.exportAllFailed); }
     finally { setBusy(false); }
   }
@@ -1890,15 +1892,15 @@ function ExportDialog({ c, conversation, initialIncludeReasoning, onClose, onPre
       content = `# ${conversation.title}\n\nBranch: ${active.name}\n\n` + active.messages.map((message) => `${message.role === "user" ? "## User" : "## Assistant"}\n\n${includeReasoning && message.reasoning ? `> Reasoning\n> ${message.reasoning.replaceAll("\n", "\n> ")}\n\n` : ""}${message.content}`).join("\n\n---\n\n");
       type = "text/markdown"; extension = "md";
     }
-    save(content, type, `${conversation.title.replace(/[^a-z0-9가-힣_-]+/gi, "-")}.${extension}`); onPreference(includeReasoning); onClose();
+    save(content, type, `${conversation.title.replace(/[^a-z0-9가-힣_-]+/gi, "-")}.${extension}`); onPreference(includeReasoning); close();
   }
-  return <div className="mini-dialog-layer"><button className="settings-backdrop" onClick={onClose} /><section className="export-dialog"><header><div><Download size={18} /><h3>{conversation ? c.exportConversation : c.exportAllChats}</h3></div><button onClick={onClose} aria-label={c.close}><X size={18} /></button></header><p>{conversation ? c.exportDescription : c.exportAllDescription}</p><label className="export-reasoning"><span><strong>{c.includeReasoning}</strong><small>{c.includeReasoningDesc}</small></span><button role="switch" aria-checked={includeReasoning} className={`toggle ${includeReasoning ? "on" : ""}`} onClick={() => setIncludeReasoning(!includeReasoning)}><i /></button></label>{notice && <p className="settings-notice" role="alert">{notice}</p>}<div className="export-actions">{conversation
+  return <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" className={`mini-dialog-layer ${closing ? "modal-closing" : ""}`}><button className="settings-backdrop" onClick={() => close()} /><section className="export-dialog"><header><div><Download size={18} /><h3>{conversation ? c.exportConversation : c.exportAllChats}</h3></div><button onClick={() => close()} aria-label={c.close}><X size={18} /></button></header><p>{conversation ? c.exportDescription : c.exportAllDescription}</p><label className="export-reasoning"><span><strong>{c.includeReasoning}</strong><small>{c.includeReasoningDesc}</small></span><button role="switch" aria-checked={includeReasoning} className={`toggle ${includeReasoning ? "on" : ""}`} onClick={() => setIncludeReasoning(!includeReasoning)}><i /></button></label>{notice && <p className="settings-notice" role="alert">{notice}</p>}<div className="export-actions">{conversation
     ? <><button onClick={() => download("markdown")}><FileText size={17} /> Markdown</button><button onClick={() => download("json")}><FileJson size={17} /> JSON · {c.allBranches}</button></>
     : <button disabled={busy} onClick={() => void downloadArchive()}>{busy ? <LoaderCircle className="spin" size={17} /> : <FileJson size={17} />} {busy ? c.exportingAllChats : c.exportAllChatsAction}</button>}</div></section></div>;
 }
 
 function SettingsPanel({ initial, onClose, onSaved, onLogout, onAccentPreview }: { initial: PublicConfig; onClose: () => void; onSaved: (config: PublicConfig) => void; onLogout: () => Promise<void>; onAccentPreview: (hex: string) => void }) {
-  const modalRef = useModalFocus(onClose);
+  const { ref: modalRef, close: closeSettings, closing } = useModalTransition(onClose);
   const admin = initial.account?.role === "admin" || initial.account?.role === "superadmin";
   const firstEditableModel = initial.models.find((model) => !model.isAlias || model.ownerId === initial.account?.id) || initial.models[0];
   const [draft, setDraft] = useState<PublicConfig>(structuredClone(initial)); const [tab, setTab] = useState<SettingsTab>("general"); const [activeModelId, setActiveModelId] = useState(firstEditableModel?.id || ""); const [saving, setSaving] = useState(false); const [detectingConnectionId, setDetectingConnectionId] = useState(""); const [notice, setNotice] = useState(""); const [statusNonce, setStatusNonce] = useState(0);
@@ -1969,10 +1971,10 @@ ${c.detectFailedDetail}: ${failure.detail}` : ""}` });
     } catch (error) { setNotice(error instanceof Error ? error.message : c.invalidModelSettings); }
     finally { setSaving(false); }
   }
-  return createPortal(<div ref={modalRef} tabIndex={-1} className="settings-layer" role="dialog" aria-modal="true" aria-label={c.settings}>
-    <button tabIndex={-1} className="settings-backdrop" onClick={onClose} aria-label={c.cancel}/>
+  return createPortal(<div ref={modalRef} tabIndex={-1} className={`settings-layer ${closing ? "modal-closing" : ""}`} role="dialog" aria-modal="true" aria-label={c.settings}>
+    <button tabIndex={-1} className="settings-backdrop" onClick={() => closeSettings()} aria-label={c.cancel}/>
     <section className="settings-panel">
-      <header><div><span>{c.workspace}</span><h2>{c.settings}</h2></div><button aria-label={c.cancel} onClick={onClose}><X size={20}/></button></header>
+      <header><div><span>{c.workspace}</span><h2>{c.settings}</h2></div><button aria-label={c.cancel} onClick={() => closeSettings()}><X size={20}/></button></header>
       <div className="settings-body">
         <nav aria-label={c.settings}>
           <button className={tab==="general"?"active":""} onClick={()=>setTab("general")}><Settings2 size={17}/>{c.general}</button>
@@ -2000,7 +2002,7 @@ ${c.detectFailedDetail}: ${failure.detail}` : ""}` });
           {tab==="users"&&admin&&<UsersSettings c={c}/>} {tab==="plans"&&admin&&<PlanSettings models={draft.models} ko={draft.preferences.language==="ko"}/>} {tab==="data"&&admin&&<DataManagementSettings ko={draft.preferences.language==="ko"}/>} {tab==="account"&&<><AccountSettings c={c} account={initial.account} draft={draft} setDraft={setDraft} onLogout={onLogout}/><AccountBackupSettings ko={draft.preferences.language==="ko"}/></>}
         </div>
       </div>
-      <footer><span>{notice}</span><div><button className="secondary-button" onClick={onClose}>{dirty?c.cancel:c.close}</button>{!["users","plans","data","mcp"].includes(tab)&&<button className="save-button" onClick={save} disabled={saving||!dirty}>{saving?c.saving:c.saveChanges}</button>}</div></footer>
+      <footer><span>{notice}</span><div><button className="secondary-button" onClick={() => closeSettings()}>{dirty?c.cancel:c.close}</button>{!["users","plans","data","mcp"].includes(tab)&&<button className="save-button" onClick={save} disabled={saving||!dirty}>{saving?c.saving:c.saveChanges}</button>}</div></footer>
     </section>{detectDialog}
   </div>,document.body);
 }

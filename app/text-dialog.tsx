@@ -2,7 +2,7 @@
 import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
-import { useModalFocus } from "@/lib/use-modal-focus";
+import { useModalTransition } from "@/lib/use-modal-focus";
 
 // One editor for every long text in the app: harness prompts, model and reasoning system prompts,
 // and chat message edits. A cramped inline textarea is never the place to rewrite a prompt, so the
@@ -14,7 +14,7 @@ export function TextDialog({ title, value, onSave, onClose, multiline = false, h
   secondary?: { label: string; icon?: ReactNode; busy?: boolean; onAction: (value: string) => void };
 }) {
   const [text, setText] = useState(value);
-  const ref = useModalFocus(onClose);
+  const { ref, close: closeModal, closing } = useModalTransition(onClose);
   const trimmed = text.trim();
   const canSave = allowEmpty || Boolean(trimmed);
   const changed = trimmed !== value.trim();
@@ -23,17 +23,17 @@ export function TextDialog({ title, value, onSave, onClose, multiline = false, h
   // The dismissing controls need a name of their own: two buttons called "Cancel" in one dialog are
   // ambiguous to anyone navigating by name.
   const close = ko ? "닫기" : "Close";
-  return createPortal(<div ref={ref} tabIndex={-1} className="harness-modal-layer" role="dialog" aria-modal="true" aria-label={title}>
-    <button className="settings-backdrop" tabIndex={-1} onClick={onClose} aria-label={close} />
-    <form className="harness-dialog text-dialog" onSubmit={(event) => { event.preventDefault(); if (canSave) onSave(trimmed); }}>
-      <header><h2>{title}</h2><button type="button" onClick={onClose} aria-label={close}><X size={20} /></button></header>
+  return createPortal(<div ref={ref} tabIndex={-1} className={`harness-modal-layer ${closing ? "modal-closing" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+    <button className="settings-backdrop" tabIndex={-1} onClick={() => closeModal()} aria-label={close} />
+    <form className="harness-dialog text-dialog" onSubmit={(event) => { event.preventDefault(); if (canSave) closeModal(() => onSave(trimmed)); }}>
+      <header><h2>{title}</h2><button type="button" onClick={() => closeModal()} aria-label={close}><X size={20} /></button></header>
       {help && <p className="harness-dialog-help">{help}</p>}
       {preface}
       {multiline
         ? <textarea aria-label={title} rows={16} maxLength={maxLength ?? 32000} placeholder={placeholder} value={text} onChange={(event) => setText(event.target.value)} />
         : <input aria-label={title} maxLength={maxLength ?? 200} placeholder={placeholder} value={text} onChange={(event) => setText(event.target.value)} />}
       <footer className="text-dialog-actions">
-        <button type="button" className="secondary-button" onClick={onClose}>{cancel}</button>
+        <button type="button" className="secondary-button" onClick={() => closeModal()}>{cancel}</button>
         {secondary && <button type="button" className="subtle-action" disabled={!canSave || !changed || secondary.busy} onClick={() => secondary.onAction(trimmed)}>{secondary.icon}{secondary.label}</button>}
         <button className="save-button" disabled={!canSave}>{saveIcon}{save}</button>
       </footer>
