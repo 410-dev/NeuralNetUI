@@ -60,7 +60,8 @@ import { literalStrikethroughSource } from "@/lib/markdown-rendering";
 import { saveConversationRequest } from "@/lib/client-persistence";
 import { useModalFocus, useModalTransition } from "@/lib/use-modal-focus";
 import { connectionForModel, resolveConnectionModels, reconcileConnectionEdits } from "@/lib/connection-drivers";
-import { modelServerState, onlineReplacement, selectableState, type ServerState } from "@/lib/model-availability";
+import { connectedModels, modelServerState, onlineReplacement, type ServerState } from "@/lib/model-availability";
+import { aliasBaseModel, aliasWithBaseModel } from "@/lib/alias-base-model";
 import { useKeyboardReturn } from "@/lib/use-keyboard-return";
 import { describeConnectionFailure, isConnectionFailureCode } from "@/lib/connection-errors";
 import { moveItemById, nudgeItemById } from "@/lib/ordered-list";
@@ -75,11 +76,23 @@ type QueuedPrompt = {
   content: string;
   attachments: StoredAttachment[];
   modelId: string;
+  aliasBaseModelId?: string;
   reasoningPresetId?: string;
   sendReasoning: boolean;
   tools: EnabledTools;
 };
 type CompletionOptions = Omit<QueuedPrompt, "id" | "content" | "attachments">;
+type AliasBasePicker = {
+  models: ModelConfig[];
+  selected?: ModelConfig;
+  defaultId?: string;
+  connections: PublicConfig["connections"];
+  showIdentifiers: boolean;
+  showConnectionNames: boolean;
+  weights?: Record<string, number>;
+  onSelect: (model: ModelConfig) => void;
+  onDefault: () => void;
+};
 type ChatJobSnapshot = { conversationId: string; branchId: string; status: "running" | "waiting" | "completed" | "stopped" | "error"; message: StoredMessage; error?: string; waitPhase?: ChatWaitPhase; waitProgress?: number };
 const emptyConfig: PublicConfig = {
   connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", hasApiKey: false, models: [] }],
@@ -101,6 +114,7 @@ const now = () => new Date().toISOString();
 const titleFrom = (text: string) => text.trim().split(/\s+/).slice(0, 7).join(" ").slice(0, 58) || "New chat";
 const McpToolsContext = createContext<{ connections: McpConnection[]; selectedIds: string[]; setSelectedIds: (ids: string[]) => void; selectedTools:Record<string,string[]>;setSelectedTools:(id:string,names:string[])=>void }>({ connections: [], selectedIds: [], setSelectedIds: () => undefined,selectedTools:{},setSelectedTools:()=>undefined });
 const StorageToolsContext=createContext<{read:boolean;write:boolean;maxFiles:number;setRead:(value:boolean)=>void;setWrite:(value:boolean)=>void;setMaxFiles:(value:number)=>void}>({read:true,write:false,maxFiles:5,setRead:()=>undefined,setWrite:()=>undefined,setMaxFiles:()=>undefined});
+const AliasBaseContext = createContext<AliasBasePicker | undefined>(undefined);
 
 const translations = {
   en: {
@@ -123,7 +137,7 @@ const translations = {
     apiKeyHelp: "The key is stored only on this server and is never returned to the browser.", displayName: "Display name",
     discover: "Discover models & capabilities", discoverDesc: "Calls GET /models and keeps every model returned by the server.", detecting: "Detecting…", detectModels: "Detect models",
     modelsTitle: "Models & aliases", modelsDesc: "All served models stay here. Choose which ones appear in the chat interface.", newAlias: "New alias",
-    customAlias: "CUSTOM ALIAS", servedModel: "SERVED MODEL", modelId: "Model ID", baseModel: "Base model", servedIdentifier: "Served model identifier",
+    customAlias: "CUSTOM ALIAS", servedModel: "SERVED MODEL", modelId: "Model ID", baseModel: "Recommended base model", servedIdentifier: "Served model identifier", aliasBaseModel: "Alias base model", aliasBaseModelDesc: "Choose the served model used by this alias for the current chat.", defaultAliasBaseActive: "Default alias base model",
     description: "Description", systemPrompt: "System prompt", systemPromptPlaceholder: "Applied to every conversation with this model…", deleteAlias: "Delete alias",
     showMain: "Show in main interface", showMainDesc: "Also show this model in the Reasoning section and model picker.", noModel: "No model selected.",
     reasoningTitle: "Reasoning effort", reasoningDesc: "Configure native effort levels and prompt templates separately for each visible model.", addTemplate: "Add template",
@@ -173,7 +187,7 @@ const translations = {
     apiKeyHelp: "키는 이 서버에만 저장되며 브라우저로 다시 전송되지 않습니다.", displayName: "표시 이름",
     discover: "모델 및 기능 감지", discoverDesc: "GET /models를 호출하고 서버가 반환한 모든 모델을 보존합니다.", detecting: "감지 중…", detectModels: "모델 감지",
     modelsTitle: "모델 및 별칭", modelsDesc: "서빙되는 모든 모델을 보존하고 채팅 화면에 표시할 모델만 선택합니다.", newAlias: "새 별칭",
-    customAlias: "커스텀 별칭", servedModel: "서빙 모델", modelId: "모델 ID", baseModel: "기반 모델", servedIdentifier: "서빙 모델 식별자",
+    customAlias: "커스텀 별칭", servedModel: "서빙 모델", modelId: "모델 ID", baseModel: "권고 기반 모델", servedIdentifier: "서빙 모델 식별자", aliasBaseModel: "Alias 기반 모델", aliasBaseModelDesc: "현재 채팅에서 이 Alias가 사용할 서빙 모델을 선택합니다.", defaultAliasBaseActive: "기본 Alias 기반 모델",
     description: "설명", systemPrompt: "시스템 프롬프트", systemPromptPlaceholder: "이 모델의 모든 대화에 적용됩니다…", deleteAlias: "별칭 삭제",
     showMain: "메인 인터페이스에 표시", showMainDesc: "모델 선택기와 추론 수준 섹션에도 이 모델을 표시합니다.", noModel: "선택된 모델이 없습니다.",
     reasoningTitle: "추론 수준", reasoningDesc: "표시된 모델별로 내장 effort와 프롬프트 템플릿을 설정하고 채팅 메뉴에 표시할 순서를 정합니다.", addTemplate: "템플릿 추가",
@@ -285,6 +299,7 @@ export default function Home() {
   const [config, setConfig] = useState<PublicConfig>(emptyConfig);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedPresetId, setSelectedPresetId] = useState("");
+  const [aliasBaseSelections, setAliasBaseSelections] = useState<Record<string, string>>({});
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<StoredMessage[]>([]);
   const [histories, setHistories] = useState<ConversationSummary[]>([]);
@@ -535,12 +550,20 @@ export default function Home() {
   useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   const { dialog: messageDialog, confirm: askConfirm, choose, notify } = useMessageDialog(locale === "ko");
   const planAllowsModel=(model:ModelConfig)=>config.planModelIds.includes(model.id)||config.planModelIds.includes(model.sourceModel);
-  const visibleModels = config.models.filter((model) => model.visible !== false && planAllowsModel(model));
-  // Models on a server an administrator switched off leave the picker; models on an offline server stay, greyed out.
-  const pickerModels = visibleModels.filter((model) => modelServerState(model, config.connections, serverStates) !== "disabled");
-  // A server answering with an error still counts: its models stay selectable and only carry a warning hint.
-  const onlineModels = pickerModels.filter((model) => selectableState(modelServerState(model, config.connections, serverStates)));
-  const serversOffline = serverStatesChecked && config.connections.length > 0 && !onlineModels.length;
+  const configuredVisibleModels = config.models.filter((model) => model.visible !== false && planAllowsModel(model));
+  const connectedBaseModels = connectedModels(configuredVisibleModels.filter(model => !model.isAlias), config.connections, serverStates);
+  // Alias definitions keep the author's recommendation; only this runtime copy follows the account/chat choice.
+  const visibleModels = configuredVisibleModels.map(model => {
+    if (!model.isAlias) return model;
+    const baseId = aliasBaseSelections[model.id] || config.preferences.aliasBaseModelIds?.[model.id];
+    const base = connectedBaseModels.find(candidate => candidate.id === baseId) || aliasBaseModel(model, configuredVisibleModels);
+    return base ? aliasWithBaseModel(model, base) : model;
+  });
+  // Disconnected and disabled servers leave the model picker entirely. Servers answering with an
+  // API error remain selectable because the host is still reachable and may recover per request.
+  const pickerModels = connectedModels(visibleModels, config.connections, serverStates);
+  const onlineModels = pickerModels;
+  const serversOffline = serverStatesChecked && config.connections.length > 0 && !pickerModels.length;
   const selectedModel = pickerModels.find((model) => model.id === selectedModelId) || pickerModels[0];
   // A selection whose server is offline or switched off moves to the default model, or else the first online one.
   const replacementModel = selectedModelId ? onlineReplacement(selectedModelId, onlineModels, config.preferences.defaultModelId) : undefined;
@@ -550,6 +573,8 @@ export default function Home() {
     setSelectedPresetId((current) => replacementModel.reasoningPresets.some((preset) => preset.id === current) ? current : replacementModel.reasoningPresets.find((preset) => preset.id === config.preferences.defaultReasoningPresetId)?.id || replacementModel.reasoningPresets[0]?.id || "");
   }, [replacementModel, config.preferences.defaultReasoningPresetId]);
   const selectedPreset = selectedModel?.reasoningPresets.find((preset) => preset.id === selectedPresetId) || selectedModel?.reasoningPresets[0];
+  const selectedAliasDefinition = selectedModel?.isAlias ? configuredVisibleModels.find(model => model.id === selectedModel.id) : undefined;
+  const selectedAliasBase = selectedAliasDefinition ? aliasBaseModel(selectedAliasDefinition, connectedBaseModels, aliasBaseSelections[selectedAliasDefinition.id] || config.preferences.aliasBaseModelIds?.[selectedAliasDefinition.id]) : undefined;
   const isAdmin = config.account?.role === "admin" || config.account?.role === "superadmin";
   const showModelWeights = config.showModelWeights === true;
   const canManageInference = isAdmin;
@@ -673,11 +698,36 @@ export default function Home() {
     }
   }
 
+  function chooseAliasBase(base: ModelConfig) {
+    if (!selectedAliasDefinition) return;
+    setAliasBaseSelections(current => ({ ...current, [selectedAliasDefinition.id]: base.id }));
+    const runtime = aliasWithBaseModel(selectedAliasDefinition, base);
+    setSelectedPresetId(current => runtime.reasoningPresets.some(preset => preset.id === current)
+      ? current
+      : runtime.reasoningPresets.find(preset => preset.id === config.preferences.defaultReasoningPresetId)?.id || runtime.reasoningPresets[0]?.id || "");
+  }
+
+  async function setDefaultAliasBase() {
+    if (!selectedAliasDefinition || !selectedAliasBase) return;
+    const previous = config;
+    const aliasBaseModelIds = { ...(config.preferences.aliasBaseModelIds || {}), [selectedAliasDefinition.id]: selectedAliasBase.id };
+    setConfig(current => ({ ...current, preferences: { ...current.preferences, aliasBaseModelIds } }));
+    try {
+      const response = await fetch("/api/preferences/alias-bases", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aliasId: selectedAliasDefinition.id, baseModelId: selectedAliasBase.id }) });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error);
+      setConfig(body);
+    } catch (caught) {
+      setConfig(previous);
+      setError(caught instanceof Error ? caught.message : "Unable to save the alias base model.");
+    }
+  }
+
   async function unloadModel() {
     if (unloadingModel) return;
     setUnloadingModel(true); setModelControlNotice(null);
     try {
-      const response = await fetch("/api/inference/unload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modelId: selectedModel?.id }) });
+      const response = await fetch("/api/inference/unload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modelId: selectedModel?.id, aliasBaseModelId: selectedAliasBase?.id }) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || c.modelUnloadFailed);
       setModelControlNotice({ message: c.modelUnloaded, error: false });
@@ -837,12 +887,12 @@ export default function Home() {
     };
   }
 
-  async function refreshModelContextWindow(modelId: string) {
+  async function refreshModelContextWindow(modelId: string, aliasBaseModelId?: string) {
     try {
       const response = await fetch("/api/models/context", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId }),
+        body: JSON.stringify({ modelId, aliasBaseModelId }),
       });
       if (!response.ok) return;
       const body = await response.json() as { modelId?: string; apiContextWindowTokens?: number | null };
@@ -936,6 +986,8 @@ export default function Home() {
   async function runCompletion(working: Conversation, branchId: string, requestMessages: StoredMessage[], create = false, revisionGroupId?: string, options?: CompletionOptions): Promise<Conversation | null> {
     const requestedModelId = options?.modelId || selectedModelIdRef.current;
     const liveModel = visibleModels.find((model) => model.id === requestedModelId);
+    const liveAliasDefinition = liveModel?.isAlias ? configuredVisibleModels.find(model => model.id === liveModel.id) : undefined;
+    const runtimeAliasBaseModelId = options?.aliasBaseModelId || (liveAliasDefinition ? aliasBaseModel(liveAliasDefinition, connectedBaseModels, aliasBaseSelections[liveAliasDefinition.id] || config.preferences.aliasBaseModelIds?.[liveAliasDefinition.id])?.id : undefined);
     if (liveModel) {
       const requestedPresetId = options?.reasoningPresetId || selectedPresetId;
       const livePreset = liveModel.reasoningPresets.find((preset) => preset.id === requestedPresetId) || liveModel.reasoningPresets[0];
@@ -954,13 +1006,13 @@ export default function Home() {
       }
       const response = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: working.id, branchId, assistantMessageId: placeholder.id, revisionGroupId, modelId: working.modelId, reasoningPresetId: working.reasoningPresetId, sendReasoning: options?.sendReasoning ?? sendReasoning,
+        body: JSON.stringify({ conversationId: working.id, branchId, assistantMessageId: placeholder.id, revisionGroupId, modelId: working.modelId, aliasBaseModelId: runtimeAliasBaseModelId, reasoningPresetId: working.reasoningPresetId, sendReasoning: options?.sendReasoning ?? sendReasoning,
           tools: options?.tools || { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserToolAvailable && browserEnabled, storageAccess:storageAccessEnabled, storageRead:storageReadEnabled, storageWrite:storageWriteEnabled, storageWriteMaxFiles, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled,artifact:artifactEnabled, mcpConnectionIds,mcpToolNames },
           clientContext: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: navigator.language, language: config.preferences.language },
           messages: requestMessages.map((message) => ({ role: message.role, content: message.content, reasoning_content: message.reasoning, toolEvents: message.toolEvents, attachments: message.attachments?.map(({ id }) => ({ id })) })) }),
       });
       if (!response.ok) { const detail = await response.json().catch(() => ({})); throw new Error(detail.error || `요청에 실패했습니다 (${response.status})`); }
-      const completed = await watchChatJob(working, branchId); if (completed) void refreshModelContextWindow(working.modelId); return completed;
+      const completed = await watchChatJob(working, branchId); if (completed) void refreshModelContextWindow(working.modelId, runtimeAliasBaseModelId); return completed;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "채팅 요청에 실패했습니다."); setMessages(requestMessages); setIsGenerating(false); setPendingWait(null); return null;
     }
@@ -1004,7 +1056,7 @@ export default function Home() {
       }
       if (!requestModel) { setError(c.noModel); return; }
       if (uploadingImages) return;
-      const queued: QueuedPrompt = { id: uid("user"), content: text, attachments: draftAttachments, modelId: requestModel.id, reasoningPresetId: requestPreset?.id, sendReasoning,
+      const queued: QueuedPrompt = { id: uid("user"), content: text, attachments: draftAttachments, modelId: requestModel.id, aliasBaseModelId: requestModel.isAlias ? selectedAliasBase?.id : undefined, reasoningPresetId: requestPreset?.id, sendReasoning,
         tools: { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserEnabled, storageAccess:storageAccessEnabled, storageRead:storageReadEnabled, storageWrite:storageWriteEnabled, storageWriteMaxFiles, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled,artifact:artifactEnabled, mcpConnectionIds,mcpToolNames } };
       replaceQueue([...queuedPromptsRef.current, queued]); setDraft(""); setDraftAttachments([]); return;
     }
@@ -1012,7 +1064,7 @@ export default function Home() {
     if (!requestModel) { setError(c.noModel); return; }
     const attachments = draftAttachments;
     const userMessage: StoredMessage = { id: uid("user"), role: "user", content: text, attachments, createdAt: now() }; setDraft(""); setDraftAttachments([]);
-    const options: CompletionOptions = { modelId: requestModel.id, reasoningPresetId: requestPreset?.id, sendReasoning,
+    const options: CompletionOptions = { modelId: requestModel.id, aliasBaseModelId: requestModel.isAlias ? selectedAliasBase?.id : undefined, reasoningPresetId: requestPreset?.id, sendReasoning,
       tools: { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserEnabled, storageAccess:storageAccessEnabled, storageRead:storageReadEnabled, storageWrite:storageWriteEnabled, storageWriteMaxFiles, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled,artifact:artifactEnabled, mcpConnectionIds,mcpToolNames } };
     if (!conversation) {
       const next = createConversation(userMessage, requestModel, requestPreset); await runCompletionAndDrain(next, next.activeBranchId, [userMessage], true, undefined, options); return;
@@ -1162,6 +1214,7 @@ export default function Home() {
     requestAnimationFrame(() => { if (element) element.scrollTop += element.scrollHeight - previousHeight; });
   }
   return (
+    <AliasBaseContext.Provider value={selectedAliasDefinition ? { models: connectedBaseModels, selected: selectedAliasBase, defaultId: config.preferences.aliasBaseModelIds?.[selectedAliasDefinition.id], connections: config.connections, showIdentifiers: config.preferences.showModelIdentifiers !== false, showConnectionNames: config.showModelConnectionNames === true, weights: config.modelWeights, onSelect: chooseAliasBase, onDefault: () => void setDefaultAliasBase() } : undefined}>
     <McpToolsContext.Provider value={{connections:config.mcpEntitlement.enabled?config.mcpConnections.filter(connection=>connection.enabled):[],selectedIds:mcpConnectionIds,setSelectedIds:persistedMcpConnections,selectedTools:mcpToolNames,setSelectedTools:(id,names)=>setMcpToolNames(current=>({...current,[id]:names}))}}>
     <StorageToolsContext.Provider value={{read:storageReadEnabled,write:storageWriteEnabled,maxFiles:storageWriteMaxFiles,setRead:persistedTool("storageRead",setStorageReadEnabled),setWrite:persistedTool("storageWrite",setStorageWriteEnabled),setMaxFiles:persistedStorageWriteLimit}}>
     <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""} ${browserEnabled && browserViewOpen ? "browser-split-open" : ""}`}>
@@ -1229,12 +1282,13 @@ export default function Home() {
         onDeleted={()=>void managedChatsChanged()}
       />}
       {renameTarget && <TextDialog ko={locale === "ko"} title={locale === "ko" ? "채팅 제목 변경" : "Rename chat"} value={renameTarget.title} saveLabel={c.saveEdit} cancelLabel={c.cancel} secondary={{ label: c.duplicateChat, icon: <Copy size={15} />, busy: duplicating, onAction: (title) => { const target = renameTarget; void duplicateHistory(target.id, title); } }} onClose={() => setRenameTarget(null)} onSave={title => { const target = renameTarget; void (async () => { try { const response = await fetch(`/api/conversations/${target.id}`, {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({title})}); if (!response.ok) throw new Error(locale === "ko" ? "제목 변경 실패" : "Rename failed"); setConversation(current => current?.id === target.id ? {...current,title} : current); await refreshHistories(); setRenameTarget(null); } catch (caught) { setError(caught instanceof Error ? caught.message : "Rename failed"); setRenameTarget(null); } })(); }} />}
-      {settingsOpen && <SettingsPanel initial={config} onAccentPreview={setAccentPreview} onClose={() => { setSettingsOpen(false); setAccentPreview(""); }} onLogout={async () => { resetWorkspaceForAuthChange(); await fetch("/api/auth/logout", { method: "POST" }); setSettingsOpen(false); setAuth(await fetch("/api/auth/status").then((response) => response.json()).catch(() => ({ setupRequired: false, authenticated: false, user: null }))); }} onSaved={(next) => { setConfig(next); setMcpConnectionIds(current=>next.mcpEntitlement.enabled?current.filter(id=>next.mcpConnections.some(connection=>connection.id===id&&connection.enabled)):[]); setSendReasoning(next.preferences.sendReasoningToModel); const visible = next.models.filter((item) => item.visible !== false); const model = visible.find((item) => item.id === selectedModelIdRef.current) || visible.find((item) => item.id === next.preferences.defaultModelId) || visible[0]; const preset = model?.reasoningPresets.find((item) => item.id === selectedPresetId) || model?.reasoningPresets.find((item) => item.id === next.preferences.defaultReasoningPresetId) || model?.reasoningPresets[0]; selectedModelIdRef.current = model?.id || ""; setSelectedModelId(model?.id || ""); setSelectedPresetId(preset?.id || ""); }} />}
+      {settingsOpen && <SettingsPanel initial={config} serverStates={serverStates} onAccentPreview={setAccentPreview} onClose={() => { setSettingsOpen(false); setAccentPreview(""); }} onLogout={async () => { resetWorkspaceForAuthChange(); await fetch("/api/auth/logout", { method: "POST" }); setSettingsOpen(false); setAuth(await fetch("/api/auth/status").then((response) => response.json()).catch(() => ({ setupRequired: false, authenticated: false, user: null }))); }} onSaved={(next) => { setConfig(next); setMcpConnectionIds(current=>next.mcpEntitlement.enabled?current.filter(id=>next.mcpConnections.some(connection=>connection.id===id&&connection.enabled)):[]); setSendReasoning(next.preferences.sendReasoningToModel); const visible = next.models.filter((item) => item.visible !== false); const model = visible.find((item) => item.id === selectedModelIdRef.current) || visible.find((item) => item.id === next.preferences.defaultModelId) || visible[0]; const preset = model?.reasoningPresets.find((item) => item.id === selectedPresetId) || model?.reasoningPresets.find((item) => item.id === next.preferences.defaultReasoningPresetId) || model?.reasoningPresets[0]; selectedModelIdRef.current = model?.id || ""; setSelectedModelId(model?.id || ""); setSelectedPresetId(preset?.id || ""); }} />}
       {exportOpen && <ExportDialog c={c} conversation={conversation || undefined} initialIncludeReasoning={config.preferences.exportReasoning} onClose={() => setExportOpen(false)} onPreference={(value) => { const next = { ...config, preferences: { ...config.preferences, exportReasoning: value } }; setConfig(next); fetch("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) }); }} />}
       {messageDialog}
     </main>
     </StorageToolsContext.Provider>
     </McpToolsContext.Provider>
+    </AliasBaseContext.Provider>
   );
 }
 
@@ -1382,6 +1436,7 @@ const MIN_INLINE_DRAFT_WIDTH = 150;
 
 function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextBreakdown: ContextUsage; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; admin: boolean; applyingReasoningDefault: boolean; applyReasoningToEveryone: () => void; sendReasoning: boolean; toggleSendReasoning: (value: boolean) => void; error: string; clearError: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onOpenStorage: () => void; onRemoveAttachment: (attachment: StoredAttachment) => void; internetSearchEnabled: boolean; setInternetSearchEnabled: (value: boolean) => void; pageVisitEnabled: boolean; setPageVisitEnabled: (value: boolean) => void; browserToolAvailable: boolean; browserEnabled: boolean; setBrowserEnabled: (value: boolean) => void; hostComputerToolAvailable: boolean; hostComputerEnabled: boolean; setHostComputerEnabled: (value: boolean) => void; storageAccessEnabled:boolean;setStorageAccessEnabled:(value:boolean)=>void; currentTimeEnabled: boolean; setCurrentTimeEnabled: (value: boolean) => void; locationEnabled: boolean; setLocationEnabled: (value: boolean) => void; multipleChoiceEnabled: boolean; setMultipleChoiceEnabled: (value: boolean) => void;artifactEnabled:boolean;setArtifactEnabled:(value:boolean)=>void; pendingChoice?: ToolEvent; pendingHostApproval?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean> }) {
   const { c, appearance, draft, setDraft, sendMessage, keyDown, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextBreakdown, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, admin, applyingReasoningDefault, applyReasoningToEveryone, sendReasoning, toggleSendReasoning, error, clearError, attachments, maxAttachments, uploadingImages, onFiles, onOpenStorage, onRemoveAttachment, internetSearchEnabled, setInternetSearchEnabled, pageVisitEnabled, setPageVisitEnabled, browserToolAvailable, browserEnabled, setBrowserEnabled, hostComputerToolAvailable, hostComputerEnabled, setHostComputerEnabled, storageAccessEnabled,setStorageAccessEnabled,currentTimeEnabled, setCurrentTimeEnabled, locationEnabled, setLocationEnabled, multipleChoiceEnabled, setMultipleChoiceEnabled,artifactEnabled,setArtifactEnabled, pendingChoice, pendingHostApproval, onChoiceSubmit } = props;
+  const aliasBasePicker = useContext(AliasBaseContext);
   const {connections:mcpConnections,selectedIds:mcpConnectionIds,setSelectedIds:setMcpConnectionIds,selectedTools:mcpToolNames,setSelectedTools:setMcpToolNames}=useContext(McpToolsContext);
   const storagePermissions=useContext(StorageToolsContext);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -1473,7 +1528,17 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
       </div>
       <div className="composer-trail" ref={trailRef}>
         <ContextWindowIndicator c={c} locale={locale} model={selectedModel} models={models} usage={contextBreakdown} includeReasoning={sendReasoning} />
-        <div className="preset-switcher"><button type="button" className="preset-trigger" disabled={!selectedModel?.reasoningPresets.length} onClick={() => setPresetOpen(!presetOpen)}><Lightbulb size={16} /><span>{selectedPreset?.name || c.default}</span><ChevronDown size={14} className={presetOpen ? "rotate" : ""} /></button>{presetMounted && <div className={`popover preset-popover ${presetClosing ? "closing" : ""}`}><p>{c.reasoningPreset}</p>{selectedModel?.reasoningPresets.map((preset) => { const note = appearance.showReasoningNotes ? reasoningNote(preset.effort, appearance, locale) : ""; return <button type="button" key={preset.id} onClick={() => { setPreset(preset.id); setPresetOpen(false); }}><span className="selection-dot">{preset.id === selectedPreset?.id && <Check size={12} />}</span><span>{preset.name}<small>{note || (preset.kind === "builtin" ? `${c.native} · ${preset.effort || c.default}` : `${c.template}${preset.effort ? ` · ${preset.effort}` : ""}`)}</small></span></button>; })}<div className="reasoning-send-toggle"><span><strong>{c.sendPriorReasoning}</strong><small>{c.sendPriorReasoningDesc}</small></span><button type="button" role="switch" aria-label={c.sendPriorReasoning} aria-checked={sendReasoning} className={`toggle ${sendReasoning ? "on" : ""}`} onClick={() => toggleSendReasoning(!sendReasoning)}><i /></button></div><button type="button" className="default-choice-action" disabled={!selectedPreset || defaultReasoningPresetId === selectedPreset.id} onClick={setDefaultReasoning}><Check size={14} />{defaultReasoningPresetId === selectedPreset?.id ? c.defaultReasoningActive : c.useAsDefault}</button>{admin && <button type="button" className="default-choice-action" disabled={!selectedPreset || applyingReasoningDefault} onClick={applyReasoningToEveryone}>{applyingReasoningDefault ? <LoaderCircle className="spin" size={14} /> : <Users size={14} />}{applyingReasoningDefault ? c.applyingToEveryone : c.applyToEveryone}</button>}</div>}</div>
+        <div className="preset-switcher">
+          <button type="button" className="preset-trigger" disabled={!selectedModel?.reasoningPresets.length} onClick={() => setPresetOpen(!presetOpen)}><Lightbulb size={16} /><span>{selectedPreset?.name || c.default}</span><ChevronDown size={14} className={presetOpen ? "rotate" : ""} /></button>
+          {presetMounted && <div className={`popover preset-popover ${aliasBasePicker ? "with-alias-base" : ""} ${presetClosing ? "closing" : ""}`}>
+            <p>{c.reasoningPreset}</p>
+            {selectedModel?.reasoningPresets.map((preset) => { const note = appearance.showReasoningNotes ? reasoningNote(preset.effort, appearance, locale) : ""; return <button type="button" key={preset.id} onClick={() => { setPreset(preset.id); setPresetOpen(false); }}><span className="selection-dot">{preset.id === selectedPreset?.id && <Check size={12} />}</span><span>{preset.name}<small>{note || (preset.kind === "builtin" ? `${c.native} · ${preset.effort || c.default}` : `${c.template}${preset.effort ? ` · ${preset.effort}` : ""}`)}</small></span></button>; })}
+            {aliasBasePicker && <section className="alias-base-picker"><header><strong>{c.aliasBaseModel}</strong><small>{c.aliasBaseModelDesc}</small></header>{aliasBasePicker.models.map(model => { const weight = aliasBasePicker.weights?.[model.id]; const weightHint = weight ? c.modelWeightHint.replace("{weight}", formatModelWeight(weight)) : ""; const connectionName = aliasBasePicker.showConnectionNames ? connectionForModel(aliasBasePicker.connections as ConnectionConfig[], model)?.name : undefined; const location = [connectionName, model.description].filter(Boolean).join(" · "); return <button type="button" className="model-option" key={model.id} onClick={() => aliasBasePicker.onSelect(model)}><span className="selection-dot">{model.id === aliasBasePicker.selected?.id && <Check size={13} />}</span><span><strong>{model.name}</strong>{aliasBasePicker.showIdentifiers && <small>{model.sourceModel}</small>}{location && <em>{location}</em>}</span>{weight && <span className="model-option-badges"><b className="model-weight-badge" data-tooltip={weightHint} aria-label={weightHint}>x{formatModelWeight(weight)}</b></span>}</button>; })}<button type="button" className="default-choice-action" disabled={!aliasBasePicker.selected || aliasBasePicker.defaultId === aliasBasePicker.selected.id} onClick={aliasBasePicker.onDefault}><Check size={14} />{aliasBasePicker.defaultId === aliasBasePicker.selected?.id ? c.defaultAliasBaseActive : c.useAsDefault}</button></section>}
+            <div className="reasoning-send-toggle"><span><strong>{c.sendPriorReasoning}</strong><small>{c.sendPriorReasoningDesc}</small></span><button type="button" role="switch" aria-label={c.sendPriorReasoning} aria-checked={sendReasoning} className={`toggle ${sendReasoning ? "on" : ""}`} onClick={() => toggleSendReasoning(!sendReasoning)}><i /></button></div>
+            <button type="button" className="default-choice-action" disabled={!selectedPreset || defaultReasoningPresetId === selectedPreset.id} onClick={setDefaultReasoning}><Check size={14} />{defaultReasoningPresetId === selectedPreset?.id ? c.defaultReasoningActive : c.useAsDefault}</button>
+            {admin && <button type="button" className="default-choice-action" disabled={!selectedPreset || applyingReasoningDefault} onClick={applyReasoningToEveryone}>{applyingReasoningDefault ? <LoaderCircle className="spin" size={14} /> : <Users size={14} />}{applyingReasoningDefault ? c.applyingToEveryone : c.applyToEveryone}</button>}
+          </div>}
+        </div>
         <button className={`send-button ${showStop ? "stopping" : ""}`} type="submit" disabled={!showStop && (uploadingImages || Boolean(pendingInput))} aria-label={showStop ? c.stop : pendingInput ? c.choiceWaiting : isGenerating ? c.addToQueue : c.send}>{showStop ? <Square size={14} fill="currentColor" /> : <ArrowUp size={20} />}</button>
       </div>
     </form>
@@ -1899,12 +1964,16 @@ function ExportDialog({ c, conversation, initialIncludeReasoning, onClose, onPre
     : <button disabled={busy} onClick={() => void downloadArchive()}>{busy ? <LoaderCircle className="spin" size={17} /> : <FileJson size={17} />} {busy ? c.exportingAllChats : c.exportAllChatsAction}</button>}</div></section></div>;
 }
 
-function SettingsPanel({ initial, onClose, onSaved, onLogout, onAccentPreview }: { initial: PublicConfig; onClose: () => void; onSaved: (config: PublicConfig) => void; onLogout: () => Promise<void>; onAccentPreview: (hex: string) => void }) {
+function SettingsPanel({ initial, serverStates, onClose, onSaved, onLogout, onAccentPreview }: { initial: PublicConfig; serverStates: Record<string, ServerState>; onClose: () => void; onSaved: (config: PublicConfig) => void; onLogout: () => Promise<void>; onAccentPreview: (hex: string) => void }) {
   const { ref: modalRef, close: closeSettings, closing } = useModalTransition(onClose);
   const admin = initial.account?.role === "admin" || initial.account?.role === "superadmin";
-  const firstEditableModel = initial.models.find((model) => !model.isAlias || model.ownerId === initial.account?.id) || initial.models[0];
+  const initialConnectedModels = connectedModels(initial.models, initial.connections, serverStates);
+  const firstEditableModel = initialConnectedModels.find((model) => !model.isAlias || model.ownerId === initial.account?.id) || initialConnectedModels[0];
   const [draft, setDraft] = useState<PublicConfig>(structuredClone(initial)); const [tab, setTab] = useState<SettingsTab>("general"); const [activeModelId, setActiveModelId] = useState(firstEditableModel?.id || ""); const [saving, setSaving] = useState(false); const [detectingConnectionId, setDetectingConnectionId] = useState(""); const [notice, setNotice] = useState(""); const [statusNonce, setStatusNonce] = useState(0);
-  const activeModel = draft.models.find((model) => model.id === activeModelId);
+  const [draftServerStates, setDraftServerStates] = useState(serverStates);
+  useEffect(() => setDraftServerStates(serverStates), [serverStates]);
+  const availableDraftModels = useMemo(() => connectedModels(draft.models, draft.connections, draftServerStates), [draft.models, draft.connections, draftServerStates]);
+  const activeModel = availableDraftModels.find((model) => model.id === activeModelId);
   const c = copyFor(draft.preferences.language || "en");
   const { dialog: detectDialog, notify: notifyDetect } = useMessageDialog(draft.preferences.language === "ko");
   // The footer only offers a save while something actually differs from the saved configuration.
@@ -1913,8 +1982,8 @@ function SettingsPanel({ initial, onClose, onSaved, onLogout, onAccentPreview }:
   const draftAppearance = draft.preferences.appearance || DEFAULT_APPEARANCE;
   useEffect(() => { onAccentPreview(accentColorOf(draftAppearance)); }, [draftAppearance.accentPalette, draftAppearance.accentColor]);
   useEffect(() => {
-    if (!draft.models.some(model => model.id === activeModelId)) setActiveModelId(draft.models[0]?.id || "");
-  }, [activeModelId, draft.models]);
+    if (!availableDraftModels.some(model => model.id === activeModelId)) setActiveModelId(availableDraftModels[0]?.id || "");
+  }, [activeModelId, availableDraftModels]);
   function updateModel(patch: Partial<ModelConfig>) { setDraft((current) => {
     const models = current.models.map(model => model.id === activeModelId ? normalizeReasoning({ ...model, ...patch }) : model);
     const connections = reconcileConnectionEdits(current.connections, models);
@@ -1945,9 +2014,9 @@ function SettingsPanel({ initial, onClose, onSaved, onLogout, onAccentPreview }:
 ${c.detectFailedDetail}: ${failure.detail}` : ""}` });
     } finally { setDetectingConnectionId(""); setStatusNonce((value) => value + 1); }
   }
-  function addAlias() { const base = draft.models.find((model) => !model.isAlias && model.visible !== false); if (!base) { setNotice(c.detectFirst); return; } const alias: ModelConfig = { ...structuredClone(base), id: uid("alias"), name: draft.preferences.language === "ko" ? "새 커스텀 모델" : "New custom model", isAlias: true, visible: true, systemPrompt: "", contextWindowTokens: undefined, apiContextWindowTokens: undefined, ownerId: initial.account?.id, isPublic: false }; setDraft((current) => ({ ...current, models: [...current.models, alias] })); setActiveModelId(alias.id); setTab("models"); }
+  function addAlias() { const base = availableDraftModels.find((model) => !model.isAlias && model.visible !== false); if (!base) { setNotice(c.detectFirst); return; } const alias: ModelConfig = { ...structuredClone(base), id: uid("alias"), name: draft.preferences.language === "ko" ? "새 커스텀 모델" : "New custom model", isAlias: true, visible: true, systemPrompt: "", contextWindowTokens: undefined, apiContextWindowTokens: undefined, ownerId: initial.account?.id, isPublic: false }; setDraft((current) => ({ ...current, models: [...current.models, alias] })); setActiveModelId(alias.id); setTab("models"); }
   function addPreset() { if (!activeModel) return ""; const preset: ReasoningPreset = { id: uid("preset"), name: draft.preferences.language === "ko" ? "새 템플릿" : "New template", kind: "custom", effort: "", systemPrompt: "", systemPromptMode: "append", ownerId: initial.account?.id }; updateModel({ reasoningPresets: [...activeModel.reasoningPresets, preset] }); return preset.id; }
-  function openReasoning() { const visible = draft.models.filter((model) => model.visible !== false); if (!activeModel?.visible) setActiveModelId(visible[0]?.id || ""); setTab("reasoning"); }
+  function openReasoning() { const visible = availableDraftModels.filter((model) => model.visible !== false); if (!activeModel?.visible) setActiveModelId(visible[0]?.id || ""); setTab("reasoning"); }
   function exportSettings() {
     const content = serializeModelSettings(draft.models, { modelId: draft.preferences.defaultModelId, reasoningPresetId: draft.preferences.defaultReasoningPresetId });
     const url = URL.createObjectURL(new Blob([content], { type: "application/json" }));
@@ -1993,12 +2062,12 @@ ${c.detectFailedDetail}: ${failure.detail}` : ""}` });
         <div className="settings-content">
           {tab==="general"&&<GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving}/>}
           {tab==="appearance"&&<AppearanceSettings c={c} draft={draft} setDraft={setDraft} admin={admin}/>}
-          {tab==="connection"&&admin&&<ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} statusNonce={statusNonce}/>}
+          {tab==="connection"&&admin&&<ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} statusNonce={statusNonce} initialServerStates={serverStates} onServerStates={setDraftServerStates}/>}
           {tab==="mcp"&&draft.mcpEntitlement.enabled&&<McpSettings ko={draft.preferences.language==="ko"} connections={draft.mcpConnections} entitlement={draft.mcpEntitlement} onChanged={(connections,entitlement)=>{setDraft(current=>({...current,mcpConnections:connections,mcpEntitlement:entitlement}));onSaved({...initial,mcpConnections:connections,mcpEntitlement:entitlement});}}/>}
           {tab==="tools"&&admin&&<><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><ToolsSettings c={c} draft={draft} setDraft={setDraft}/><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}
           {tab==="experimental"&&admin&&<ExperimentalSettings c={c} draft={draft} setDraft={setDraft}/>}
-          {tab==="models"&&<ModelSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account}/>}
-          {tab==="reasoning"&&<ReasoningSettings c={c} draft={draft} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account}/>}
+          {tab==="models"&&<ModelSettings c={c} draft={draft} availableModels={availableDraftModels} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account}/>}
+          {tab==="reasoning"&&<ReasoningSettings c={c} draft={draft} availableModels={availableDraftModels} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account}/>}
           {tab==="users"&&admin&&<UsersSettings c={c}/>} {tab==="plans"&&admin&&<PlanSettings models={draft.models} ko={draft.preferences.language==="ko"}/>} {tab==="data"&&admin&&<DataManagementSettings ko={draft.preferences.language==="ko"}/>} {tab==="account"&&<><AccountSettings c={c} account={initial.account} draft={draft} setDraft={setDraft} onLogout={onLogout}/><AccountBackupSettings ko={draft.preferences.language==="ko"}/></>}
         </div>
       </div>
@@ -2164,7 +2233,7 @@ function AppearanceSettings({ c, draft, setDraft, admin }: { c: CopySet; draft: 
   </div>;
 }
 
-function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionId, statusNonce }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; onDetect: (connectionId: string) => void; detectingConnectionId: string; statusNonce: number }) {
+function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionId, statusNonce, initialServerStates, onServerStates }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; onDetect: (connectionId: string) => void; detectingConnectionId: string; statusNonce: number; initialServerStates: Record<string, ServerState>; onServerStates: (states: Record<string, ServerState>) => void }) {
   const [activeConnectionId, setActiveConnectionId] = useState(draft.connections[0]?.id || "");
   const activeConnection = draft.connections.find((connection) => connection.id === activeConnectionId) || draft.connections[0];
   const activeIndex = activeConnection ? draft.connections.findIndex((connection) => connection.id === activeConnection.id) : -1;
@@ -2172,7 +2241,7 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
   function patchConnection(id: string, patch: Partial<PublicConfig["connections"][number]>) { replaceConnections(draft.connections.map((connection) => connection.id === id ? { ...connection, ...patch } : connection)); }
   function addConnection() { const connection = { id: uid("connection"), name: "LM Studio", driver: "lmstudio" as const, baseUrl: "http://localhost:1234", apiKey: "", hasApiKey: false, models: [] }; replaceConnections([...draft.connections, connection]); setActiveConnectionId(connection.id); }
   const { dialog: messageDialog, confirm: askConfirm } = useMessageDialog(draft.preferences.language === "ko");
-  const [serverStates, setServerStates] = useState<Record<string, ServerState>>({});
+  const [serverStates, setServerStates] = useState<Record<string, ServerState>>(initialServerStates);
   const [statusTick, setStatusTick] = useState(0);
   // Probe what the draft describes, so an edited address or a new server shows its state before saving. Beyond
   // edits, servers are rechecked after model detection and when typing resumes after a minute, never on a timer.
@@ -2183,11 +2252,11 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
     const timer = window.setTimeout(() => {
       fetch("/api/models/status", { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ connections: JSON.parse(probeKey) }), signal: controller.signal })
         .then((response) => response.ok ? response.json() : undefined)
-        .then((body: { statuses?: Record<string, ServerState> } | undefined) => { if (body?.statuses) setServerStates(body.statuses); })
+        .then((body: { statuses?: Record<string, ServerState> } | undefined) => { if (body?.statuses) { setServerStates(body.statuses); onServerStates(body.statuses); } })
         .catch(() => undefined);
     }, 500);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [probeKey, statusTick, statusNonce]);
+  }, [probeKey, statusTick, statusNonce, onServerStates]);
   const stateOf = (connection: PublicConfig["connections"][number]): ServerState | undefined => connection.disabled ? "disabled" : serverStates[connection.id] === "disabled" ? undefined : serverStates[connection.id];
   const stateLabel = (state?: ServerState) => state === "online" ? c.serverStateOnline : state === "offline" ? c.serverStateOffline : state === "error" ? c.serverStateError : state === "disabled" ? c.serverStateDisabled : undefined;
   async function confirmRemoveConnection(connection: PublicConfig["connections"][number]) {
@@ -2238,12 +2307,12 @@ function ModelColumn({ c, models, connections, items, label, active, onChange, s
   return <aside className="model-column"><div className="model-column-head"><span>{label || c.models}</span>{action}</div><div className="model-column-list">{rows.map((item) => <button key={item.id} draggable={Boolean(onMove)} className={item.id === active ? "active" : ""} onClick={() => onChange(item.id)} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", item.id); }} onDragOver={(event) => { if (onMove) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }} onDrop={(event) => { if (!onMove) return; event.preventDefault(); onMove(event.dataTransfer.getData("text/plain"), item.id); }}><span className="model-type-icon">{item.icon}{item.status && <i className={`server-status-dot ${item.status}`} role="img" aria-label={item.statusLabel} title={item.statusLabel} />}</span><span><strong>{item.name}</strong>{item.detail && <small>{item.detail}</small>}</span>{item.hidden && <i className="hidden-model-dot" />}</button>)}</div></aside>;
 }
 
-function ModelSettings({ c, draft, setDraft, activeModelId, setActiveModelId, activeModel, updateModel, addAlias, account }: ModelEditorProps & { c: CopySet; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; updateModel: (patch: Partial<ModelConfig>) => void; addAlias: () => void; account?: AccountInfo }) {
+function ModelSettings({ c, draft, availableModels, setDraft, activeModelId, setActiveModelId, activeModel, updateModel, addAlias, account }: ModelEditorProps & { c: CopySet; availableModels: ModelConfig[]; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; updateModel: (patch: Partial<ModelConfig>) => void; addAlias: () => void; account?: AccountInfo }) {
   const [promptOpen, setPromptOpen] = useState(false);
   function removeModel() { if (!activeModel) return; const next = draft.models.filter((model) => model.id !== activeModel.id); setDraft((current) => ({ ...current, models: next })); setActiveModelId(next[0]?.id || ""); }
-  const editableModels = draft.models.filter((model) => model.isAlias && (!account || model.ownerId === account.id));
+  const editableModels = availableModels.filter((model) => model.isAlias && (!account || model.ownerId === account.id));
   const privileged = account?.role === "admin" || account?.role === "superadmin";
-  const shownModels = account ? privileged ? draft.models.filter((model) => !model.isAlias || model.ownerId === account.id || !model.ownerId) : editableModels : draft.models;
+  const shownModels = account ? privileged ? availableModels.filter((model) => !model.isAlias || model.ownerId === account.id || !model.ownerId) : editableModels : availableModels;
   const effectiveContext = effectiveContextWindowTokens(activeModel, draft.models);
   const advertisedContext = advertisedContextWindowTokens(activeModel, draft.models);
   const inheritedContext = activeModel?.isAlias && activeModel.contextWindowTokens === undefined ? effectiveContext : undefined;
@@ -2267,7 +2336,7 @@ function ModelSettings({ c, draft, setDraft, activeModelId, setActiveModelId, ac
         <div className="model-visibility-row"><div><strong>{c.showMain}</strong><small>{c.showMainDesc}</small></div><button role="switch" aria-label={c.showMain} aria-checked={activeModel.visible !== false} className={`toggle ${activeModel.visible !== false ? "on" : ""}`} onClick={() => updateModel({ visible: activeModel.visible === false })}><i /></button></div>
         <div className="type-badge">{activeModel.isAlias ? c.customAlias : c.servedModel}</div>
         <div className="form-grid"><label className="field"><span>{c.displayName}</span><input value={activeModel.name} onChange={(event) => updateModel({ name: event.target.value })} /></label><label className="field"><span>{c.modelId}</span><input value={activeModel.id} disabled={!activeModel.isAlias} onChange={(event) => { const oldId = activeModel.id; setDraft((current) => ({ ...current, models: current.models.map((model) => model.id === oldId ? { ...model, id: event.target.value } : model) })); setActiveModelId(event.target.value); }} /></label></div>
-        <label className="field"><span>{activeModel.isAlias ? c.baseModel : c.servedIdentifier}</span>{activeModel.isAlias ? <SelectMenu label={c.baseModel} value={activeModel.sourceModel} options={draft.models.filter((model) => !model.isAlias && model.visible !== false).map((model) => ({ value: model.sourceModel, label: model.name, detail: draft.preferences.showModelIdentifiers !== false ? model.sourceModel : undefined }))} onChange={(value) => { const base = draft.models.find((model) => !model.isAlias && model.sourceModel === value); updateModel({ sourceModel: value, connectionId: base?.connectionId }); }} /> : <input value={activeModel.sourceModel} onChange={(event) => updateModel({ sourceModel: event.target.value })} />}</label>
+        <label className="field"><span>{activeModel.isAlias ? c.baseModel : c.servedIdentifier}</span>{activeModel.isAlias ? <SelectMenu label={c.baseModel} value={activeModel.sourceModel} options={availableModels.filter((model) => !model.isAlias && model.visible !== false).map((model) => ({ value: model.sourceModel, label: model.name, detail: draft.preferences.showModelIdentifiers !== false ? model.sourceModel : undefined }))} onChange={(value) => { const base = availableModels.find((model) => !model.isAlias && model.sourceModel === value); updateModel({ sourceModel: value, connectionId: base?.connectionId }); }} /> : <input value={activeModel.sourceModel} onChange={(event) => updateModel({ sourceModel: event.target.value })} />}</label>
         <label className="field context-window-field"><span>{c.contextWindow}</span><input type="number" min={1} step={1} inputMode="numeric" value={activeModel.contextWindowTokens ?? ""} onChange={(event) => setContextWindow(event.target.value)} placeholder={effectiveContext ? String(effectiveContext) : "131072"} /><small>{activeModel.isAlias ? c.aliasContextWindowHelp : c.contextWindowHelp}</small>{inheritedContext ? <small>{c.inheritedContextWindow}: {formatTokens(inheritedContext, draft.preferences.language)}</small> : null}{advertisedContext ? <small>{c.apiContextWindow}: {formatTokens(advertisedContext, draft.preferences.language)}</small> : null}{effectiveContext ? <small>{c.effectiveContextWindow}: {formatTokens(effectiveContext, draft.preferences.language)}</small> : null}</label>
         <label className="field"><span>{c.description}</span><input value={activeModel.description || ""} onChange={(event) => updateModel({ description: event.target.value })} /></label>
         <div className="model-image-input-row"><div><strong>{c.visionSettings}</strong><small>{c.visionSettingsDesc}</small></div><label><span>{c.visionMaxResolution}</span><input type="number" min={128} max={8192} step={1} inputMode="numeric" disabled={activeModel.visionImageMode !== "max-resolution"} value={activeModel.visionMaxEdgePixels ?? 1024} onChange={(event) => setVisionMaxEdge(event.target.value)} title={c.visionMaxResolutionHelp}/></label><button role="switch" aria-label={c.visionUseOriginal} aria-checked={activeModel.visionImageMode === "max-resolution"} className={`toggle ${activeModel.visionImageMode === "max-resolution" ? "on" : ""}`} onClick={() => updateModel({ visionImageMode: activeModel.visionImageMode === "max-resolution" ? "original" : "max-resolution" })} title={c.visionUseOriginalDesc}><i /></button></div>
@@ -2279,7 +2348,7 @@ function ModelSettings({ c, draft, setDraft, activeModelId, setActiveModelId, ac
   </div>;
 }
 
-function ReasoningSettings({ c, draft, setDraft, activeModelId, setActiveModelId, activeModel, updateModel, addPreset, account }: ModelEditorProps & { c: CopySet; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; updateModel: (patch: Partial<ModelConfig>) => void; addPreset: () => string; account?: AccountInfo }) {
+function ReasoningSettings({ c, draft, availableModels, setDraft, activeModelId, setActiveModelId, activeModel, updateModel, addPreset, account }: ModelEditorProps & { c: CopySet; availableModels: ModelConfig[]; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; updateModel: (patch: Partial<ModelConfig>) => void; addPreset: () => string; account?: AccountInfo }) {
   const [activePresetId, setActivePresetId] = useState(activeModel?.reasoningPresets[0]?.id || "");
   const [promptPresetId, setPromptPresetId] = useState("");
   function patchPreset(id: string, patch: Partial<ReasoningPreset>) { if (activeModel) updateModel({ reasoningPresets: activeModel.reasoningPresets.map((preset) => preset.id === id ? { ...preset, ...patch } : preset) }); }
@@ -2288,7 +2357,7 @@ function ReasoningSettings({ c, draft, setDraft, activeModelId, setActiveModelId
   // Item 9: native levels cannot be renamed or deleted, so the editor lists templates only.
   const editablePresets = activeModel?.reasoningPresets.filter((preset) => preset.kind === "custom") || [];
   const hasEffort = efforts.some(value => !isReasoningToggle(value));
-  const visibleModels = draft.models.filter((model) => model.visible !== false);
+  const visibleModels = availableModels.filter((model) => model.visible !== false);
   const privileged = account?.role === "admin" || account?.role === "superadmin";
   const ownsModel = Boolean(activeModel?.isAlias && activeModel.ownerId === account?.id);
   // Served models belong to the administrators. A standard account shapes reasoning only on the

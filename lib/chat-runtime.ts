@@ -11,6 +11,7 @@ import { restoreToolHistory, settlePendingTools } from "./conversation-messages"
 import { describeMcpApproval } from "./mcp-approval";
 import { readSsePayload } from "./stream-protocol";
 import { canUseModel, readConfig } from "./config";
+import { aliasBaseModel, aliasWithBaseModel } from "./alias-base-model";
 import { readConversation, writeConversation, renameConversation } from "./conversations";
 import { readUploadModelContent } from "./uploads";
 import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, nnuiEventsEndpoint } from "./connection-drivers";
@@ -50,12 +51,23 @@ export type StartChatJobInput = {
   assistantMessageId: string;
   revisionGroupId?: string;
   modelId: string;
+  /** Current per-chat base for an alias. Omitted models use the alias recommendation. */
+  aliasBaseModelId?: string;
   reasoningPresetId?: string;
   sendReasoning?: boolean;
   tools?: EnabledWebTools;
   messages: InputMessage[];
   clientContext?: { timeZone?: string; locale?: string; language?: "en" | "ko" };
 };
+
+function runtimeModel(config: Awaited<ReturnType<typeof readConfig>>, input: Pick<StartChatJobInput, "modelId" | "aliasBaseModelId">, userId: string) {
+  const selected = config.models.find(model => model.id === input.modelId);
+  if (!selected || !canUseModel(selected, { id: userId } as never)) throw new Error("The selected model is unavailable.");
+  if (!selected.isAlias) return { selected, model: selected, base: selected };
+  const base = aliasBaseModel(selected, config.models, input.aliasBaseModelId);
+  if (!base || input.aliasBaseModelId && base.id !== input.aliasBaseModelId || base.visible === false || !canUseModel(base, { id: userId } as never)) throw new Error("The selected alias base model is unavailable.");
+  return { selected, base, model: aliasWithBaseModel(selected, base) };
+}
 
 type ChatJob = {
   userId: string;
@@ -493,8 +505,7 @@ async function run(job: ChatJob) {
   try {
     const config = await readConfig();
     if (job.input.messages.some((message) => (message.attachments?.length || 0) > config.toolSettings.maxAttachmentsPerMessage)) throw new Error(`A message exceeds the configured ${config.toolSettings.maxAttachmentsPerMessage}-attachment limit.`);
-    const model = config.models.find((item) => item.id === job.input.modelId);
-    if (!model || !canUseModel(model, { id: job.userId } as never)) throw new Error("The selected model is unavailable.");
+    const { model } = runtimeModel(config, job.input, job.userId);
     const chargeModelId=model.isAlias?(config.models.find(item=>!item.isAlias&&(item.id===model.sourceModel||item.sourceModel===model.sourceModel))?.id||model.sourceModel):model.id;
     const connection = connectionForModel(config.connections, model);
     if (!connection) throw new Error("The selected model's connection is unavailable.");
@@ -748,8 +759,8 @@ export async function startChatJob(input: StartChatJobInput, userId: string, use
   if (!conversation.branches.some((branch) => branch.id === input.branchId)) throw new Error("Conversation branch not found.");
   existing = jobs.get(input.conversationId);
   if (existing && existing.userId === userId && ["running", "waiting"].includes(existing.status)) return snapshot(existing);
-  const config=await readConfig();const selected=config.models.find(model=>model.id===input.modelId);if(!selected||!canUseModel(selected,{id:userId} as never))throw new Error("The selected model is unavailable.");
-  acquirePlanAdmission(userId,selected.id,selected.sourceModel);
+  const config=await readConfig();const {base}=runtimeModel(config,input,userId);
+  acquirePlanAdmission(userId,base.id,base.sourceModel);
   const job: ChatJob = {
     userId, userRole, input, conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
     message: { id: input.assistantMessageId, revisionGroupId: input.revisionGroupId, role: "assistant", content: "", reasoning: "", toolEvents: [], createdAt: new Date().toISOString() },

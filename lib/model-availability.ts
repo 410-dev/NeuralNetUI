@@ -17,6 +17,11 @@ export function modelServerState(model: Pick<ModelConfig, "connectionId">, conne
 /** A server that answers with an error still takes requests, so its models stay selectable and are only flagged. */
 export function selectableState(state: ServerState) { return state === "online" || state === "error"; }
 
+/** Models from disabled or unreachable servers leave every model-facing list. */
+export function connectedModels<T extends Pick<ModelConfig, "connectionId">>(models: T[], connections: Array<Pick<ConnectionConfig, "id" | "disabled">>, statuses: Record<string, ServerState>): T[] {
+  return models.filter(model => selectableState(modelServerState(model, connections, statuses)));
+}
+
 /**
  * The model to switch to when the selection's server is not online: the default model when it is online,
  * otherwise the first online model. Undefined keeps the selection (already online, or nothing is online).

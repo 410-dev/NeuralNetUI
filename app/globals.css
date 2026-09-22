@@ -402,11 +402,22 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .preset-trigger:hover { background: rgba(255,255,255,.06); }
 .preset-trigger > svg:first-child { color: var(--text); }
 .preset-popover { bottom: 40px; right: 0; width: 260px; max-height: min(58dvh, 420px); overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
+.preset-popover.with-alias-base { width: min(360px, calc(100vw - 28px)); }
 .preset-popover > p, .preset-popover > button, .preset-popover > .reasoning-send-toggle { flex: 0 0 auto; }
 .preset-popover > p { margin: 4px 8px 7px; color: var(--dim); font-size: 11px; }
 .preset-popover > button { width: 100%; display: grid; grid-template-columns: 18px 1fr; gap: 7px; text-align: left; align-items: start; border-radius: var(--radius-sm); padding: 8px; background: transparent; font-size: 13px; }
 .preset-popover > button:hover { background: rgba(255,255,255,.06); }
 .preset-popover small { display: block; color: var(--dim); margin-top: 3px; font-size: 10px; }
+.alias-base-picker { flex: 0 0 auto; display: grid; gap: 2px; margin: 7px 0; padding: 9px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.alias-base-picker > header { padding: 0 8px 7px; }
+.alias-base-picker > header strong, .alias-base-picker > header small { display: block; }
+.alias-base-picker > header strong { color: var(--muted); font-size: 11px; font-weight: 600; }
+.alias-base-picker > header small { margin-top: 4px; color: var(--dim); font-size: 9px; line-height: 1.4; }
+.alias-base-picker > .model-option { grid-template-columns: 18px minmax(0,1fr) auto; }
+.alias-base-picker > .model-option strong { font-size: 13px; }
+.alias-base-picker > .model-option small { font-size: 10px; }
+.alias-base-picker > .model-option em { font-size: 10px; }
+.alias-base-picker > .default-choice-action { margin-top: 5px; }
 .send-button { width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: white; transition: background .15s, transform .12s; }
 .send-button:hover { background: var(--accent-bright); }.send-button:active { transform: scale(.93); }
 .send-button.stopping { background: #4c4c53; }

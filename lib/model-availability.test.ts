@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { modelServerState, onlineReplacement, selectableState } from "./model-availability.ts";
+import { connectedModels, modelServerState, onlineReplacement, selectableState } from "./model-availability.ts";
 
 const connections = [{ id: "a" }, { id: "b" }, { id: "c", disabled: true }];
 
@@ -16,6 +16,11 @@ test("a model takes its server's state and unchecked servers count as online", (
 
 test("servers that answer with an error keep their models selectable", () => {
   assert.deepEqual((["online", "error", "offline", "disabled"] as const).map(selectableState), [true, true, false, false]);
+});
+
+test("all model-facing lists omit disabled and disconnected servers", () => {
+  const models = [{ id: "online", connectionId: "a" }, { id: "offline", connectionId: "b" }, { id: "disabled", connectionId: "c" }];
+  assert.deepEqual(connectedModels(models, connections, { a: "online", b: "offline", c: "disabled" }).map(model => model.id), ["online"]);
 });
 
 test("an offline selection moves to the online default, then the first online model", () => {

@@ -3,6 +3,7 @@ import { authErrorResponse, requireUser } from "@/lib/auth";
 import { canUseModel, inferModel, readConfig, writeConfig } from "@/lib/config";
 import { baseModelForAlias, inferApiContextWindowTokens } from "@/lib/model-context";
 import { connectionForModel, modelsEndpoint } from "@/lib/connection-drivers";
+import { aliasBaseModel } from "@/lib/alias-base-model";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,11 +17,11 @@ function identifierWithoutVariant(value: string) {
 export async function POST(request: Request) {
   try {
     const user = requireUser(request);
-    const { modelId } = await request.json().catch(() => ({})) as { modelId?: string };
+    const { modelId, aliasBaseModelId } = await request.json().catch(() => ({})) as { modelId?: string; aliasBaseModelId?: string };
     const config = await readConfig();
     const requested = config.models.find((model) => model.id === modelId && canUseModel(model, user));
     if (!requested) return NextResponse.json({ error: "선택한 모델을 사용할 수 없습니다." }, { status: 400 });
-    const base = baseModelForAlias(requested, config.models) || requested;
+    const base = aliasBaseModel(requested, config.models, aliasBaseModelId) || baseModelForAlias(requested, config.models) || requested;
 
     const connection = connectionForModel(config.connections, base);
     if (!connection) return NextResponse.json({ error: "모델 연결을 찾을 수 없습니다." }, { status: 404 });
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
     const apiContextWindowTokens = inferApiContextWindowTokens(record);
     const latest = await readConfig();
     const latestRequested = latest.models.find((model) => model.id === requested.id);
-    const latestBase = baseModelForAlias(latestRequested, latest.models) || latestRequested;
+    const latestBase = aliasBaseModel(latestRequested, latest.models, aliasBaseModelId) || baseModelForAlias(latestRequested, latest.models) || latestRequested;
     if (!latestBase) return NextResponse.json({ error: "모델 설정이 변경되었습니다." }, { status: 409 });
     await writeConfig({
       ...latest,

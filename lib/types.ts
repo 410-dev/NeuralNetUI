@@ -211,6 +211,8 @@ export interface AppConfig {
     renderStrikethrough: boolean;
     defaultModelId?: string;
     defaultReasoningPresetId?: string;
+    /** Per-account default served model for each alias. Alias settings remain recommendations. */
+    aliasBaseModelIds?: Record<string, string>;
     appearance: AppearancePreferences;
     /** Per-account composer tool switches; absent keys use the built-in defaults. */
     enabledTools?: Partial<EnabledTools>;

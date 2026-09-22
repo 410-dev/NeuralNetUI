@@ -3,15 +3,17 @@ import { authErrorResponse, requireAdmin } from "@/lib/auth";
 import { readConfig } from "@/lib/config";
 import { inferenceEndpoint, loadedModelIdentifier } from "@/lib/inference-control";
 import { connectionForModel, connectionHeaders, lmStudioEndpoint, modelsEndpoint, nnuiModelEndpoint } from "@/lib/connection-drivers";
+import { aliasBaseModel } from "@/lib/alias-base-model";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
     requireAdmin(request);
-    const { modelId } = await request.json().catch(() => ({})) as { modelId?: string };
+    const { modelId, aliasBaseModelId } = await request.json().catch(() => ({})) as { modelId?: string; aliasBaseModelId?: string };
     const config = await readConfig();
-    const model = config.models.find((candidate) => candidate.id === modelId) || config.models[0];
+    const requested = config.models.find((candidate) => candidate.id === modelId) || config.models[0];
+    const model = aliasBaseModel(requested, config.models, aliasBaseModelId) || requested;
     if (!model) return NextResponse.json({ ok: true, alreadyUnloaded: true });
     const connection = connectionForModel(config.connections, model);
     if (!connection) throw new Error("The model connection is unavailable.");
