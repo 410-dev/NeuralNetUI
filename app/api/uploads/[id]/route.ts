@@ -1,7 +1,7 @@
 import { createReadStream, existsSync } from "node:fs";
 import { Readable } from "node:stream";
-import { deleteUpload, purgeDeletedUploads, readUpload } from "@/lib/uploads";
-import { requireUser } from "@/lib/auth";
+import { deleteUpload, purgeDeletedUploads, readUpload, replaceStoredTextFile } from "@/lib/uploads";
+import { authErrorResponse, requireUser } from "@/lib/auth";
 import { readConfig } from "@/lib/config";
 
 export const runtime = "nodejs";
@@ -30,4 +30,20 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   try { const { id } = await context.params; const user = requireUser(request); await deleteUpload(id, user.id);const config=await readConfig();await purgeDeletedUploads(user.id,config.userStorageSettings.trashRetentionDays);return new Response(null, { status: 204 }); }
   catch { return Response.json({ error: "Attachment deletion failed." }, { status: 400 }); }
+}
+
+export async function PUT(request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const declared=Number(request.headers.get("content-length")||0);
+    if(declared>20*1024*1024)return Response.json({error:"Edited files are limited to 16 MB."},{status:413});
+    const {id}=await context.params,user=requireUser(request),body=await request.json();
+    if(typeof body.content!=="string")return Response.json({error:"File content must be text."},{status:400});
+    const content=body.content;
+    if(Buffer.byteLength(content,"utf8")>16*1024*1024)return Response.json({error:"Edited files are limited to 16 MB."},{status:413});
+    return Response.json({attachment:await replaceStoredTextFile(id,user.id,content)});
+  } catch(error) {
+    if(error&&typeof error==="object"&&"status" in error)return authErrorResponse(error);
+    const message=error instanceof Error?error.message:"File update failed.";
+    return Response.json({error:message},{status:/not found/i.test(message)?404:400});
+  }
 }

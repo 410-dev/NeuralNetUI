@@ -6,14 +6,19 @@ import { assertUploadSignature, extractPdf, isSupportedUploadMimeType, pdfModelC
 import type { ModelConfig, StorageFile, StoredAttachment, ToolSettings } from "./types.ts";
 import { completeStorageMigration, dataDir, db, storageMigrationCompleted } from "./database.ts";
 import { resolvedVisionSettings } from "./vision-settings.ts";
+import { isEditableStorageFile } from "./storage-file-view.ts";
 
 const uploadsDir = path.join(dataDir, "uploads");
 const legacyMigrationName = "legacy-uploads-v1";
 let legacyMigration: Promise<void> | undefined;
 const modelImageJobs = new Map<string, Promise<string>>();
+const textUpdateJobs = new Map<string, Promise<void>>();
 const FILE_MIME_TYPES:Record<string,string>={
   ".txt":"text/plain", ".md":"text/markdown", ".csv":"text/csv", ".tsv":"text/tab-separated-values",
   ".json":"application/json", ".xml":"application/xml", ".yaml":"application/yaml", ".yml":"application/yaml",
+  ".html":"text/html", ".htm":"text/html", ".css":"text/css", ".js":"text/javascript", ".mjs":"text/javascript",
+  ".cjs":"text/javascript", ".ts":"text/typescript", ".tsx":"text/typescript", ".jsx":"text/jsx", ".py":"text/x-python",
+  ".sql":"text/x-sql", ".log":"text/plain", ".toml":"application/toml", ".ini":"text/plain", ".ps1":"text/plain", ".sh":"text/x-shellscript",
   ".zip":"application/zip", ".gz":"application/gzip", ".tar":"application/x-tar", ".7z":"application/x-7z-compressed",
   ".docx":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".xlsx":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -289,6 +294,50 @@ export async function readUpload(id: string, userId: string) {
   const row = db.prepare("SELECT id, name, mime_type, size, width, height FROM uploads WHERE id = ? AND user_id = ? AND deleted_at IS NULL").get(id, userId) as UploadRow | undefined;
   if (!row) throw Object.assign(new Error("Attachment not found."), { code: "ENOENT" });
   return { metadata: toAttachment(row), paths: pathsFor(id) };
+}
+
+async function replaceStoredTextFileUnlocked(id:string,userId:string,content:string){
+  const {metadata,paths}=await readUpload(id,userId);
+  if(!isEditableStorageFile(metadata.name,metadata.mimeType))throw new Error("This file type cannot be edited as text.");
+  const data=Buffer.from(content,"utf8"),temporary=`${paths.original}.${randomUUID()}.tmp`,backup=`${paths.original}.${randomUUID()}.bak`;
+  await fs.writeFile(temporary,data,{mode:0o600,flag:"wx"});
+  let originalMoved=false,replacementInstalled=false;
+  try{
+    db.transaction(()=>{
+      const row=db.prepare("SELECT size FROM uploads WHERE id=? AND user_id=? AND deleted_at IS NULL").get(id,userId) as {size:number}|undefined;
+      if(!row)throw Object.assign(new Error("Attachment not found."),{code:"ENOENT"});
+      const account=db.prepare("SELECT storage_quota_bytes AS quota FROM users WHERE id=?").get(userId) as {quota:number}|undefined;
+      if(!account)throw new Error("Storage owner not found.");
+      const used=(db.prepare("SELECT COALESCE(SUM(size),0) AS bytes FROM uploads WHERE user_id=? AND deleted_at IS NULL").get(userId) as {bytes:number}).bytes;
+      if(used-row.size+data.length>account.quota)throw new Error("Storage quota exceeded by the edited file.");
+    })();
+    await fs.rename(paths.original,backup);originalMoved=true;
+    await fs.rename(temporary,paths.original);replacementInstalled=true;
+    db.transaction(()=>{
+      const row=db.prepare("SELECT size FROM uploads WHERE id=? AND user_id=? AND deleted_at IS NULL").get(id,userId) as {size:number}|undefined;
+      if(!row)throw Object.assign(new Error("Attachment not found."),{code:"ENOENT"});
+      const account=db.prepare("SELECT storage_quota_bytes AS quota FROM users WHERE id=?").get(userId) as {quota:number}|undefined;
+      if(!account)throw new Error("Storage owner not found.");
+      const used=(db.prepare("SELECT COALESCE(SUM(size),0) AS bytes FROM uploads WHERE user_id=? AND deleted_at IS NULL").get(userId) as {bytes:number}).bytes;
+      if(used-row.size+data.length>account.quota)throw new Error("Storage quota exceeded by the edited file.");
+      const result=db.prepare("UPDATE uploads SET size=? WHERE id=? AND user_id=? AND deleted_at IS NULL").run(data.length,id,userId);
+      if(!result.changes)throw Object.assign(new Error("Attachment not found."),{code:"ENOENT"});
+    })();
+    await fs.unlink(backup);
+    return{...metadata,size:data.length};
+  }catch(error){
+    if(replacementInstalled)await fs.unlink(paths.original).catch(()=>undefined);
+    if(originalMoved)await fs.rename(backup,paths.original).catch(()=>undefined);
+    throw error;
+  }finally{await fs.unlink(temporary).catch(()=>undefined);await fs.unlink(backup).catch(()=>undefined);}
+}
+
+/** Replace an owner-scoped editable text file while serializing writes to the same stored object. */
+export async function replaceStoredTextFile(id:string,userId:string,content:string){
+  const key=`${userId}:${id}`,previous=textUpdateJobs.get(key)??Promise.resolve();
+  let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});const queued=previous.catch(()=>undefined).then(()=>gate);textUpdateJobs.set(key,queued);
+  await previous.catch(()=>undefined);
+  try{return await replaceStoredTextFileUnlocked(id,userId,content);}finally{release();if(textUpdateJobs.get(key)===queued)textUpdateJobs.delete(key);}
 }
 
 export async function readManagedUpload(id: string, userId: string) {
