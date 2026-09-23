@@ -4,8 +4,8 @@ export type PlanSaveState = "pending" | "saving" | "saved" | "error";
 export type PlanSaveEvent = { id: string; state: PlanSaveState; plan?: UsagePlan; error?: string };
 
 function fingerprint(plan: UsagePlan) {
-  const { name, servedModelIds, modelWeights, tokenLimits, storageQuotaBytes, trashQuotaBytes, mcpEnabled, maxMcpConnections } = plan;
-  return JSON.stringify({ name: name.trim(), servedModelIds, modelWeights, tokenLimits, storageQuotaBytes, trashQuotaBytes, mcpEnabled, maxMcpConnections });
+  const { name, servedModelIds, modelWeights, tokenLimits, storageQuotaBytes, trashQuotaBytes, mcpEnabled, maxMcpConnections, artifactHtmlEnabled } = plan;
+  return JSON.stringify({ name: name.trim(), servedModelIds, modelWeights, tokenLimits, storageQuotaBytes, trashQuotaBytes, mcpEnabled, maxMcpConnections, artifactHtmlEnabled });
 }
 
 /** Coalesces edits while serializing full-plan PUTs for each plan. */

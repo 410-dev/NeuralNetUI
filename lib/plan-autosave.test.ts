@@ -3,7 +3,7 @@ import test from "node:test";
 import type { UsagePlan } from "./types.ts";
 import { PlanAutosave } from "./plan-autosave.ts";
 
-const plan = (name: string): UsagePlan => ({ id: "plan-1", name, servedModelIds: [], modelWeights: {}, tokenLimits: [], storageQuotaBytes: 1024 ** 3, trashQuotaBytes: 2 * 1024 ** 3, mcpEnabled: false, maxMcpConnections: 0 });
+const plan = (name: string): UsagePlan => ({ id: "plan-1", name, servedModelIds: [], modelWeights: {}, tokenLimits: [], storageQuotaBytes: 1024 ** 3, trashQuotaBytes: 2 * 1024 ** 3, mcpEnabled: false, maxMcpConnections: 0, artifactHtmlEnabled: true });
 
 test("rapid plan edits save serially and keep the newest value", async () => {
   let releaseFirst!: () => void;

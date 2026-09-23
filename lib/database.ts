@@ -470,6 +470,13 @@ function openDatabase() {
     `);
     connection.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(21, new Date().toISOString());
   })();
+  const artifactHtmlPolicyVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (artifactHtmlPolicyVersion.version < 22) connection.transaction(() => {
+    // Preserve existing JavaScript previews for upgraded plans.
+    const columns=connection.prepare("PRAGMA table_info(plans)").all() as Array<{name:string}>;
+    if(!columns.some(column=>column.name==="artifact_html_enabled"))connection.exec("ALTER TABLE plans ADD COLUMN artifact_html_enabled INTEGER NOT NULL DEFAULT 1 CHECK (artifact_html_enabled IN (0, 1));");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(22, new Date().toISOString());
+  })();
   return connection;
 }
 

@@ -132,6 +132,7 @@ export interface UsagePlan {
   trashQuotaBytes: number;
   mcpEnabled: boolean;
   maxMcpConnections: number;
+  artifactHtmlEnabled: boolean;
   userCount?: number;
 }
 

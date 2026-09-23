@@ -961,6 +961,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .artifact-table-wrap{width:100%;height:100%;overflow:auto;padding:18px}.artifact-table-wrap table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}.artifact-table-wrap th,.artifact-table-wrap td{max-width:360px;padding:9px 11px;border-right:1px solid #dededb;border-bottom:1px solid #dededb;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere}.artifact-table-wrap th{position:sticky;top:0;z-index:1;background:#e9e9e6;font-weight:600}.artifact-table-wrap td{background:#fff}
 .artifact-structured{padding:24px;font:12px/1.45 var(--font-mono,monospace)}.artifact-tree{margin:4px 0}.artifact-tree summary{display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:600}.artifact-tree summary small{color:#777;font-weight:400}.artifact-tree>div{margin:5px 0 5px 9px;padding-left:13px;border-left:1px solid #d8d8d4}.artifact-tree-leaf{display:grid;grid-template-columns:minmax(80px,.32fr) minmax(0,1fr);gap:12px;padding:4px 0}.artifact-tree-leaf b{color:#555;font-weight:500}.artifact-tree-leaf code{color:#153e82;white-space:pre-wrap;overflow-wrap:anywhere}
 
+.artifact-html-shell{height:100%;min-height:0;display:flex;flex-direction:column}.artifact-html-shell .artifact-html-frame{flex:1;min-height:0}.artifact-policy-note{flex:none;padding:9px 16px;background:#ecece9;color:#555;font-size:11px;line-height:1.45}.artifact-policy-note.error{color:#9d3737;background:#f7eaea}
 @media (max-width:640px) {
   .artifact-layer { padding:0; }
   .artifact-dialog { width:100%; height:100dvh; border:0; border-radius:0; }
@@ -1408,6 +1409,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .plan-editor-actions > .save-button, .plan-editor-actions > .danger-button { height:40px; min-height:40px; display:flex; align-items:center; gap:7px; padding:0 18px; font-size:12.5px; white-space:nowrap; }
 .plan-editor-actions > .danger-button { margin-right:auto; }
 .plan-editor-actions > .save-button:disabled { opacity:.45; }
+.plan-editor-actions > .plan-copy-action { min-height:40px;display:flex;align-items:center;gap:7px;padding:0 15px;white-space:nowrap; }
+.plan-editor-actions > .plan-copy-action:disabled { opacity:.45; }
 .plan-save-status { min-width:0; color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
 .plan-editor-actions > .plan-save-status { margin-left:auto; }
 @media (max-width:560px) { .plan-editor-actions { flex-wrap:wrap; } .plan-editor-actions > .plan-save-status { flex:1 1 130px; } }
