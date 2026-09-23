@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { nativeEligibility, sdkCredentials, progressEvent, nativeHistory } from "./inference-progress.ts";
+import { nativeEligibility, sdkCredentials, progressEvent, nativeHistory, pollPromptProcessing } from "./inference-progress.ts";
 
 test("native inference never drops unsupported reasoning semantics", () => {
   assert.equal(nativeEligibility([{ role: "user", content: "hello" }], "off"), true);
@@ -13,6 +13,23 @@ test("progress accepts documented event values only", () => {
   assert.deepEqual(progressEvent({ type: "model_load.end" }), { phase: "loading-model", progress: 1 });
   for (const value of [-1, 101, NaN, Infinity, "50"]) assert.equal(progressEvent({ type: "model_load.progress", progress: value }), undefined);
   assert.equal(progressEvent({ usage: { prompt_tokens: 400 } }), undefined);
+});
+test("model status polling stops at the first observed prompt processing state", async () => {
+  const states = ["idle", "idle", "processingPrompt", "generating"];
+  let reads = 0; let starts = 0;
+  await pollPromptProcessing(new AbortController().signal, async () => states[reads++], () => starts++, 1);
+  assert.equal(reads, 3);
+  assert.equal(starts, 1);
+});
+test("model status polling stops when cancelled", async () => {
+  const controller = new AbortController(); let reads = 0;
+  await pollPromptProcessing(controller.signal, async () => { reads++; controller.abort(); return "idle"; }, () => { throw Error("unexpected prefill"); }, 1);
+  assert.equal(reads, 1);
+});
+test("unsupported model status ends the fallback without affecting inference", async () => {
+  let reads = 0;
+  await pollPromptProcessing(new AbortController().signal, async () => { reads++; throw Error("unsupported"); }, () => { throw Error("unexpected prefill"); }, 1);
+  assert.equal(reads, 1);
 });
 test("SDK auth uses only the selected connection token", () => {
   assert.deepEqual(sdkCredentials(undefined), {});

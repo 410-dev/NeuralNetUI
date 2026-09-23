@@ -33,7 +33,7 @@ const DETAILS: Partial<Record<CapabilityId, Partial<Record<ConnectionDriver, [st
   },
   progress: {
     openai: ["Only on hosts verified as LM Studio, and only while the experimental switch is on", "LM Studio로 확인된 서버에서만, 실험적 기능 스위치를 켠 경우에만 표시됩니다"],
-    lmstudio: ["Reported for plain requests; a named effort level or prior reasoning falls back to no progress", "일반 요청에서 표시됩니다. 추론 강도 단계나 이전 생각 기록이 있으면 진행률 없이 진행합니다"],
+    lmstudio: ["SDK percentages for supported requests; other requests can show polled model-level prompt processing without a percentage", "지원되는 요청은 SDK 퍼센트를 표시합니다. 추론 강도 단계나 이전 생각 기록으로 폴백해도 모델 상태 조회가 가능하면 퍼센트 없이 프롬프트 처리 상태를 표시합니다"],
     nnui: ["Load and prompt-prefill events are read from the authenticated server event stream", "인증된 서버 이벤트 스트림에서 모델 로드와 프롬프트 프리필 진행률을 읽습니다"],
   },
   effort: {

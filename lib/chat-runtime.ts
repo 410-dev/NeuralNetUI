@@ -1,5 +1,5 @@
 import { progressEvent } from "./inference-progress";
-import { nativeChatResponse } from "./lm-studio-progress";
+import { nativeChatResponse, observeLmStudioPrefill } from "./lm-studio-progress";
 import { contextOverflowDetails, DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rollingMessages, contextThresholdReached } from "./harness";
 import { contextUsage } from "./context-usage";
 import { harnessCompletion, prepareContext, compactForResume, compactToolContext, type CompactionRecord, type CompactionUpdate } from "./harness-runtime";
@@ -261,7 +261,7 @@ async function materializeImageFiles(body: Record<string, unknown>) {
   return { ...body, messages:converted };
 }
 
-async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false, threshold?: number, baseInput?: number, chargeModelId?: string, nnui?: { eventsUrl: string; sessionId: string; model: string }) {
+async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false, threshold?: number, baseInput?: number, chargeModelId?: string, nnui?: { eventsUrl: string; sessionId: string; model: string }, pollLmStudioStatus = false) {
   const turnController = new AbortController();
   const signal = AbortSignal.any([job.controller.signal, turnController.signal]);
   const eventController = new AbortController();
@@ -271,17 +271,35 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   }) : undefined;
   await events?.ready;
   setWaitPhase(job, "preparing-response");
+  let prefillSeen = false; let outputStarted = false; let statusPollStarted = false;
+  const statusPollController = new AbortController();
+  const stopStatusPoll = () => statusPollController.abort();
+  const startStatusPoll = () => {
+    if (!pollLmStudioStatus || !native || statusPollStarted || signal.aborted) return;
+    statusPollStarted = true;
+    void observeLmStudioPrefill(native.baseUrl, String(body.model), AbortSignal.any([signal, statusPollController.signal]), () => {
+      if (outputStarted || prefillSeen) return;
+      prefillSeen = true;
+      setWaitPhase(job, "processing-prompt");
+      stopStatusPoll();
+    }, headers.Authorization).catch(() => undefined);
+  };
+  const setResponsePhase = (phase: ChatWaitPhase) => {
+    if (prefillSeen && !outputStarted && (phase === "preparing-response" || phase === "waiting-server")) return;
+    setWaitPhase(job, phase);
+  };
   let response: Response;
   try {
-    const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal }) : undefined;
+    const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal, onInferenceStart: startStatusPoll }) : undefined;
     const httpBody = nativeResponse ? body : await materializeImageFiles(body);
+    if (!nativeResponse) startStatusPoll();
     response = nativeResponse || await progressFetch(String(body._endpoint), {
       method: "POST", headers, signal,
       body: JSON.stringify(Object.fromEntries(Object.entries(httpBody).filter(([key]) => key !== "_endpoint")), (key, value) => key === "_neural_context_tokens" ? undefined : value),
-    }, phase => setWaitPhase(job, phase), "preparing-response");
+    }, setResponsePhase, "preparing-response");
     if (!response.ok) throw new Error((await response.text()) || `Model server responded with ${response.status}`);
     if (!response.body) throw new Error("The model server returned no response stream.");
-  } catch (error) { eventController.abort(); void events?.done; throw error; }
+  } catch (error) { stopStatusPoll(); eventController.abort(); void events?.done; throw error; }
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
   const calls = new Map<number, ToolCall>(); let content = ""; let reasoning = ""; let usage: Record<string, number | undefined> = {};
   let visibleStarted: number | undefined; let visibleEnded: number | undefined; let reasoningStarted: number | undefined; let reasoningEnded: number | undefined;
@@ -293,8 +311,11 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   const readPayload = (payload: Record<string, unknown>) => {
     sawPayload = true;
     const progress = allowProgress ? progressEvent(payload) : undefined;
-    if (progress && !content && !reasoning && !calls.size) { setWaitProgress(job, progress.phase, progress.progress); return; }
-    setWaitPhase(job, content || reasoning || calls.size ? undefined : "preparing-response");
+    if (progress && !content && !reasoning && !calls.size) {
+      if (progress.phase === "processing-prompt") { prefillSeen = true; stopStatusPoll(); }
+      setWaitProgress(job, progress.phase, progress.progress); return;
+    }
+    if (!prefillSeen || content || reasoning || calls.size) setWaitPhase(job, content || reasoning || calls.size ? undefined : "preparing-response");
     usage = { ...usage, ...usageFrom(payload) };
     const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }> : [];
     if (choices[0]?.finish_reason) finishReason = true;
@@ -306,6 +327,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     if (reasoningDelta) { reasoningStarted ??= now; reasoningEnded = now; }
     content += contentDelta; reasoning += reasoningDelta;
     if (contentDelta || reasoningDelta) {
+      outputStarted = true; stopStatusPoll();
       setWaitPhase(job, undefined);
       job.message = { ...job.message, content: job.message.content + contentDelta, reasoning: (job.message.reasoning || "") + reasoningDelta };
       appendStep(job, "reasoning", reasoningDelta);
@@ -313,6 +335,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
       broadcast(job);
     }
     if (Array.isArray(delta.tool_calls)) for (const part of delta.tool_calls as Array<Record<string, unknown>>) {
+      outputStarted = true; stopStatusPoll();
       setWaitPhase(job, undefined);
       const index = typeof part.index === "number" ? part.index : calls.size;
       const fn = part.function as Record<string, unknown> | undefined;
@@ -339,7 +362,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   };
   try {
     while (!terminated) {
-      const { done, value } = await withSlowProgress(() => reader.read(), () => setWaitPhase(job, "waiting-server"), SERVER_RESPONSE_TIMEOUT_MS); if (done) break;
+      const { done, value } = await withSlowProgress(() => reader.read(), () => setResponsePhase("waiting-server"), SERVER_RESPONSE_TIMEOUT_MS); if (done) break;
       buffer += decoder.decode(value, { stream: true }); const records = buffer.split(/\r?\n\r?\n/); buffer = records.pop() || "";
       for (const record of records) { consume(record); if (terminated) break; }
     }
@@ -353,6 +376,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     if (chargeModelId && sawPayload) recordTokenUsage(job.userId, chargeModelId, chargedUsage.inputTokens, chargedUsage.outputTokens);
     throw error;
   } finally {
+    stopStatusPoll();
     eventController.abort(); void events?.done;
     if (chargeModelId) clearLiveTokenUsage(job.userId, job.message.id);
     setWaitPhase(job, undefined);
@@ -686,7 +710,7 @@ async function run(job: ChatJob) {
       try {
         const configuredThreshold = contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined;
         const streamThreshold = configuredThreshold && projectedInput >= configuredThreshold && contextWindow ? Math.floor(contextWindow * .95) : configuredThreshold;
-        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled, harness.contextMode === "compacting" ? streamThreshold : undefined, projectedInput, chargeModelId, connection.driver === "nnui" ? { eventsUrl: nnuiEventsEndpoint(connection.baseUrl), sessionId, model: model.sourceModel } : undefined);
+        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled, harness.contextMode === "compacting" ? streamThreshold : undefined, projectedInput, chargeModelId, connection.driver === "nnui" ? { eventsUrl: nnuiEventsEndpoint(connection.baseUrl), sessionId, model: model.sourceModel } : undefined, connection.driver === "lmstudio");
       } catch (error) {
         const overflow = contextOverflowDetails(error);
         if (!overflow) throw error;

@@ -69,6 +69,8 @@ try {
   config.connections = [{ id: 'standard', name: 'Standard server', driver: 'openai', baseUrl: `${backend}/v1`, apiKey: '', clearApiKey: true, models: [model] }];
   config.models = [model]; config.preferences.language = 'ko'; config.preferences.onDemand = false; config.harnessSettings.maxOutputTokens = 256;
   config = await json('/api/config', 'PUT', config);
+  const qaPlan = (await json('/api/plans')).plans[0];
+  await json(`/api/plans/${qaPlan.id}`, 'PUT', { ...qaPlan, servedModelIds: [model.id] });
   await chat('standard', 'standard only');
   assert.deepEqual(requests, ['/v1/chat/completions']);
   config.experimental.openAIProgress = true; config = await json('/api/config', 'PUT', config);
@@ -89,6 +91,7 @@ try {
     config.connections = [{ id: 'lm', name: 'LM Studio QA', driver: 'lmstudio', baseUrl: 'http://localhost:1234', apiKey: '', models: [lm] }];
     config.models = [lm]; config.experimental.openAIProgress = false;
     config = await json('/api/config', 'PUT', config);
+    await json(`/api/plans/${qaPlan.id}`, 'PUT', { ...qaPlan, servedModelIds: [lm.id] });
     const first = await chat(lm.id, 'Remember the word orchid. Reply with OK.');
     assert.ok(first.snapshots.some(s => s.waitPhase === 'processing-prompt' && typeof s.waitProgress === 'number'));
     const followup = await chat(lm.id, 'What word did I ask you to remember?', { prior: [

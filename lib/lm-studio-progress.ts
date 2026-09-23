@@ -1,7 +1,7 @@
 import { LMStudioClient, type LLMTool } from "@lmstudio/sdk";
 import { connectionRoot } from "./connection-drivers.ts";
 import { abortable } from "./chat-progress.ts";
-import { nativeEligibility, nativeHistory, sdkCredentials, type InferenceMessage } from "./inference-progress.ts";
+import { nativeEligibility, nativeHistory, pollPromptProcessing, sdkCredentials, type InferenceMessage } from "./inference-progress.ts";
 
 function sdkClient(baseUrl: string, authorization?: string) {
   const credentials = sdkCredentials(authorization);
@@ -39,12 +39,35 @@ export async function loadWithProgress(baseUrl: string, model: string, contextLe
   }
 }
 
+/** Observe the loaded model's coarse processing state while request progress is unavailable. */
+export async function observeLmStudioPrefill(baseUrl: string, identifier: string, signal: AbortSignal, onStart: () => void, authorization?: string) {
+  const client = sdkClient(baseUrl, authorization);
+  if (!client) return;
+  const dispose = () => { void client[Symbol.asyncDispose]().catch(() => undefined); };
+  signal.addEventListener("abort", dispose, { once: true });
+  let model: Awaited<ReturnType<typeof client.llm.listLoaded>>[number] | undefined;
+  try {
+    await pollPromptProcessing(signal, async () => {
+      const bounded = AbortSignal.any([signal, AbortSignal.timeout(2000)]);
+      if (!model) {
+        const loaded = await abortable(client.llm.listLoaded(), bounded);
+        model = loaded.find(item => item.identifier === identifier || item.modelKey === identifier || item.path === identifier);
+        if (!model) return "idle";
+      }
+      return (await abortable(model.getInstanceProcessingState(), bounded)).status;
+    }, onStart);
+  } finally {
+    signal.removeEventListener("abort", dispose);
+    await client[Symbol.asyncDispose]().catch(() => undefined);
+  }
+}
+
 /** Adapts native per-request SDK events to the existing tool loop's stream contract.
  * Fallback is allowed only BEFORE inference starts; a failed prediction is never replayed.
  */
 export async function nativeChatResponse(options: {
   baseUrl: string; authorization?: string; model: string; messages: InferenceMessage[];
-  effort?: string; maxTokens?: number; tools?: LLMTool[]; signal: AbortSignal;
+  effort?: string; maxTokens?: number; tools?: LLMTool[]; signal: AbortSignal; onInferenceStart?: () => void;
 }): Promise<Response | undefined> {
   if (!nativeEligibility(options.messages, options.effort)) return;
   const client = sdkClient(options.baseUrl, options.authorization);
@@ -77,6 +100,7 @@ export async function nativeChatResponse(options: {
         const emit = (payload: unknown) => { if (!closed && !signal.aborted) controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)); };
         let reasoningTokens = 0; let toolError: Error | undefined;
         try {
+          options.onInferenceStart?.();
           const result = await model.respond({ messages: history }, {
             signal, ...(options.maxTokens ? { maxTokens: options.maxTokens } : {}),
             contextOverflowPolicy: "stopAtLimit", toolNaming: "passThrough",

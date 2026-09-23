@@ -1,5 +1,6 @@
 import type { ChatMessageData, ChatMessagePartFileData } from "@lmstudio/sdk";
 import type { ChatWaitPhase } from "./types.ts";
+import { delayWithSignal } from "./chat-progress.ts";
 
 export type InferenceMessage = { role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string };
 
@@ -24,6 +25,18 @@ export function progressEvent(payload: Record<string, unknown>): { phase: ChatWa
   const value = suffix === "start" ? 0 : suffix === "end" ? 1 : suffix === "progress" ? payload.progress : undefined;
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) return;
   return { phase, progress: value };
+}
+
+/** The SDK's model state is a fallback signal, not a request-specific percentage. */
+export async function pollPromptProcessing(signal: AbortSignal, readStatus: () => Promise<string | undefined>, onStart: () => void, intervalMs = 250) {
+  while (!signal.aborted) {
+    const started = performance.now();
+    let status: string | undefined;
+    try { status = await readStatus(); } catch { return; }
+    if (signal.aborted) return;
+    if (status === "processingPrompt") { onStart(); return; }
+    try { await delayWithSignal(Math.max(0, intervalMs - (performance.now() - started)), signal); } catch { return; }
+  }
 }
 
 export type NativeImageSource = { kind:"data"; dataUrl:string } | { kind:"file"; path:string };
