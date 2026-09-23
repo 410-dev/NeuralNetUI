@@ -1,4 +1,4 @@
-import type { ModelConfig } from "./types";
+import type { HarnessSettings, ModelConfig } from "./types";
 
 function positiveInteger(value: unknown): number | undefined {
   const parsed = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
@@ -61,4 +61,13 @@ export function effectiveContextWindowTokens(model?: ModelConfig, models: ModelC
   if (model.isAlias && base && !configured) return effectiveContextWindowTokens(base, models);
   if (configured && advertised) return Math.min(configured, advertised);
   return configured || advertised;
+}
+
+/** Display 100% at the point context compaction starts, not at the model's hard limit. */
+export function contextUsageDisplayLimitTokens(model?: ModelConfig, models: ModelConfig[] = [], settings?: Pick<HarnessSettings, "contextMode" | "compactThreshold">): number | undefined {
+  const window = effectiveContextWindowTokens(model, models);
+  if (!window || settings?.contextMode !== "compacting") return window;
+  const threshold = Number(settings.compactThreshold);
+  if (!Number.isFinite(threshold) || threshold <= 0) return window;
+  return Math.max(1, Math.floor(window * Math.min(95, threshold) / 100));
 }
