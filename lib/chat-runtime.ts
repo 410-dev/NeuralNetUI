@@ -476,7 +476,7 @@ function storageWriteCount(job:ChatJob){
   for(const message of messages)for(const event of message.toolEvents||[]){
     if(seen.has(event.id)||event.name!=="storage_access"||event.status!=="completed")continue;seen.add(event.id);
     const args=event.arguments&&typeof event.arguments==="object"?event.arguments as Record<string,unknown>:{};
-    if(String(args.action||"").toLowerCase()==="write")count++;
+    if(["write","save_url"].includes(String(args.action||"").toLowerCase()))count++;
   }
   return count;
 }

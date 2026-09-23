@@ -166,7 +166,7 @@ async function createStoredThumbnail(source:string,destination:string){
 }
 
 /** Copy a regular host file into private retained storage without loading it into memory. */
-export async function saveHostFile(sourcePath:string,userId:string){
+export async function saveHostFile(sourcePath:string,userId:string,nameInput?:string){
   await ensureLegacyUploadsMigrated();
   const source=path.resolve(sourcePath);const sourceStats=await fs.stat(source);
   if(!sourceStats.isFile())throw new Error("Only regular files can be stored.");
@@ -179,7 +179,7 @@ export async function saveHostFile(sourcePath:string,userId:string){
     await fs.chmod(temporary,0o600).catch(()=>undefined);
     const copied=await fs.stat(temporary);if(!copied.isFile()||copied.size!==sourceStats.size)throw new Error("The source file changed while it was being copied.");
     const handle=await fs.open(temporary,"r");const header=Buffer.alloc(Math.min(32,copied.size));try{if(header.length)await handle.read(header,0,header.length,0);}finally{await handle.close();}
-    const name=path.basename(source).slice(0,240)||"file";let mimeType=storedFileMimeType(header,name);const dimensions=mimeType.startsWith("image/")?await createStoredThumbnail(temporary,paths.thumbnail):undefined;
+    const name=nameInput===undefined?path.basename(source).slice(0,240)||"file":safeStoredName(nameInput);let mimeType=storedFileMimeType(header,name);const dimensions=mimeType.startsWith("image/")?await createStoredThumbnail(temporary,paths.thumbnail):undefined;
     if(mimeType.startsWith("image/")&&!dimensions)mimeType="application/octet-stream";
     const metadata:StoredAttachment={id,name,mimeType,size:copied.size,width:dimensions?.width,height:dimensions?.height,url:`/api/uploads/${id}`,...(mimeType.startsWith("image/")?{thumbnailUrl:`/api/uploads/${id}?variant=thumbnail`}:{})};
     await fs.rename(temporary,paths.original);insertWithinQuota({...metadata,userId,retained:true});

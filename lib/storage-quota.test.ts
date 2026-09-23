@@ -8,7 +8,7 @@ import sharp from "sharp";
 const root=await mkdtemp(path.join(os.tmpdir(),"neural-storage-test-"));
 process.env.NEURAL_CHAT_DATA_DIR=root;
 const {db}=await import("./database.ts");
-const {deleteUpload,moveUploadsToTrash,purgeDeletedUploads,readUploadModelContent,restoreUpload,saveGeneratedImage,saveHostFile,storagePage,storageSummary}=await import("./uploads.ts");
+const {deleteUpload,moveUploadsToTrash,purgeDeletedUploads,readUpload,readUploadModelContent,restoreUpload,saveGeneratedImage,saveHostFile,storagePage,storageSummary}=await import("./uploads.ts");
 const {executeHostComputerTool}=await import("./host-computer-tool.ts");
 const {executeStorageAccessTool}=await import("./storage-tool.ts");
 const toolSettings={maxToolRounds:8,maxBrowserTabs:8,maxMultipleChoiceQuestions:3,maxAttachmentsPerMessage:12,textDownloadLimitMb:1,textCharacterLimit:24_000,imageDownloadLimitMb:10,imageUploadLimitMb:20,pdfSizeLimitMb:25,pdfPageLimit:100,pdfTextCharacterLimit:100_000,pdfVisionPageLimit:6,pdfProcessingTimeoutSeconds:30,temporaryFileTtlMinutes:60,orphanUploadTtlHours:24};
@@ -46,6 +46,37 @@ test("storage tool writes only text formats and enforces the conversation limit"
   await assert.rejects(executeStorageAccessTool({action:"write",name:"blocked",kind:"markdown",content:"x"},id,toolSettings,{read:false,write:true,maxWrites:1,writesUsed:1}),/write limit/i);
   await assert.rejects(executeStorageAccessTool({action:"write",name:"binary",kind:"html",content:"<b>x</b>"},id,toolSettings,{read:false,write:true,maxWrites:2,writesUsed:0}),/only plain text and Markdown/i);
   await assert.rejects(executeStorageAccessTool({action:"search"},id,toolSettings,{read:false,write:true,maxWrites:2}),/read access is disabled/i);
+});
+
+test("storage tool saves URL files into private storage with chat Markdown",async()=>{
+  const {createServer}=await import("node:http");
+  const png=await sharp({create:{width:8,height:12,channels:3,background:{r:200,g:40,b:40}}}).png().toBuffer();
+  const server=createServer((request,response)=>{
+    if(request.url==="/files/9ee1a2cf")return response.writeHead(200,{"content-type":"image/jpeg"}).end(png);
+    if(request.url==="/moved")return response.writeHead(302,{location:"/files/9ee1a2cf"}).end();
+    if(request.url==="/report")return response.writeHead(200,{"content-disposition":"attachment; filename=\"report.csv\""}).end("a,b\n1,2\n");
+    if(request.url==="/large")return response.writeHead(200).end(Buffer.alloc(2*1024*1024));
+    response.writeHead(404).end();
+  });
+  await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+  const base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
+  try{
+    const stamp=new Date().toISOString(),admin=crypto.randomUUID(),member=crypto.randomUUID();
+    for(const [id,role] of [[admin,"admin"],[member,"user"]])db.prepare("INSERT INTO users(id,username,display_name,password_hash,role,preferences,storage_quota_bytes,created_at,updated_at) VALUES(?,?,?,?,?,'{}',?,?,?)").run(id,`url-${id}`,"Url","unused",role,8*1024*1024,stamp,stamp);
+    const permissions={read:false,write:true,maxWrites:3,writesUsed:0};
+    const saved=await executeStorageAccessTool({action:"save_url",url:`${base}/files/9ee1a2cf`},admin,toolSettings,permissions) as {result:{file:{id:string;name:string;mimeType:string};image:boolean;markdown:string;remaining:number};content?:Array<{type:string;text?:string}>};
+    assert.equal(saved.result.file.name,"9ee1a2cf.png");assert.equal(saved.result.file.mimeType,"image/png");assert.equal(saved.result.image,true);assert.equal(saved.result.remaining,2);
+    assert.equal(saved.result.markdown,`![9ee1a2cf.png](/api/uploads/${saved.result.file.id})`);assert.match(saved.content?.[0]?.text||"",/exact Markdown/);
+    const {metadata,paths}=await readUpload(saved.result.file.id,admin);assert.equal(metadata.width,8);assert.deepEqual(await readFile(paths.original),png);
+    const renamed=await executeStorageAccessTool({action:"save_url",url:`${base}/moved`,name:"portrait"},admin,toolSettings,permissions) as {result:{file:{name:string}}};assert.equal(renamed.result.file.name,"portrait.png");
+    const csv=await executeStorageAccessTool({action:"save_url",url:`${base}/report`},admin,toolSettings,permissions) as {result:{file:{name:string;mimeType:string};markdown:string}};assert.equal(csv.result.file.mimeType,"text/csv");assert.match(csv.result.markdown,/^\[report\.csv\]\(.*download=1\)$/);
+    await assert.rejects(executeStorageAccessTool({action:"save_url",url:`${base}/files/9ee1a2cf`},member,toolSettings,permissions),/administrator accounts/);
+    await assert.rejects(executeStorageAccessTool({action:"save_url",url:`${base}/large`},admin,{...toolSettings,imageDownloadLimitMb:1,pdfSizeLimitMb:1},permissions),/download limit/);
+    await assert.rejects(executeStorageAccessTool({action:"save_url",url:`${base}/missing`},admin,toolSettings,permissions),/404/);
+    await assert.rejects(executeStorageAccessTool({action:"save_url",url:"file:///etc/passwd"},admin,toolSettings,permissions),/HTTP\(S\)/);
+    await assert.rejects(executeStorageAccessTool({action:"save_url",url:`${base}/files/9ee1a2cf`},admin,toolSettings,{...permissions,writesUsed:3}),/write limit/);
+    await assert.rejects(executeStorageAccessTool({action:"save_url",url:`${base}/files/9ee1a2cf`},admin,toolSettings,{...permissions,write:false}),/write access is disabled/);
+  }finally{server.close();}
 });
 
 test.after(async()=>{db.close();await rm(root,{recursive:true,force:true});});
