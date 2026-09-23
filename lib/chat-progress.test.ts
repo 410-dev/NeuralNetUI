@@ -31,3 +31,15 @@ test('server wait is not emitted before the response timeout, preserving prompt 
   assert.equal(response.status, 200);
   assert.deepEqual(phases, ['processing-prompt', 'processing-prompt']);
 });
+test('confirmed prompt processing stops an active server-wait timer', async () => {
+  const prefill = new AbortController();
+  let release!: () => void;
+  const operation = new Promise<void>(resolve => { release = resolve; });
+  let slow = 0;
+  const pending = withSlowProgress(() => operation, () => slow++, 10, prefill.signal);
+  prefill.abort();
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(slow, 0);
+  release();
+  await pending;
+});

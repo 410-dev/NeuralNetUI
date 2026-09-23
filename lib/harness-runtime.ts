@@ -10,6 +10,7 @@ import { createResidencyAdapter } from "./residency-adapter";
 import { readSsePayload } from "./stream-protocol";
 import type { AppConfig, ModelConfig, ChatWaitPhase } from "./types";
 import { recordTokenUsage } from "./plans";
+import { observeLmStudioPrefill } from "./lm-studio-progress";
 
 type Message = { role: string; content: unknown; tool_calls?: unknown };
 type Context = { config: AppConfig; model: ModelConfig; userId: string; sessionId?: string; signal: AbortSignal; onPhase: (phase: ChatWaitPhase) => void };
@@ -22,7 +23,7 @@ function taskModel(ctx: Context, id: string) {
 
 export type HarnessResult = { text: string; reasoning: string; inputTokens?:number; outputTokens?:number };
 
-async function readHarnessStream(response: Response, onUpdate: (result: HarnessResult) => void): Promise<HarnessResult> {
+async function readHarnessStream(response: Response, onUpdate: (result: HarnessResult) => void, onFirstOutput?: () => void): Promise<HarnessResult> {
   if (!response.body) throw new Error("Harness generation returned no response stream.");
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
   let text = ""; let reasoning = ""; let finished = false; let finishReason = "";let inputTokens:number|undefined;let outputTokens:number|undefined;
@@ -38,7 +39,7 @@ async function readHarnessStream(response: Response, onUpdate: (result: HarnessR
     const textDelta = typeof delta.content === "string" ? delta.content : "";
     const reasoningDelta = typeof (delta.reasoning_content ?? delta.reasoning) === "string" ? String(delta.reasoning_content ?? delta.reasoning) : "";
     if (choices[0]?.finish_reason) finishReason = String(choices[0].finish_reason);
-    if (textDelta || reasoningDelta) { text += textDelta; reasoning += reasoningDelta; onUpdate({ text, reasoning }); }
+    if (textDelta || reasoningDelta) { onFirstOutput?.(); onFirstOutput = undefined; text += textDelta; reasoning += reasoningDelta; onUpdate({ text, reasoning }); }
   };
   try {
     while (!finished) {
@@ -62,17 +63,30 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
   const peers = ctx.config.connections.filter(c => connectionRoot(c.baseUrl) === server);
   const limits = peers.map(c => c.maxResidentModels || 0).filter(Boolean);
   const limit = limits.length ? Math.min(...limits) : 0;
-  const signal = AbortSignal.any([ctx.signal, AbortSignal.timeout(120_000)]);
+  const timeoutController = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const startTimeout = () => { if (timeout) clearTimeout(timeout); timeout = setTimeout(() => timeoutController.abort(new Error("Harness generation timed out.")), 120_000); };
+  startTimeout();
+  const signal = AbortSignal.any([ctx.signal, timeoutController.signal]);
   const release = await modelResidency.acquire({ server, model: model.sourceModel, limit,
     policy: peers.some(c => c.modelWaitPolicy === "serial") ? "serial" : "capacity", signal, onPhase: ctx.onPhase,
-    adapter: ctx.config.preferences.onDemand || limit || connection.driver === "lmstudio" || connection.driver === "nnui" ? createResidencyAdapter(connection, headers, model.contextWindowTokens, ctx.onPhase) : undefined });
+    adapter: ctx.config.preferences.onDemand || limit || connection.driver === "lmstudio" || connection.driver === "nnui" ? createResidencyAdapter(connection, headers, model.contextWindowTokens, ctx.onPhase) : undefined }).catch(error => { if (timeout) clearTimeout(timeout); throw error; });
+  const isCompaction = prompt === (ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS).compactPrompt;
+  const pollController = new AbortController();
+  const stopPoll = () => pollController.abort();
   try {
-    ctx.onPhase(prompt === (ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS).compactPrompt ? "compacting-context" : "preparing-response");
+    ctx.onPhase(isCompaction ? "compacting-context" : "preparing-response");
+    if (isCompaction && connection.driver === "lmstudio") void observeLmStudioPrefill(connection.baseUrl, model.sourceModel, AbortSignal.any([signal, pollController.signal]), () => {
+      if (timeout) clearTimeout(timeout);
+      timeout = undefined;
+      ctx.onPhase("processing-prompt");
+      stopPoll();
+    }, headers.Authorization).catch(() => undefined);
     const effort = reasoningEffort(model, { id: "harness", name: "Harness", kind: "builtin", effort: effortValue === "off" && model.reasoningEfforts?.includes("none") ? "none" : effortValue });
     const response = await fetch(chatEndpoint(connection.driver, connection.baseUrl), { method: "POST", headers, signal,
       body: JSON.stringify({ model: model.sourceModel, stream: Boolean(onUpdate), ...(onUpdate ? { stream_options: { include_usage: true } } : {}), messages: [{role:"system", content:prompt}, {role:"user", content}], max_tokens:maxTokens, ...(effort ? {reasoning_effort:effort} : {}) }) });
     if (!response.ok) throw new Error(`Harness generation failed (${response.status}).`);
-    if (onUpdate){const streamed=await readHarnessStream(response,onUpdate);recordTokenUsage(ctx.userId,chargeModelId,streamed.inputTokens||0,streamed.outputTokens||0);return streamed;}
+    if (onUpdate){const streamed=await readHarnessStream(response,onUpdate,() => { stopPoll(); startTimeout(); ctx.onPhase(isCompaction ? "compacting-context" : "preparing-response"); });recordTokenUsage(ctx.userId,chargeModelId,streamed.inputTokens||0,streamed.outputTokens||0);return streamed;}
     const result = await response.json();
     const choice = result.choices?.[0];
     const text = choice?.message?.content;
@@ -80,7 +94,7 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
     const thought = choice?.message?.reasoning_content ?? choice?.message?.reasoning;
     const usage=result.usage||{},inputTokens=Number(usage.prompt_tokens??usage.input_tokens),outputTokens=Number(usage.completion_tokens??usage.output_tokens);recordTokenUsage(ctx.userId,chargeModelId,Number.isFinite(inputTokens)?inputTokens:0,Number.isFinite(outputTokens)?outputTokens:0);
     return { text: text.trim(), reasoning: typeof thought === "string" ? thought.trim() : "",...(Number.isFinite(inputTokens)?{inputTokens:Math.floor(inputTokens)}:{}),...(Number.isFinite(outputTokens)?{outputTokens:Math.floor(outputTokens)}:{}) };
-  } finally { release(); }
+  } finally { stopPoll(); if (timeout) clearTimeout(timeout); release(); }
 }
 
 const fingerprint = (messages: Message[]) => createHash("sha256").update(JSON.stringify(messages)).digest("hex");

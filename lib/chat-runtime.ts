@@ -265,13 +265,14 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   const turnController = new AbortController();
   const signal = AbortSignal.any([job.controller.signal, turnController.signal]);
   const eventController = new AbortController();
+  const prefillTimerController = new AbortController();
+  let prefillSeen = false; let outputStarted = false; let statusPollStarted = false;
   const events = nnui ? startNnuiEventObserver(nnui.eventsUrl, headers, AbortSignal.any([job.controller.signal, eventController.signal]), event => {
     if (event.type !== "request.prefill.progress" || event.model !== nnui.model || event.session_id !== nnui.sessionId) return;
-    const progress = nnuiEventProgress(event); if (progress) setWaitProgress(job, progress.phase, progress.progress);
+    const progress = nnuiEventProgress(event); if (progress) { prefillSeen = true; prefillTimerController.abort(); setWaitProgress(job, progress.phase, progress.progress); }
   }) : undefined;
   await events?.ready;
-  setWaitPhase(job, "preparing-response");
-  let prefillSeen = false; let outputStarted = false; let statusPollStarted = false;
+  if (!prefillSeen) setWaitPhase(job, "preparing-response");
   const statusPollController = new AbortController();
   const stopStatusPoll = () => statusPollController.abort();
   const startStatusPoll = () => {
@@ -280,6 +281,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     void observeLmStudioPrefill(native.baseUrl, String(body.model), AbortSignal.any([signal, statusPollController.signal]), () => {
       if (outputStarted || prefillSeen) return;
       prefillSeen = true;
+      prefillTimerController.abort();
       setWaitPhase(job, "processing-prompt");
       stopStatusPoll();
     }, headers.Authorization).catch(() => undefined);
@@ -296,7 +298,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     response = nativeResponse || await progressFetch(String(body._endpoint), {
       method: "POST", headers, signal,
       body: JSON.stringify(Object.fromEntries(Object.entries(httpBody).filter(([key]) => key !== "_endpoint")), (key, value) => key === "_neural_context_tokens" ? undefined : value),
-    }, setResponsePhase, "preparing-response");
+    }, setResponsePhase, "preparing-response", fetch, SERVER_RESPONSE_TIMEOUT_MS, prefillTimerController.signal);
     if (!response.ok) throw new Error((await response.text()) || `Model server responded with ${response.status}`);
     if (!response.body) throw new Error("The model server returned no response stream.");
   } catch (error) { stopStatusPoll(); eventController.abort(); void events?.done; throw error; }
@@ -312,10 +314,10 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     sawPayload = true;
     const progress = allowProgress ? progressEvent(payload) : undefined;
     if (progress && !content && !reasoning && !calls.size) {
-      if (progress.phase === "processing-prompt") { prefillSeen = true; stopStatusPoll(); }
+      if (progress.phase === "processing-prompt") { prefillSeen = true; prefillTimerController.abort(); stopStatusPoll(); }
       setWaitProgress(job, progress.phase, progress.progress); return;
     }
-    if (!prefillSeen || content || reasoning || calls.size) setWaitPhase(job, content || reasoning || calls.size ? undefined : "preparing-response");
+    if (!prefillSeen && !outputStarted) setWaitPhase(job, "preparing-response");
     usage = { ...usage, ...usageFrom(payload) };
     const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }> : [];
     if (choices[0]?.finish_reason) finishReason = true;
@@ -345,6 +347,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
         type: "function",
         function: { name: `${previous.function.name}${typeof fn?.name === "string" ? fn.name : ""}`, arguments: `${previous.function.arguments}${typeof fn?.arguments === "string" ? fn.arguments : ""}` },
       });
+      if (calls.get(index)?.function.name === "create_artifact") setWaitPhase(job, "creating-artifact");
     }
     const outputEstimate = estimateTokens(content) + estimateTokens(reasoning) + estimateTokens([...calls.values()]);
     const used = Math.max(inputEstimate, usage.inputTokens ?? 0) + Math.max(outputEstimate, usage.outputTokens ?? 0, usage.reasoningTokens ?? 0);
@@ -362,7 +365,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   };
   try {
     while (!terminated) {
-      const { done, value } = await withSlowProgress(() => reader.read(), () => setResponsePhase("waiting-server"), SERVER_RESPONSE_TIMEOUT_MS); if (done) break;
+      const { done, value } = await withSlowProgress(() => reader.read(), () => setResponsePhase("waiting-server"), SERVER_RESPONSE_TIMEOUT_MS, outputStarted ? undefined : prefillTimerController.signal); if (done) break;
       buffer += decoder.decode(value, { stream: true }); const records = buffer.split(/\r?\n\r?\n/); buffer = records.pop() || "";
       for (const record of records) { consume(record); if (terminated) break; }
     }

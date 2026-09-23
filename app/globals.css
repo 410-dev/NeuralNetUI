@@ -410,6 +410,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .preset-trigger > svg:first-child { color: var(--text); }
 .preset-popover { bottom: 40px; right: 0; width: 260px; max-height: min(58dvh, 420px); overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
 .preset-popover.with-alias-base { width: min(360px, calc(100vw - 28px)); }
+@media (max-width: 560px) {
+  .composer-trail { position: relative; }
+  .composer-trail .preset-switcher { position: static; }
+  .preset-popover, .preset-popover.with-alias-base { width: min(320px, calc(100vw - 64px)); max-width: calc(100vw - 64px); right: 0; }
+  .preset-popover > button, .alias-base-picker > .model-option { min-width: 0; }
+  .preset-popover > button > span:last-child, .alias-base-picker > .model-option > span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
+}
 .preset-popover > p, .preset-popover > button, .preset-popover > .reasoning-send-toggle { flex: 0 0 auto; }
 .preset-popover > p { margin: 4px 8px 7px; color: var(--dim); font-size: 11px; }
 .preset-popover > button { width: 100%; display: grid; grid-template-columns: 18px 1fr; gap: 7px; text-align: left; align-items: start; border-radius: var(--radius-sm); padding: 8px; background: transparent; font-size: 13px; }
@@ -1399,6 +1406,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .plan-editor-actions > .save-button, .plan-editor-actions > .danger-button { height:40px; min-height:40px; display:flex; align-items:center; gap:7px; padding:0 18px; font-size:12.5px; white-space:nowrap; }
 .plan-editor-actions > .danger-button { margin-right:auto; }
 .plan-editor-actions > .save-button:disabled { opacity:.45; }
+.plan-save-status { min-width:0; color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+.plan-editor-actions > .plan-save-status { margin-left:auto; }
+@media (max-width:560px) { .plan-editor-actions { flex-wrap:wrap; } .plan-editor-actions > .plan-save-status { flex:1 1 130px; } }
 
 .plan-admin-block { display:flex; flex-direction:column; gap:14px; padding:20px; border:1px solid var(--border); border-radius:var(--radius-lg); background:rgba(255,255,255,.01); }
 .plan-admin-block > .section-title { margin-bottom:0; }

@@ -12,6 +12,7 @@ const labels: Record<Locale, Record<ChatWaitPhase, string>> = {
     "waiting-server": "서버 응답을 기다리는 중입니다",
     "preparing-response": "응답을 준비중입니다",
     "compacting-context": "컨텍스트를 압축하고 있습니다",
+    "creating-artifact": "아티팩트를 생성중입니다",
   },
   en: {
     "processing-prompt": "Processing the prompt",
@@ -21,6 +22,7 @@ const labels: Record<Locale, Record<ChatWaitPhase, string>> = {
     "waiting-server": "Waiting for the server to respond",
     "preparing-response": "Preparing the response",
     "compacting-context": "Compacting context",
+    "creating-artifact": "Creating an artifact",
   },
 };
 export const chatWaitLabel = (phase: ChatWaitPhase, locale: Locale) => labels[locale][phase];
@@ -43,19 +45,22 @@ export function delayWithSignal(ms: number, signal: AbortSignal) {
   });
 }
 
-export async function withSlowProgress<T>(operation: () => Promise<T>, onSlow: () => void, timeoutMs = SERVER_RESPONSE_TIMEOUT_MS): Promise<T> {
-  const timer = setTimeout(onSlow, timeoutMs);
-  try { return await operation(); } finally { clearTimeout(timer); }
+export async function withSlowProgress<T>(operation: () => Promise<T>, onSlow: () => void, timeoutMs = SERVER_RESPONSE_TIMEOUT_MS, stopTimerOn?: AbortSignal): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stopTimer = () => { if (timer) clearTimeout(timer); timer = undefined; };
+  if (!stopTimerOn?.aborted) timer = setTimeout(onSlow, timeoutMs);
+  stopTimerOn?.addEventListener("abort", stopTimer, { once: true });
+  try { return await operation(); } finally { stopTimer(); stopTimerOn?.removeEventListener("abort", stopTimer); }
 }
 
 /** Retry only connection refusal / DNS failure, where no inference was dispatched. */
-export async function progressFetch(url: string, init: RequestInit, onPhase: (phase: ChatWaitPhase) => void, phase: ChatWaitPhase, request: typeof fetch = fetch, serverResponseTimeoutMs = SERVER_RESPONSE_TIMEOUT_MS): Promise<Response> {
+export async function progressFetch(url: string, init: RequestInit, onPhase: (phase: ChatWaitPhase) => void, phase: ChatWaitPhase, request: typeof fetch = fetch, serverResponseTimeoutMs = SERVER_RESPONSE_TIMEOUT_MS, stopTimerOn?: AbortSignal): Promise<Response> {
   const signal = init.signal || AbortSignal.timeout(300_000);
   const started = Date.now();
   for (;;) {
     signal.throwIfAborted(); onPhase(phase);
     try {
-      const response = await withSlowProgress(() => request(url, { ...init, signal }), () => onPhase("waiting-server"), serverResponseTimeoutMs);
+      const response = await withSlowProgress(() => request(url, { ...init, signal }), () => onPhase("waiting-server"), serverResponseTimeoutMs, stopTimerOn);
       onPhase(phase); return response;
     } catch (error) {
       const code = (error as { cause?: { code?: string } })?.cause?.code;

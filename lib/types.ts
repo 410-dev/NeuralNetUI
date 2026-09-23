@@ -9,7 +9,7 @@ export type McpAuthType = "oauth" | "api_key" | "none";
 export type McpToolPolicy = "blocked" | "always_ask" | "session_ask" | "always_allow";
 export type ArtifactKind = "html" | "csv" | "json" | "xml" | "markdown";
 export type ModelWaitPolicy = "capacity" | "serial";
-export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response" | "processing-prompt" | "compacting-context";
+export type ChatWaitPhase = "waiting-session" | "freeing-space" | "loading-model" | "waiting-server" | "preparing-response" | "processing-prompt" | "compacting-context" | "creating-artifact";
 export type AccentPaletteId = "blue" | "violet" | "teal" | "amber" | "rose" | "graphite" | "custom";
 export type StreamReveal = "instant" | "fade";
 

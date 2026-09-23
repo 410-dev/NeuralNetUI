@@ -1865,12 +1865,12 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
   const steps = transcriptSteps(message);
   const liveContentIndex = lastContentStep(steps);
   const wholeReasoning = reasoningStepIsWhole(message);
-  const waitStatus = pending && waitPhase && waitPhase !== "compacting-context" ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
+  const waitStatus = pending && waitPhase ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
   return <div className="message-row assistant-message long-press-target" {...longPress}>
     {message.attachments?.length ? <AssistantAttachmentGallery attachments={message.attachments} /> : null}
     {steps.map((step, index) => {
       if (step.kind === "reasoning") return <ReasoningStep key={index} c={c} locale={locale} text={wholeReasoning ? displayedReasoning : step.text} seconds={step.seconds} live={pending && isThinking && index === steps.length - 1} />;
-      if (step.kind === "compaction") return <CompactionStep key={index} c={c} locale={locale} step={step} live={pending && index === steps.length - 1 && waitPhase === "compacting-context"} />;
+      if (step.kind === "compaction") return <CompactionStep key={index} c={c} locale={locale} step={step} live={pending && index === steps.length - 1 && step.seconds === undefined} />;
       if (step.kind === "tools") {
         const events = stepToolEvents(step.ids, message.toolEvents);
         const tools = events.filter((event) => !["ask_multiple_choice","create_artifact"].includes(event.name));
