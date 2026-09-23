@@ -9,8 +9,9 @@ import { SectionTitle } from "./section-title";
 import { SelectMenu } from "./select-menu";
 import { useMessageDialog } from "./message-dialog";
 
-type McpDraft = { id?: string; name: string; description: string; url: string; authType: McpAuthType; credential: string; enabled: boolean; hasCredential?: boolean };
-const emptyDraft = (): McpDraft => ({ name: "", description: "", url: "", authType: "none", credential: "", enabled: true });
+type McpDraft = { id?: string; name: string; description: string; url: string; authType: McpAuthType; credential: string; enabled: boolean; toolTimeoutSeconds: string; hasCredential?: boolean };
+const MIN_TOOL_TIMEOUT = 5, MAX_TOOL_TIMEOUT = 600, DEFAULT_TOOL_TIMEOUT = 20;
+const emptyDraft = (): McpDraft => ({ name: "", description: "", url: "", authType: "none", credential: "", enabled: true, toolTimeoutSeconds: String(DEFAULT_TOOL_TIMEOUT) });
 
 const policies:McpToolPolicy[]=["blocked","always_ask","session_ask","always_allow"];
 function policyLabel(policy:McpToolPolicy,ko:boolean){return ({blocked:ko?"차단":"Block",always_ask:ko?"항상 묻기":"Always ask",session_ask:ko?"세션마다 묻기":"Ask per session",always_allow:ko?"항상 허용":"Always allow"})[policy];}
@@ -24,11 +25,13 @@ function McpToolPolicyDialog({ko,connection,onClose}:{ko:boolean;connection:McpC
 
 function McpConnectionDialog({ ko, initial, onClose, onSaved }: { ko: boolean; initial?: McpConnection; onClose: () => void; onSaved: () => void }) {
   const ref = useModalFocus(onClose);
-  const [draft, setDraft] = useState<McpDraft>(() => initial ? { ...initial, description: initial.description || "", credential: "" } : emptyDraft());
+  const [draft, setDraft] = useState<McpDraft>(() => initial ? { ...initial, description: initial.description || "", credential: "", toolTimeoutSeconds: String(initial.toolTimeoutSeconds ?? DEFAULT_TOOL_TIMEOUT) } : emptyDraft());
   const [notice, setNotice] = useState(""), [busy, setBusy] = useState(false), [testing, setTesting] = useState(false);
-  const payload = { ...draft, credential: draft.credential.trim() };
+  const toolTimeoutSeconds = Number(draft.toolTimeoutSeconds);
+  const timeoutValid = Number.isInteger(toolTimeoutSeconds) && toolTimeoutSeconds >= MIN_TOOL_TIMEOUT && toolTimeoutSeconds <= MAX_TOOL_TIMEOUT;
+  const payload = { ...draft, credential: draft.credential.trim(), toolTimeoutSeconds };
   const credentialNeeded = draft.authType !== "none" && !draft.credential.trim() && !draft.hasCredential;
-  const valid = Boolean(draft.name.trim() && draft.url.trim() && !credentialNeeded);
+  const valid = Boolean(draft.name.trim() && draft.url.trim() && !credentialNeeded && timeoutValid);
   async function test() {
     if (!valid) return;
     setTesting(true); setNotice("");
@@ -58,6 +61,7 @@ function McpConnectionDialog({ ko, initial, onClose, onSaved }: { ko: boolean; i
       <label className="field"><span>{ko ? "연결 URL" : "Connection URL"}</span><input required type="url" value={draft.url} onChange={event=>setDraft(current=>({...current,url:event.target.value}))} placeholder="https://example.com/mcp"/><small>{ko ? "Streamable HTTP를 지원하는 MCP 엔드포인트를 입력하세요." : "Enter an MCP endpoint that supports Streamable HTTP."}</small></label>
       <label className="field"><span>{ko ? "인증" : "Authentication"}</span><SelectMenu label={ko ? "인증" : "Authentication"} value={draft.authType} options={[{value:"oauth",label:"OAuth"},{value:"api_key",label:ko?"API Key":"API key"},{value:"none",label:ko?"인증 없음":"No authentication"}]} onChange={value=>setDraft(current=>({...current,authType:value as McpAuthType,credential:value==="none"?"":current.credential}))}/></label>
       {draft.authType!=="none"&&<label className="field"><span>{credentialLabel}</span><input type="password" autoComplete="off" required={!draft.hasCredential} value={draft.credential} onChange={event=>setDraft(current=>({...current,credential:event.target.value}))} placeholder={draft.hasCredential?(ko?"저장된 값 유지":"Keep saved value"):"••••••••"}/><small>{draft.authType==="oauth"?(ko?"발급된 OAuth 액세스 토큰을 Bearer 인증으로 전송합니다.":"The issued OAuth access token is sent as Bearer authentication."):(ko?"API 키를 Bearer 인증으로 전송합니다.":"The API key is sent as Bearer authentication.")}</small></label>}
+      <label className="field"><span>{ko?"도구 실행 타임아웃 (초)":"Tool timeout (seconds)"}</span><input required type="number" inputMode="numeric" min={MIN_TOOL_TIMEOUT} max={MAX_TOOL_TIMEOUT} step={1} value={draft.toolTimeoutSeconds} aria-invalid={!timeoutValid} onChange={event=>setDraft(current=>({...current,toolTimeoutSeconds:event.target.value}))}/><small>{ko?`도구 한 번 호출의 최대 대기 시간입니다. ${MIN_TOOL_TIMEOUT}~${MAX_TOOL_TIMEOUT}초, 기본값 ${DEFAULT_TOOL_TIMEOUT}초.`:`Maximum wait for a single tool call. ${MIN_TOOL_TIMEOUT}–${MAX_TOOL_TIMEOUT} seconds, default ${DEFAULT_TOOL_TIMEOUT}.`}</small></label>
       <div className="general-setting-card general-toggle-card"><div><strong>{ko?"이 연결 사용":"Use this connection"}</strong><small>{ko?"끄면 등록 정보는 유지되지만 채팅 도구에 나타나지 않습니다.":"When off, the record stays saved but is hidden from chat tools."}</small></div><button type="button" role="switch" aria-label={ko?"이 연결 사용":"Use this connection"} aria-checked={draft.enabled} className={`toggle ${draft.enabled?"on":""}`} onClick={()=>setDraft(current=>({...current,enabled:!current.enabled}))}><i/></button></div>
       {notice&&<p className="settings-notice" role="status">{notice}</p>}
       <footer className="mcp-dialog-actions"><button type="button" className="secondary-button" disabled={!valid||testing||busy} onClick={()=>void test()}>{testing?<LoaderCircle className="spin" size={15}/>:<PlugZap size={15}/>} {ko?"연결 테스트":"Test connection"}</button><button className="save-button" disabled={!valid||busy||testing}>{busy?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {initial?(ko?"변경 저장":"Save changes"):(ko?"등록":"Add connection")}</button></footer>

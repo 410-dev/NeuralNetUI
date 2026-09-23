@@ -477,6 +477,12 @@ function openDatabase() {
     if(!columns.some(column=>column.name==="artifact_html_enabled"))connection.exec("ALTER TABLE plans ADD COLUMN artifact_html_enabled INTEGER NOT NULL DEFAULT 1 CHECK (artifact_html_enabled IN (0, 1));");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(22, new Date().toISOString());
   })();
+  const mcpToolTimeoutVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (mcpToolTimeoutVersion.version < 23) connection.transaction(() => {
+    const columns=connection.prepare("PRAGMA table_info(mcp_connections)").all() as Array<{name:string}>;
+    if(!columns.some(column=>column.name==="tool_timeout_seconds"))connection.exec("ALTER TABLE mcp_connections ADD COLUMN tool_timeout_seconds INTEGER NOT NULL DEFAULT 20 CHECK (tool_timeout_seconds >= 5 AND tool_timeout_seconds <= 600);");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(23, new Date().toISOString());
+  })();
   return connection;
 }
 

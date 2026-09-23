@@ -10,11 +10,15 @@ import { classifyMcpAddress, mcpToolAlias } from "./mcp-utils";
 
 const MAX_RESULT_CHARS = 100_000;
 const CONNECTION_TIMEOUT_MS = 20_000;
+export const DEFAULT_MCP_TOOL_TIMEOUT_SECONDS = 20;
+export const MIN_MCP_TOOL_TIMEOUT_SECONDS = 5;
+export const MAX_MCP_TOOL_TIMEOUT_SECONDS = 600;
+const toolTimeoutMessage = `도구 실행 타임아웃은 ${MIN_MCP_TOOL_TIMEOUT_SECONDS}~${MAX_MCP_TOOL_TIMEOUT_SECONDS}초 사이의 정수여야 합니다.`;
 const DEFAULT_TOOL_POLICY: McpToolPolicy = "session_ask";
 
 type McpRow = {
   id: string; user_id: string; name: string; description: string; url: string;
-  auth_type: McpAuthType; credential: string; enabled: number; created_at: string; updated_at: string;
+  auth_type: McpAuthType; credential: string; enabled: number; tool_timeout_seconds: number; created_at: string; updated_at: string;
 };
 
 const connectionSchema = z.object({
@@ -24,10 +28,11 @@ const connectionSchema = z.object({
   authType: z.enum(["oauth", "api_key", "none"]),
   credential: z.string().max(8000).optional().default(""),
   enabled: z.boolean().optional().default(true),
+  toolTimeoutSeconds: z.number().int().min(MIN_MCP_TOOL_TIMEOUT_SECONDS, toolTimeoutMessage).max(MAX_MCP_TOOL_TIMEOUT_SECONDS, toolTimeoutMessage).optional().default(DEFAULT_MCP_TOOL_TIMEOUT_SECONDS),
 });
 
 function publicConnection(row: McpRow): McpConnection {
-  return { id: row.id, name: row.name, description: row.description || undefined, url: row.url, authType: row.auth_type, hasCredential: Boolean(row.credential), enabled: row.enabled === 1, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, name: row.name, description: row.description || undefined, url: row.url, authType: row.auth_type, hasCredential: Boolean(row.credential), enabled: row.enabled === 1, toolTimeoutSeconds: row.tool_timeout_seconds, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
 export function mcpEntitlement(userId: string): McpEntitlement {
@@ -60,8 +65,8 @@ export function createMcpConnection(userId: string, input: unknown): McpConnecti
   if (value.authType !== "none" && !value.credential.trim()) throw new AuthError("선택한 인증 방식의 토큰 또는 API 키를 입력해 주세요.", 400);
   const id = randomUUID(), stamp = new Date().toISOString();
   try {
-    db.prepare("INSERT INTO mcp_connections(id,user_id,name,description,url,auth_type,credential,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
-      .run(id, userId, value.name, value.description, value.url, value.authType, value.authType === "none" ? "" : value.credential.trim(), value.enabled ? 1 : 0, stamp, stamp);
+    db.prepare("INSERT INTO mcp_connections(id,user_id,name,description,url,auth_type,credential,enabled,tool_timeout_seconds,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+      .run(id, userId, value.name, value.description, value.url, value.authType, value.authType === "none" ? "" : value.credential.trim(), value.enabled ? 1 : 0, value.toolTimeoutSeconds, stamp, stamp);
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new AuthError("같은 이름의 MCP 연결이 이미 있습니다.", 409);
     throw error;
@@ -75,8 +80,8 @@ export function updateMcpConnection(userId: string, id: string, input: unknown):
   const credential = value.authType === "none" ? "" : value.credential.trim() || (value.authType === previous.auth_type ? previous.credential : "");
   if (value.authType !== "none" && !credential) throw new AuthError("선택한 인증 방식의 토큰 또는 API 키를 입력해 주세요.", 400);
   try {
-    db.prepare("UPDATE mcp_connections SET name=?,description=?,url=?,auth_type=?,credential=?,enabled=?,updated_at=? WHERE id=? AND user_id=?")
-      .run(value.name, value.description, value.url, value.authType, credential, value.enabled ? 1 : 0, new Date().toISOString(), id, userId);
+    db.prepare("UPDATE mcp_connections SET name=?,description=?,url=?,auth_type=?,credential=?,enabled=?,tool_timeout_seconds=?,updated_at=? WHERE id=? AND user_id=?")
+      .run(value.name, value.description, value.url, value.authType, credential, value.enabled ? 1 : 0, value.toolTimeoutSeconds, new Date().toISOString(), id, userId);
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new AuthError("같은 이름의 MCP 연결이 이미 있습니다.", 409);
     throw error;
@@ -89,8 +94,8 @@ export function deleteMcpConnection(userId: string, id: string) {
   if (!result.changes) throw new AuthError("MCP 연결을 찾을 수 없습니다.", 404);
 }
 
-function requestSignal(signal?: AbortSignal) {
-  return signal ? AbortSignal.any([signal, AbortSignal.timeout(CONNECTION_TIMEOUT_MS)]) : AbortSignal.timeout(CONNECTION_TIMEOUT_MS);
+function requestSignal(signal?: AbortSignal, timeoutMs = CONNECTION_TIMEOUT_MS) {
+  return signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
 }
 
 async function assertNetworkTarget(userId:string,rawUrl:string){
@@ -144,7 +149,7 @@ export async function testMcpConnection(userId: string, input: unknown & { id?: 
   const value = connectionSchema.parse(source);
   const credential = value.authType === "none" ? "" : value.credential.trim() || (previous?.auth_type === value.authType ? previous.credential : "");
   if (value.authType !== "none" && !credential) throw new AuthError("연결 테스트에 사용할 토큰 또는 API 키를 입력해 주세요.", 400);
-  const row: McpRow = { id: previous?.id || "test", user_id: userId, name: value.name, description: value.description, url: value.url, auth_type: value.authType, credential, enabled: 1, created_at: "", updated_at: "" };
+  const row: McpRow = { id: previous?.id || "test", user_id: userId, name: value.name, description: value.description, url: value.url, auth_type: value.authType, credential, enabled: 1, tool_timeout_seconds: value.toolTimeoutSeconds, created_at: "", updated_at: "" };
   const client = await connectedClient(row, signal);
   try { const result = await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" }); return { toolCount: result.tools.length, tools: result.tools.slice(0, 20).map(tool => tool.name) }; }
   finally { await client.close().catch(() => undefined); }
@@ -182,7 +187,9 @@ export async function executeMcpTool(userId: string, binding: McpToolBinding, ar
   if (!row.enabled) throw new AuthError("이 MCP 연결은 비활성화되어 있습니다.", 403);
   const client = await connectedClient(row, signal);
   try {
-    const response = await client.callTool({ name: binding.toolName, arguments: args && typeof args === "object" ? args as Record<string, unknown> : {} }, { signal: requestSignal(signal), toolDefinition: binding.tool });
+    // Tool execution gets the connection's own budget; the SDK timeout is raised to match so its 60s default cannot cut it short.
+    const timeoutMs = (row.tool_timeout_seconds || DEFAULT_MCP_TOOL_TIMEOUT_SECONDS) * 1000;
+    const response = await client.callTool({ name: binding.toolName, arguments: args && typeof args === "object" ? args as Record<string, unknown> : {} }, { signal: requestSignal(signal, timeoutMs), timeout: timeoutMs, toolDefinition: binding.tool });
     const content: ModelContentPart[] = [];
     const summaries: unknown[] = [];
     for (const part of response.content || []) {

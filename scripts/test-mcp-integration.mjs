@@ -66,6 +66,9 @@ try {
 
   const first = (await json("/api/mcp-connections", "POST", base)).connection;
   assert.equal(first.hasCredential, true); assert.equal("credential" in first, false);
+  assert.equal(first.toolTimeoutSeconds, 20, "new connections default to a 20 second tool timeout");
+  assert.equal((await json(`/api/mcp-connections/${first.id}`, "PUT", { ...base, id: first.id, credential: "", toolTimeoutSeconds: 90 })).connection.toolTimeoutSeconds, 90);
+  assert.equal((await request(`/api/mcp-connections/${first.id}`, "PUT", { ...base, id: first.id, credential: "", toolTimeoutSeconds: 4 })).status, 400, "tool timeout below the minimum is rejected");
   await json("/api/mcp-connections", "POST", { ...base, name: "QA MCP 2", authType: "none", credential: "" });
   const overLimit = await request("/api/mcp-connections", "POST", { ...base, name: "QA MCP 3" });
   assert.equal(overLimit.status, 409);

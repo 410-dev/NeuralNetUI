@@ -144,6 +144,7 @@ export interface McpConnection {
   authType: McpAuthType;
   hasCredential: boolean;
   enabled: boolean;
+  toolTimeoutSeconds: number;
   createdAt: string;
   updatedAt: string;
 }
