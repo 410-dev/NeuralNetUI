@@ -1,7 +1,7 @@
 "use client";
 
-import { Check, Code2, Download, FileJson, FileSpreadsheet, FileText, Image as ImageIcon, LoaderCircle, Maximize2, Minimize2, PenLine, X } from "lucide-react";
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { Check, ChevronDown, ChevronUp, Code2, Download, FileJson, FileSpreadsheet, FileText, Image as ImageIcon, LoaderCircle, Maximize2, Minimize2, PenLine, X } from "lucide-react";
+import { ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -13,6 +13,21 @@ import { HtmlArtifactFrame } from "./html-artifact-frame";
 
 type ViewerKind=ArtifactKind|"text";
 type ViewerDocument=Omit<ArtifactDocument,"kind">&{kind:ViewerKind};
+type HtmlPolicy={enabled:boolean;accountId:string;error?:boolean};
+
+function useHtmlArtifactPolicy(active:boolean){
+  const [policy,setPolicy]=useState<HtmlPolicy>();
+  useEffect(()=>{
+    if(!active){setPolicy(undefined);return;}
+    const controller=new AbortController();
+    fetch("/api/artifact-policy",{cache:"no-store",signal:controller.signal})
+      .then(async response=>{if(!response.ok)throw new Error(String(response.status));return response.json();})
+      .then(body=>setPolicy({enabled:body.htmlEnabled===true,accountId:String(body.accountId||"")}))
+      .catch(error=>{if(error?.name!=="AbortError")setPolicy({enabled:false,accountId:"",error:true});});
+    return()=>controller.abort();
+  },[active]);
+  return policy;
+}
 
 export function artifactFromEvent(event:ToolEvent):ArtifactDocument|undefined{
   const result=event.result&&typeof event.result==="object"?event.result as Record<string,unknown>:undefined;
@@ -48,7 +63,7 @@ function xmlValue(source:string){
   return {[document.documentElement.tagName]:convert(document.documentElement)};
 }
 
-function ArtifactBody({artifact,language,htmlPolicy,storageId,locale}:{artifact:ViewerDocument;language?:string;htmlPolicy?:{enabled:boolean;accountId:string;error?:boolean};storageId:string;locale:Locale}){
+function ArtifactBody({artifact,language,htmlPolicy,storageId,locale}:{artifact:ViewerDocument;language?:string;htmlPolicy?:HtmlPolicy;storageId:string;locale:Locale}){
   if(artifact.kind==="html")return <HtmlArtifactFrame content={artifact.content} title={artifact.title} enabled={htmlPolicy?.enabled===true} accountId={htmlPolicy?.accountId||""} artifactId={storageId} ko={locale==="ko"} policyError={htmlPolicy?.error}/>;
   if(artifact.kind==="markdown")return <div className="artifact-markdown markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]}>{artifact.content}</ReactMarkdown></div>;
   if(artifact.kind==="csv"){const rows=parseCsv(artifact.content),width=Math.min(200,Math.max(0,...rows.map(row=>row.length)));return <div className="artifact-table-wrap"><table><thead><tr>{Array.from({length:width},(_,index)=><th key={index}>{rows[0]?.[index]||`Column ${index+1}`}</th>)}</tr></thead><tbody>{rows.slice(1).map((row,rowIndex)=><tr key={rowIndex}>{Array.from({length:width},(_,index)=><td key={index}>{row[index]||""}</td>)}</tr>)}</tbody></table></div>}
@@ -60,8 +75,7 @@ function triggerDownload(url:string,name?:string){const anchor=document.createEl
 
 export function ArtifactDialog({artifact,locale,onClose,onSave,initialEditing=false,editable=artifact.kind!=="html",downloadUrl,language,loading=false,loadError="",storageId=artifact.title}:{artifact:ViewerDocument;locale:Locale;onClose:()=>void;onSave?:(next:ViewerDocument)=>void|Promise<void>;initialEditing?:boolean;editable?:boolean;downloadUrl?:string;language?:string;loading?:boolean;loadError?:string;storageId?:string}){
   const {ref,close,closing}=useModalTransition(onClose),[editing,setEditing]=useState(initialEditing),[mode,setMode]=useState<"preview"|"code">("preview"),[content,setContent]=useState(artifact.content),[maximized,setMaximized]=useState(false),[saving,setSaving]=useState(false),[saveError,setSaveError]=useState("");
-  const [htmlPolicy,setHtmlPolicy]=useState<{enabled:boolean;accountId:string;error?:boolean}|undefined>();
-  useEffect(()=>{if(artifact.kind!=="html")return;const controller=new AbortController();fetch("/api/artifact-policy",{cache:"no-store",signal:controller.signal}).then(async response=>{if(!response.ok)throw new Error(String(response.status));return response.json();}).then(body=>setHtmlPolicy({enabled:body.htmlEnabled===true,accountId:String(body.accountId||"")})).catch(error=>{if(error?.name!=="AbortError")setHtmlPolicy({enabled:false,accountId:"",error:true});});return()=>controller.abort();},[artifact.kind]);
+  const htmlPolicy=useHtmlArtifactPolicy(artifact.kind==="html");
   useEffect(()=>setContent(artifact.content),[artifact.content,artifact.kind,artifact.title]);
   const draft=useMemo(()=>({...artifact,content}),[artifact,content]),renderable=artifact.kind!=="text";
   function download(){if(downloadUrl){triggerDownload(downloadUrl);return;}const mime={html:"text/html",csv:"text/csv",json:"application/json",xml:"application/xml",markdown:"text/markdown",text:"text/plain"}[artifact.kind],extension=artifact.kind==="markdown"?"md":artifact.kind,url=URL.createObjectURL(new Blob([content],{type:`${mime};charset=utf-8`}));triggerDownload(url,`${artifact.title.replace(/[\\/:*?\"<>|]/g,"-")}.${extension}`);URL.revokeObjectURL(url);}
@@ -83,8 +97,26 @@ export function StorageFileDialog({file,locale,onClose,onUpdated}:{file:StorageF
   return <ArtifactDialog artifact={artifact} locale={locale} onClose={onClose} editable storageId={`file:${file.id}`} downloadUrl={`${file.url}${file.url.includes("?")?"&":"?"}download=1`} language={storageFileLanguage(file.name,file.mimeType)} loading={loading} loadError={loadError} onSave={async next=>{const response=await fetch(file.url,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:next.content})}),body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||`Request failed (${response.status}).`);setContent(next.content);onUpdated?.({...file,...body.attachment});}}/>;
 }
 
+function ArtifactInlinePreview({artifact,locale,storageId,id}:{artifact:ViewerDocument;locale:Locale;storageId:string;id:string}){
+  const htmlPolicy=useHtmlArtifactPolicy(artifact.kind==="html");
+  return <div id={id} className="artifact-inline-preview" role="region" aria-label={locale==="ko"?`${artifact.title} 펼친 보기`:`${artifact.title} expanded preview`}>
+    {artifact.kind==="html"&&!htmlPolicy?<div className="artifact-inline-loading" role="status"><LoaderCircle className="spin" size={18}/>{locale==="ko"?"미리보기를 준비하는 중…":"Preparing preview…"}</div>
+      :<div className="artifact-preview"><ArtifactBody artifact={artifact} htmlPolicy={htmlPolicy} storageId={storageId} locale={locale}/></div>}
+  </div>;
+}
+
 export function ArtifactCard({event,locale,onSave}:{event:ToolEvent;locale:Locale;onSave?:(artifact:ArtifactDocument)=>void|Promise<void>}){
-  const initial=artifactFromEvent(event),storage=artifactStorageFromEvent(event),[open,setOpen]=useState(false),[local,setLocal]=useState(initial);if(!local)return null;
+  const initial=artifactFromEvent(event),storage=artifactStorageFromEvent(event),[open,setOpen]=useState(false),[expanded,setExpanded]=useState(false),[local,setLocal]=useState(initial),inlineId=useId();
+  if(!local)return null;
   const Icon=local.kind==="csv"?FileSpreadsheet:local.kind==="json"||local.kind==="xml"?FileJson:Code2;
-  return <><article className="artifact-card"><Icon size={20}/><div><strong>{local.title}</strong><small>{storage?(locale==="ko"?`${storage.fileName} · 저장소에 저장됨`:`${storage.fileName} · Saved to storage`):`${local.kind.toUpperCase()} · ${locale==="ko"?"대화에서 생성됨":"Created in chat"}`}</small></div><button onClick={()=>setOpen(true)}>{locale==="ko"?"열기":"Open"}<Maximize2 size={15}/></button></article>{open&&<ArtifactDialog artifact={local} locale={locale} onClose={()=>setOpen(false)} storageId={storage?`file:${storage.id}`:`event:${event.id}`} downloadUrl={storage?`${storage.url}?download=1`:undefined} onSave={async next=>{const artifact=next as ArtifactDocument;if(storage){const response=await fetch(storage.url,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:artifact.content})}),body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||`Request failed (${response.status}).`);}await onSave?.(artifact);setLocal(artifact);}}/>}</>;
+  const storageId=storage?`file:${storage.id}`:`event:${event.id}`;
+  return <>
+    <article className={`artifact-card ${expanded?"expanded":""}`}>
+      <Icon size={20}/>
+      <div className="artifact-card-label"><strong>{local.title}</strong><small>{storage?(locale==="ko"?`${storage.fileName} · 저장소에 저장됨`:`${storage.fileName} · Saved to storage`):`${local.kind.toUpperCase()} · ${locale==="ko"?"대화에서 생성됨":"Created in chat"}`}</small></div>
+      <div className="artifact-card-actions"><button type="button" onClick={()=>{setExpanded(false);setOpen(true);}}>{locale==="ko"?"열기":"Open"}<Maximize2 size={15}/></button><button type="button" className="artifact-expand-button" aria-expanded={expanded} aria-controls={expanded?inlineId:undefined} onClick={()=>setExpanded(value=>!value)}>{expanded?(locale==="ko"?"접기":"Collapse"):(locale==="ko"?"펼치기":"Expand")}{expanded?<ChevronUp size={15}/>:<ChevronDown size={15}/>}</button></div>
+      {expanded&&<ArtifactInlinePreview artifact={local} locale={locale} storageId={storageId} id={inlineId}/>}
+    </article>
+    {open&&<ArtifactDialog artifact={local} locale={locale} onClose={()=>setOpen(false)} storageId={storageId} downloadUrl={storage?`${storage.url}?download=1`:undefined} onSave={async next=>{const artifact=next as ArtifactDocument;if(storage){const response=await fetch(storage.url,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({content:artifact.content})}),body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.error||`Request failed (${response.status}).`);}await onSave?.(artifact);setLocal(artifact);}}/>}
+  </>;
 }

@@ -59,7 +59,7 @@
 - MCP connection rows reveal per-session tools in place. Keep the connection switch on the far right and put the fold immediately to its left; blocked tools remain visible but disabled so policy and session state cannot be confused.
 - MCP approval cards keep the title and connection badge in separate, truncating header columns. State the requested operation in plain language above the raw arguments so approval is informed rather than tool-name-only.
 - Storage access uses the same in-place disclosure pattern: the parent switch stays at the right, while the fold reveals independent read/write permissions and a compact per-session text-file limit.
-- Artifact results leave the technical tool disclosure and become quiet message cards. Open them first in the same centered work-surface size as Settings, with an explicit maximize/restore control for a true viewport-filling view: isolated HTML, tabular CSV, foldable structured data, or rendered Markdown. A Preview/Code segment beside Download exposes every format's syntax-coloured source; non-HTML editing keeps source and live rendering visible together.
+- Artifact results leave the technical tool disclosure and become quiet message cards. Keep Open left of Expand on each card. Expand renders a 2:3 preview inside the card without a modal and collapses in place; Open uses the centered work-surface size of Settings with an explicit maximize/restore control for a true viewport-filling view: isolated HTML, tabular CSV, foldable structured data, or rendered Markdown. A Preview/Code segment beside Download exposes every format's syntax-coloured source; non-HTML editing keeps source and live rendering visible together.
 
 ## Shared browser surface
 
