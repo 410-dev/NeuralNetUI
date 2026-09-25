@@ -1875,7 +1875,8 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
         const tools = events.filter((event) => !["ask_multiple_choice","create_artifact"].includes(event.name));
         const answered = events.filter((event) => event.name === "ask_multiple_choice" && event.status === "completed");
         const artifacts=events.filter(event=>event.name==="create_artifact"&&event.status==="completed");
-        return <div key={index} className="transcript-tools">{tools.length ? <ToolActivityGroup c={c} locale={locale} events={tools} /> : null}{answered.map((event) => <MultipleChoiceResponse key={event.id} event={event} />)}{artifacts.map(event=><ArtifactCard key={event.id} event={event} locale={locale} onSave={artifact=>onEditArtifact(event.id,artifact)}/>)}</div>;
+        const creatingArtifacts=pending?events.filter(event=>event.name==="create_artifact"&&["calling","waiting"].includes(event.status)):[];
+        return <div key={index} className="transcript-tools">{tools.length ? <ToolActivityGroup c={c} locale={locale} events={tools} /> : null}{answered.map((event) => <MultipleChoiceResponse key={event.id} event={event} />)}{artifacts.map(event=><ArtifactCard key={event.id} event={event} locale={locale} onSave={artifact=>onEditArtifact(event.id,artifact)}/>)}{creatingArtifacts.map(event=><div key={event.id} className="artifact-card artifact-card-pending" role="status" aria-live="polite"><LoaderCircle className="spin" size={20}/><div className="artifact-card-label"><strong>{chatWaitLabel("creating-artifact", locale)}</strong><small>{typeof (event.arguments as {title?:unknown}|undefined)?.title==="string"?String((event.arguments as {title:string}).title):"…"}</small></div></div>)}</div>;
       }
       const live = index === liveContentIndex && pending;
       const body = step.text;

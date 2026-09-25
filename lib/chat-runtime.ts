@@ -317,6 +317,10 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
       if (progress.phase === "processing-prompt") { prefillSeen = true; prefillTimerController.abort(); stopStatusPoll(); }
       setWaitProgress(job, progress.phase, progress.progress); return;
     }
+    if (payload.type === "tool_call.name") {
+      outputStarted = true; stopStatusPoll();
+      setWaitPhase(job, payload.name === "create_artifact" ? "creating-artifact" : undefined); return;
+    }
     if (!prefillSeen && !outputStarted) setWaitPhase(job, "preparing-response");
     usage = { ...usage, ...usageFrom(payload) };
     const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }> : [];
@@ -338,7 +342,6 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     }
     if (Array.isArray(delta.tool_calls)) for (const part of delta.tool_calls as Array<Record<string, unknown>>) {
       outputStarted = true; stopStatusPoll();
-      setWaitPhase(job, undefined);
       const index = typeof part.index === "number" ? part.index : calls.size;
       const fn = part.function as Record<string, unknown> | undefined;
       const previous = calls.get(index) || { id: "", type: "function" as const, function: { name: "", arguments: "" } };
@@ -347,7 +350,8 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
         type: "function",
         function: { name: `${previous.function.name}${typeof fn?.name === "string" ? fn.name : ""}`, arguments: `${previous.function.arguments}${typeof fn?.arguments === "string" ? fn.arguments : ""}` },
       });
-      if (calls.get(index)?.function.name === "create_artifact") setWaitPhase(job, "creating-artifact");
+      // One phase per delta: clearing and re-setting it would broadcast twice for every argument token.
+      setWaitPhase(job, calls.get(index)?.function.name === "create_artifact" ? "creating-artifact" : undefined);
     }
     const outputEstimate = estimateTokens(content) + estimateTokens(reasoning) + estimateTokens([...calls.values()]);
     const used = Math.max(inputEstimate, usage.inputTokens ?? 0) + Math.max(outputEstimate, usage.outputTokens ?? 0, usage.reasoningTokens ?? 0);

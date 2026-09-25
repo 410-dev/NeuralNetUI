@@ -112,6 +112,10 @@ export async function nativeChatResponse(options: {
               if (fragment.isStructural || !["none", "reasoning"].includes(fragment.reasoningType)) return;
               emit({ choices: [{ delta: { [fragment.reasoningType === "reasoning" ? "reasoning_content" : "content"]: fragment.content } }] });
             },
+            // The finished call only arrives once every argument is generated, which for an artifact
+            // is the whole document. Naming the tool as soon as it is known lets the chat say what the
+            // model is writing instead of sitting silent.
+            onToolCallRequestNameReceived: (_index, name) => emit({ type: "tool_call.name", name }),
             onToolCallRequestEnd: (index, { toolCallRequest: call }) => emit({ choices: [{ delta: { tool_calls: [{ index, id: call.id || `tool-${crypto.randomUUID()}`, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments || {}) } }] } }] }),
             onToolCallRequestFailure: (_index, error) => { toolError = new Error(`The model generated an invalid tool call: ${error.message}`); },
           });
