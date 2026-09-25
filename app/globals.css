@@ -201,14 +201,14 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .user-message { display: flex; justify-content: flex-end; padding-block: 12px; margin-top: -12px; margin-bottom: 18px; }
 .message-bubble { min-width: 0; max-width: 75%; overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; font-size: 17px; line-height: 1.55; padding: 12px 17px; border-radius: var(--radius-lg) var(--radius-lg) var(--radius-media) var(--radius-lg); background: #232329; border: 1px solid rgba(255,255,255,.035); }
 .assistant-message { width: 100%; white-space: pre-wrap; line-height: 1.75; color: #e6e8ec; }
-.assistant-message > .chat-wait-status, .assistant-message > .assistant-copy, .assistant-message > .thinking-block, .assistant-message > .transcript-tools, .assistant-message > .assistant-footer { width: min(760px, 92%); }
-.assistant-message > .assistant-generated-images { width:min(860px,92%); }
+.assistant-message > .chat-wait-status, .assistant-message > .assistant-copy, .assistant-message > .thinking-block, .assistant-message > .transcript-tools, .assistant-message > .assistant-footer { width: 100%; }
+.assistant-message > .assistant-generated-images { width:100%; }
 .assistant-generated-images { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin:2px 0 12px; }
 .assistant-generated-images.count-1 { grid-template-columns:1fr; }
 .assistant-generated-images button { min-width:0; padding:0; overflow:hidden; border:1px solid var(--border); border-radius:var(--radius-md); background:#101013; cursor:zoom-in; }
 .assistant-generated-images img { width:100%; max-height:70dvh; display:block; object-fit:contain; }
 .assistant-message > .transcript-tools:has(.choice-response-row) { width: 100%; }
-.assistant-message > .transcript-tools > .tool-activity-group { width: min(760px, 92%); }
+.assistant-message > .transcript-tools > .tool-activity-group { width: 100%; }
 .assistant-copy { min-height: 26px; }
 .thinking-block { margin-bottom: 0; }
 .thinking-block > button { min-height: 39px; padding: 2px 0; display: flex; align-items: center; gap: 7px; color: var(--muted); background: transparent; font-size: 13px; }
