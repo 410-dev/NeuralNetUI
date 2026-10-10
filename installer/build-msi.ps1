@@ -13,6 +13,11 @@ $serviceOutput = Join-Path $buildRoot "service-host"
 $trayProject = Join-Path $PSScriptRoot "tray-host\NeuralNetUI.Tray.csproj"
 $trayOutput = Join-Path $buildRoot "tray-host"
 $wix = Join-Path $PSScriptRoot ".tools\wix.exe"
+$packageMetadata = Get-Content -LiteralPath (Join-Path $repoRoot "package.json") -Raw | ConvertFrom-Json
+$packageVersion = [string]$packageMetadata.version
+if ($packageVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
+    throw "package.json contains an invalid or unsafe installer version: $packageVersion"
+}
 
 Push-Location $repoRoot
 try {
@@ -113,7 +118,7 @@ try {
         -ext WixToolset.UI.wixext `
         -d "StagePath=$stageRoot" `
         -intermediatefolder (Join-Path $buildRoot "wixobj") `
-        -o (Join-Path $outputRoot "NeuralNetUI-3.0.0-rc3-b23-x64.msi")
+        -o (Join-Path $outputRoot "NeuralNetUI-$packageVersion-x64.msi")
     if ($LASTEXITCODE -ne 0) { throw "The MSI build failed." }
 } finally {
     Pop-Location

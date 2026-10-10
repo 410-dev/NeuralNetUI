@@ -10,6 +10,14 @@ test("Windows installer suppresses system restarts", async () => {
   assert.doesNotMatch(source, /<(?:ForceReboot|ScheduleReboot)\b/);
 });
 
+test("MSI output filename follows the application package version", async () => {
+  const source = await readFile(path.join(process.cwd(), "installer", "build-msi.ps1"), "utf8");
+
+  assert.match(source, /\$packageVersion\s*=\s*\[string\]\$packageMetadata\.version/);
+  assert.match(source, /"NeuralNetUI-\$packageVersion-x64\.msi"/);
+  assert.doesNotMatch(source, /NeuralNetUI-\d+\.\d+\.\d+(?:-[\w.-]+)?-x64\.msi/);
+});
+
 test("the supplied NeuralNetUI artwork drives the favicon and tray icon", async () => {
   const root = process.cwd();
   const [sourcePng, favicon, trayIco, trayProject, traySource] = await Promise.all([
