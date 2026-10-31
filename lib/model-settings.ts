@@ -28,6 +28,8 @@ const modelSchema = z.object({
   imageGeneration: z.boolean().optional(),
   imageInput: z.boolean().optional(),
   isPublic: z.boolean().optional(),
+  rememberReasoning: z.boolean().optional(),
+  systemPromptEditable: z.boolean().optional(),
 }).strict();
 
 const exportSchema = z.object({

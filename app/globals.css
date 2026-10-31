@@ -421,7 +421,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .preset-popover > button, .alias-base-picker > .model-option { min-width: 0; }
   .preset-popover > button > span:last-child, .alias-base-picker > .model-option > span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
 }
-.preset-popover > p, .preset-popover > button, .preset-popover > .reasoning-send-toggle { flex: 0 0 auto; }
+.preset-popover > p, .preset-popover > button { flex: 0 0 auto; }
 .preset-popover > p { margin: 4px 8px 7px; color: var(--dim); font-size: 11px; }
 .preset-popover > button { width: 100%; display: grid; grid-template-columns: 18px 1fr; gap: 7px; text-align: left; align-items: start; border-radius: var(--radius-sm); padding: 8px; background: transparent; font-size: 13px; }
 .preset-popover > button:hover { background: rgba(255,255,255,.06); }
@@ -574,10 +574,29 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .idle-center .welcome { margin: 0 0 20px; }
 .chat-idle .composer-wrap { padding-bottom: 0; flex: 0 0 auto; }
 
-.reasoning-send-toggle { border-top: 1px solid var(--border); margin-top: 7px; padding: 11px 8px 4px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.reasoning-send-toggle strong, .reasoning-send-toggle small { display: block; }
-.reasoning-send-toggle strong { font-size: 11px; font-weight: 550; }
-.reasoning-send-toggle small { margin-top: 3px; font-size: 9px; color: var(--dim); }
+/* Sits where the remember-reasoning switch used to be; that choice now belongs to each model's settings. */
+.preset-popover > .system-prompt-action { grid-template-columns: 18px minmax(0,1fr) 15px; align-items: center; margin-top: 7px; padding: 11px 8px; border-top: 1px solid var(--border); border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
+.system-prompt-action > svg:first-child { color: var(--muted); }
+.system-prompt-action > svg:last-child { color: var(--dim); }
+.system-prompt-action strong { display: block; font-size: 11.5px; font-weight: 550; }
+.system-prompt-action small { font-size: 9.5px; }
+.system-prompt-dialog { width: min(780px, 100%); }
+.system-prompt-dialog header > div { min-width: 0; }
+.system-prompt-dialog header small { display: block; margin-top: 4px; color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.system-prompt-preset { display: grid; gap: 7px; }
+.system-prompt-preset > span { margin-left: 2px; color: #c1c3c9; font-size: 11.5px; }
+.system-prompt-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.system-prompt-status b { padding: 4px 10px; border-radius: var(--radius-pill); color: var(--muted); background: rgba(255,255,255,.06); font-size: 10.5px; font-weight: 550; }
+.system-prompt-status b.customized { color: #ffffff; background: var(--accent-soft); }
+.system-prompt-status .subtle-action { height: 30px; padding: 0 12px; }
+.system-prompt-dialog textarea { min-height: 300px; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12.5px; }
+.system-prompt-error { margin: 0; color: #ff8a8a; font-size: 11.5px; }
+@media (max-width: 560px) {
+  .harness-modal-layer.system-prompt-layer { padding: 0; place-items: stretch; }
+  .harness-dialog.system-prompt-dialog { width: 100%; max-height: none; height: 100dvh; border-radius: 0; border: 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .system-prompt-dialog textarea { flex: 1 1 auto; min-height: 180px; font-size: 16px; }
+  .system-prompt-dialog .text-dialog-actions > button { flex: 1 1 0; justify-content: center; height: 44px; }
+}
 .toggle i { display: block; width: 16px; height: 16px; border-radius: 50%; background: #c9cbd1; transition: transform .18s; }
 .toggle.on i { transform: translateX(17px); background: white; }
 
@@ -1815,4 +1834,65 @@ select:focus-visible {
 @media(max-width:640px){
   .mcp-tool-policy-dialog{width:100%;height:100dvh;max-height:none;border:0;border-radius:0}.mcp-policy-segments{grid-template-columns:repeat(2,minmax(0,1fr));border-radius:var(--radius-md)}
   .artifact-layer{padding:0}.artifact-dialog{width:100%;height:100dvh;border:0;border-radius:0}.artifact-dialog>header{align-items:flex-start}.artifact-dialog nav button{padding:0 6px;font-size:0}.artifact-dialog nav button svg{width:18px;height:18px}.artifact-workspace.editing{grid-template-columns:1fr;grid-template-rows:minmax(180px,.7fr) minmax(0,1.3fr)}.artifact-workspace>textarea{border-right:0;border-bottom:1px solid var(--border)}.artifact-card{grid-template-columns:24px minmax(0,1fr);padding:15px}.artifact-card-actions{grid-column:2;justify-self:start}
+}
+
+/* Settings on a phone: a list of sections, then one section with a back button, and in the list-and-editor
+   sections the list first and the chosen item's editor on its own screen. Nothing scrolls inside a scroller. */
+.settings-panel > header .settings-back, .settings-title-section, .settings-nav-chevron { display: none; }
+.settings-nav-icon { display: contents; }
+.settings-panel > header h2 b { font-weight: inherit; }
+@media (max-width: 720px) {
+  .settings-layer { padding: 0; }
+  .settings-panel { width: 100%; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  .settings-panel > header { flex: 0 0 auto; min-height: 58px; gap: 2px; justify-content: flex-start; padding: calc(6px + env(safe-area-inset-top)) 8px 6px; }
+  .settings-panel > header > div { flex: 1; min-width: 0; }
+  .settings-panel > header span { display: none; }
+  .settings-panel > header h2 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 600; text-align: center; }
+  .settings-panel > header button { width: 42px; height: 42px; flex: 0 0 42px; }
+  .settings-panel.mobile-root > header { padding-left: 18px; }
+  .settings-panel.mobile-root > header h2 { font-size: 26px; text-align: left; }
+  .settings-panel.mobile-section .settings-back { display: grid; }
+  .settings-panel.mobile-section .settings-title-root { display: none; }
+  .settings-panel.mobile-section .settings-title-section { display: inline; }
+  .settings-panel.mobile-section > header > div { padding-right: 44px; }
+  .settings-panel.mobile-section > header > button:last-child { position: absolute; right: 8px; }
+  .settings-panel > header { position: relative; }
+  .settings-body { display: block; position: relative; }
+  .settings-body nav { display: flex; flex-direction: column; height: 100%; overflow-y: auto; overscroll-behavior: contain; padding: 6px 16px calc(24px + env(safe-area-inset-bottom)); border: 0; background: transparent; }
+  .settings-body nav button { flex: 0 0 auto; width: 100%; min-width: 0; height: 58px; margin: 0; padding: 0 14px; gap: 14px; border-radius: 0; color: var(--text); background: rgba(255,255,255,.035); font-size: 15px; border-bottom: 1px solid var(--border); }
+  .settings-body nav button:first-child { border-radius: 18px 18px 0 0; }
+  .settings-body nav button:last-child { border-radius: 0 0 18px 18px; border-bottom: 0; }
+  .settings-body nav button.active, .settings-body nav button:hover { color: var(--text); background: rgba(255,255,255,.035); }
+  .settings-body nav button:active { background: rgba(255,255,255,.08); }
+  .settings-nav-icon { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border-radius: 10px; color: var(--text); background: rgba(255,255,255,.07); }
+  .settings-nav-icon svg { width: 18px; height: 18px; }
+  .settings-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+  .settings-nav-chevron { display: block; flex: 0 0 auto; color: var(--dim); }
+  .settings-panel.mobile-section .settings-body nav, .settings-panel.mobile-root .settings-content { display: none; }
+  .settings-content { height: 100%; padding: 14px 16px calc(32px + env(safe-area-inset-bottom)); scrollbar-gutter: auto; }
+  .settings-content input:not([type="checkbox"]):not([type="radio"]), .settings-content textarea, .settings-content select { font-size: 16px; }
+  .settings-content .section-title { grid-template-columns: minmax(0,1fr) auto; gap: 10px; margin-bottom: 16px; }
+  .settings-content .section-title > .title-icon { display: none; }
+  .settings-content .section-title h3 { font-size: 16px; }
+  .settings-content .section-title p { font-size: 12.5px; }
+  .settings-content .section-title > .order-actions { grid-column: 1 / -1; }
+  .split-model-editor { display: block; height: auto; max-height: none; border: 0; border-radius: 0; overflow: visible; background: transparent; }
+  .split-model-editor .model-column { height: auto; overflow: hidden; border: 1px solid var(--border); border-radius: 18px; background: rgba(255,255,255,.02); }
+  .split-model-editor .model-column-head { height: 50px; flex-basis: 50px; padding: 0 8px 0 14px; font-size: 12px; }
+  .split-model-editor .model-column-list { flex: 0 0 auto; overflow: visible; padding: 4px; scrollbar-gutter: auto; }
+  .split-model-editor .model-column-list > button { min-height: 58px; padding: 9px 10px; border-radius: 13px; }
+  .split-model-editor .model-column-list strong { font-size: 14.5px; }
+  .split-model-editor .model-column-list small { font-size: 11.5px; }
+  .split-model-editor .model-editor-pane { max-height: none; overflow: visible; padding: 0; }
+  .settings-panel:not(.mobile-detail) .split-model-editor .model-editor-pane { display: none; }
+  /* In an editor the chosen row stays on top as its heading, so it is clear what is being edited. */
+  .settings-panel.mobile-detail .split-model-editor .model-column { margin-bottom: 16px; border-color: transparent; background: transparent; }
+  .settings-panel.mobile-detail .split-model-editor :is(.model-column-head, .model-column-list > button:not(.active)) { display: none; }
+  .settings-panel.mobile-detail .split-model-editor .model-column-list { padding: 0; }
+  .settings-panel.mobile-detail .split-model-editor .model-column-list > button.active { pointer-events: none; }
+  .settings-panel > footer { flex: 0 0 auto; flex-wrap: wrap; gap: 8px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+  .settings-panel > footer > span:not(:empty) { display: block; flex: 1 0 100%; white-space: normal; }
+  .settings-panel > footer > div { flex: 1; }
+  .settings-panel > footer > div > button { flex: 1 1 0; height: 46px; justify-content: center; font-size: 14px; }
+  .settings-panel:not(.dirty) > footer:not(:has(> span:not(:empty))) { display: none; }
 }

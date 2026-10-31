@@ -314,9 +314,15 @@ export function updateUserPreferences(userId: string, displayName: string, prefe
   const row = db.prepare("SELECT preferences FROM users WHERE id = ?").get(userId) as { preferences: string } | undefined;
   let existing: Record<string, unknown> = {};
   try { existing = JSON.parse(row?.preferences || "{}"); } catch { /* unreadable preferences start again */ }
-  const kept = "enabledTools" in existing ? { enabledTools: existing.enabledTools } : {};
+  const kept = Object.fromEntries(["enabledTools", "systemPromptOverrides"].filter(key => key in existing).map(key => [key, existing[key]]));
   db.prepare("UPDATE users SET display_name = ?, preferences = ?, updated_at = ? WHERE id = ?")
     .run(displayName, JSON.stringify({ ...kept, ...preferences }), new Date().toISOString(), userId);
+}
+
+/** One account's saved preferences, or none when the account no longer exists. */
+export function readUserPreferences(userId: string): Record<string, unknown> {
+  const row = db.prepare("SELECT preferences FROM users WHERE id = ?").get(userId) as { preferences: string } | undefined;
+  try { return JSON.parse(row?.preferences || "{}"); } catch { return {}; }
 }
 
 /** Merges one preference key into an account without touching the others. */

@@ -73,6 +73,10 @@ export interface ModelConfig {
   isPublic?: boolean;
   /** Connection that serves this model. Aliases inherit their base model connection. */
   connectionId?: string;
+  /** Administrator choice: earlier responses' reasoning is sent back to this model. Aliases without one follow their base. */
+  rememberReasoning?: boolean;
+  /** Administrator choice for a served model: accounts may replace its system prompt for themselves. Aliases always may. */
+  systemPromptEditable?: boolean;
 }
 
 export interface ConnectionConfig {
@@ -222,6 +226,8 @@ export interface AppConfig {
     appearance: AppearancePreferences;
     /** Per-account composer tool switches; absent keys use the built-in defaults. */
     enabledTools?: Partial<EnabledTools>;
+    /** Per-account system prompt replacements by model id, then reasoning preset id. */
+    systemPromptOverrides?: Record<string, Record<string, string>>;
   };
   /** Workspace-wide, never overridden per account. */
   loginAppearance: LoginAppearance;

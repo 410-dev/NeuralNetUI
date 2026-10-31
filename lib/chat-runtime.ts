@@ -30,6 +30,8 @@ import { promises as fs } from "node:fs";
 import { acquirePlanAdmission, assertPlanAccess, clearLiveTokenUsage, recordTokenUsage, releasePlanAdmission, remainingPlanOutputTokens, setLiveTokenUsage } from "./plans";
 import { executeMcpTool, mcpToolDefinitions, type McpToolBinding } from "./mcp";
 import { generateCompatibleImage } from "./image-generation";
+import { composeSystemPrompt, readSystemPromptOverrides, systemPromptEditable, systemPromptOverride } from "./system-prompt";
+import { readUserPreferences } from "./auth";
 
 type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
 type UpstreamMessage = { role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string };
@@ -546,16 +548,18 @@ async function run(job: ChatJob) {
   try {
     const config = await readConfig();
     if (job.input.messages.some((message) => (message.attachments?.length || 0) > config.toolSettings.maxAttachmentsPerMessage)) throw new Error(`A message exceeds the configured ${config.toolSettings.maxAttachmentsPerMessage}-attachment limit.`);
-    const { model } = runtimeModel(config, job.input, job.userId);
+    const { model, selected, base } = runtimeModel(config, job.input, job.userId);
+    // Whether earlier reasoning goes back to the model is the administrator's per-model choice, never the request's.
+    job.input = { ...job.input, sendReasoning: (selected.rememberReasoning ?? base.rememberReasoning) === true };
     const chargeModelId=model.isAlias?(config.models.find(item=>!item.isAlias&&(item.id===model.sourceModel||item.sourceModel===model.sourceModel))?.id||model.sourceModel):model.id;
     const connection = connectionForModel(config.connections, model);
     if (!connection) throw new Error("The selected model's connection is unavailable.");
     if (connection.disabled) throw new Error("The selected model's server is disabled.");
     const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId && (item.kind === "builtin" || !item.ownerId || item.ownerId === job.userId));
     const effort = reasoningEffort(model, preset);
-    const modelPrompt = model.systemPrompt?.trim() || ""; const presetPrompt = preset?.kind === "custom" ? preset.systemPrompt?.trim() || "" : "";
-    let systemPrompt = modelPrompt;
-    if (presetPrompt) systemPrompt = preset?.systemPromptMode === "replace" ? presetPrompt : preset?.systemPromptMode === "prepend" ? [presetPrompt, modelPrompt].filter(Boolean).join("\n\n") : [modelPrompt, presetPrompt].filter(Boolean).join("\n\n");
+    // An account's own rewrite of this model and preset replaces the composed prompt, where the model allows it.
+    const promptOverride = systemPromptEditable(selected) ? systemPromptOverride(readSystemPromptOverrides(readUserPreferences(job.userId).systemPromptOverrides), selected.id, preset?.id) : undefined;
+    const systemPrompt = promptOverride !== undefined ? promptOverride.trim() : composeSystemPrompt(model, preset);
     if (model.imageGeneration === true) {
       if (connection.driver !== "openai") throw new Error("Image generation currently requires an OpenAI-compatible connection.");
       const latest = job.input.messages.findLast(message => message.role === "user");
