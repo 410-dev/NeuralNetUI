@@ -62,7 +62,7 @@ import { saveConversationRequest } from "@/lib/client-persistence";
 import { useModalFocus, useModalTransition } from "@/lib/use-modal-focus";
 import { connectionForModel, resolveConnectionModels, reconcileConnectionEdits } from "@/lib/connection-drivers";
 import { connectedModels, modelServerState, onlineReplacement, type ServerState } from "@/lib/model-availability";
-import { aliasBaseModel, aliasWithBaseModel } from "@/lib/alias-base-model";
+import { aliasBaseModel, aliasFallbackBase, aliasWithBaseModel } from "@/lib/alias-base-model";
 import { useKeyboardReturn } from "@/lib/use-keyboard-return";
 import { describeConnectionFailure, isConnectionFailureCode } from "@/lib/connection-errors";
 import { moveItemById, nudgeItemById } from "@/lib/ordered-list";
@@ -124,7 +124,7 @@ const translations = {
     availableModels: "Available models", checkingModelServers: "Checking model servers", noOnlineModels: "No model server is online.", modelServerOffline: "The server serving this model is offline", modelServerError: "The server serving this model is answering with an error", serverOffline: "Server offline", modelWeightHint: "Uses tokens {weight}x faster", showModelWeights: "Show model weights", showModelWeightsDesc: "Show every account, including administrators, a weight badge on models whose plan weight is not 1. This is a workspace setting.", showModelConnectionNames:"Show model server names", showModelConnectionNamesDesc:"Show connection server names in the model picker for every account. This workspace setting is off by default.", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
     messagePlaceholder: "Message to send", reasoningPreset: "Reasoning preset", native: "Native", template: "Template", default: "default",
     sendPriorReasoning: "Remember its train of thought", sendPriorReasoningDesc: "Send the earlier reasoning back with the next request",
-    disclaimer: "Responses may be inaccurate. Verify important information.", stop: "Stop generating", send: "Send message", addToQueue: "Add to queue", queuedMessages: "Queued messages", removeQueuedMessage: "Remove queued message",
+    disclaimer: "Responses may be inaccurate. Verify important information.", stop: "Stop generating", send: "Send message", addToQueue: "Add to queue", sendHeld: "Waiting for the model list to refresh before sending", modelSwitchedNotice: "{from} is unavailable, so this message will go to {to}. Press send again to continue.", queuedMessages: "Queued messages", removeQueuedMessage: "Remove queued message",
     cancel: "Cancel", close: "Close", closeMenu: "Close menu", forkSend: "Fork & send", editBranch: "Edit and branch", reasoning: "Reasoning", copy: "Copy", regenerate: "Regenerate response", regenerateRequest: "Regenerate from this message", deleteMessage: "Delete message", confirmDeleteMessage: "Delete this message and its connected model response?", previousRevision: "Previous revision", nextRevision: "Next revision",
     confirmDelete: "Delete", irreversibleAction: "This action cannot be undone.", deleteWhileGenerating: "Wait for the response to finish before deleting this message.", editPrompt: "Edit prompt", editMessage: "Edit message",
     exportConversation: "Export conversation", exportDescription: "Export every branch as JSON, or the selected branch as Markdown.",
@@ -174,7 +174,7 @@ const translations = {
     availableModels: "사용 가능한 모델", checkingModelServers: "모델 서버 확인 중", noOnlineModels: "온라인 상태인 모델 서버가 없습니다.", modelServerOffline: "모델을 서빙하는 서버가 오프라인입니다", modelServerError: "모델을 서빙하는 서버에서 오류가 발생했습니다", serverOffline: "서버 오프라인", modelWeightHint: "토큰을 {weight}배 더 빨리 소모합니다", showModelWeights: "모델 가중치 표시", showModelWeightsDesc: "플랜 가중치가 1이 아닌 모델에 가중치 딱지를 표시합니다. 전역 설정이며 관리자를 포함한 모든 사용자에게 적용됩니다.", showModelConnectionNames:"모델 서버 이름 표시", showModelConnectionNamesDesc:"모델 선택 드롭다운에 연결 서버 이름을 표시합니다. 기본값은 꺼짐이며 모든 사용자에게 적용되는 전역 설정입니다.", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
     messagePlaceholder: "보낼 메시지", reasoningPreset: "Reasoning 프리셋", native: "내장", template: "템플릿", default: "기본값",
     sendPriorReasoning: "생각 기록 기억하기", sendPriorReasoningDesc: "다음 요청에 이전 생각 기록을 함께 보냅니다",
-    disclaimer: "응답이 부정확할 수 있습니다. 중요한 정보는 확인해 주세요.", stop: "생성 중단", send: "메시지 전송", addToQueue: "대기열에 추가", queuedMessages: "대기 중인 메시지", removeQueuedMessage: "대기열에서 제거",
+    disclaimer: "응답이 부정확할 수 있습니다. 중요한 정보는 확인해 주세요.", stop: "생성 중단", send: "메시지 전송", addToQueue: "대기열에 추가", sendHeld: "모델 목록을 갱신한 뒤 전송합니다", modelSwitchedNotice: "{from}을(를) 사용할 수 없어 {to}(으)로 변경되었습니다. 계속하려면 전송을 다시 누르세요.", queuedMessages: "대기 중인 메시지", removeQueuedMessage: "대기열에서 제거",
     cancel: "취소", close: "닫기", closeMenu: "메뉴 닫기", forkSend: "분기 후 전송", editBranch: "편집 후 분기", reasoning: "Reasoning", copy: "복사", regenerate: "응답 재생성", regenerateRequest: "이 메시지부터 재생성", deleteMessage: "메시지 삭제", confirmDeleteMessage: "이 메시지와 연결된 모델 응답을 함께 삭제할까요?", previousRevision: "이전 수정본", nextRevision: "다음 수정본",
     confirmDelete: "삭제", irreversibleAction: "이 작업은 되돌릴 수 없습니다.", deleteWhileGenerating: "응답 생성이 끝난 뒤에 메시지를 삭제할 수 있습니다.", editPrompt: "프롬프트 편집", editMessage: "메시지 편집",
     exportConversation: "대화 내보내기", exportDescription: "모든 브랜치를 JSON으로, 선택한 브랜치를 Markdown으로 내보냅니다.",
@@ -332,14 +332,18 @@ export default function Home() {
   // Keyed on what the connections are rather than the config object, which is replaced on every refresh; the
   // placeholder config shown before the workspace loads (it has no account) is never checked.
   const serverCheckKey = config.account ? JSON.stringify(config.connections.map(({ id, driver, baseUrl, disabled }) => [id, driver, baseUrl, disabled === true])) : "[]";
+  // A refused server is retried for up to seven attempts before it is reported offline, so a check can take a
+  // while; messages sent meanwhile are held until the list is current.
+  const [serverCheckInFlight, setServerCheckInFlight] = useState(false);
   useEffect(() => {
-    if (!auth?.authenticated || serverCheckKey === "[]") return;
+    if (!auth?.authenticated || serverCheckKey === "[]") { setServerCheckInFlight(false); return; }
     const controller = new AbortController();
+    setServerCheckInFlight(true);
     fetch("/api/models/status", { cache: "no-store", signal: controller.signal })
       .then((response) => response.ok ? response.json() : undefined)
       .then((body: { statuses?: Record<string, ServerState> } | undefined) => { if (body) { setServerStates(body.statuses || {}); setServerStatesChecked(true); } })
       .catch(() => undefined)
-      .finally(() => { if (!controller.signal.aborted) setCheckingModelServers(false); });
+      .finally(() => { if (!controller.signal.aborted) { setCheckingModelServers(false); setServerCheckInFlight(false); } });
     return () => controller.abort();
   }, [serverCheckTick, auth?.authenticated, serverCheckKey]);
   const [unloadingModel, setUnloadingModel] = useState(false);
@@ -426,6 +430,9 @@ export default function Home() {
   const abandonRef = useRef(false);
   const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
+  // Set when a saved chat is opened: its thread starts with the last request at the top instead of at the bottom.
+  const revealLastRequestRef = useRef(false);
+  const revealHoldRef = useRef<(() => void) | undefined>(undefined);
   const autoFollowThreadRef = useRef(true);
   const [threadAutoFollow, setThreadAutoFollow] = useState(true);
   const selectedModelIdRef = useRef("");
@@ -549,6 +556,33 @@ export default function Home() {
     };
   }, []);
 
+  useLayoutEffect(() => {
+    const element = threadRef.current;
+    if (!revealLastRequestRef.current || !element) return;
+    revealLastRequestRef.current = false;
+    const lastRequest = messages.findLast(message => message.role === "user");
+    const reveal = () => {
+      const target = lastRequest ? element.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(lastRequest.id)}"]`) : null;
+      if (target) element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top - 12;
+      else element.scrollTop = element.scrollHeight;
+      const following = isNearScrollBottom(element);
+      autoFollowThreadRef.current = following;
+      setThreadAutoFollow(following);
+    };
+    reveal();
+    // Rendered Markdown, code and media keep changing heights above the request for a moment after the first
+    // layout, so the alignment is held briefly, until the person scrolls or touches the thread themselves. The
+    // hold outlives this effect: the job watcher replaces the messages again right after a chat opens.
+    revealHoldRef.current?.();
+    const observer = new ResizeObserver(() => { if (element.isConnected) reveal(); });
+    [element, ...element.children].forEach(child => observer.observe(child));
+    const events = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    const release = () => { observer.disconnect(); clearTimeout(timer); events.forEach(name => element.removeEventListener(name, release)); if (revealHoldRef.current === release) revealHoldRef.current = undefined; };
+    const timer = setTimeout(release, 5_000);
+    events.forEach(name => element.addEventListener(name, release, { passive: true }));
+    revealHoldRef.current = release;
+  }, [messages]);
+
   useEffect(() => {
     if (!autoFollowThreadRef.current) return;
     const frame = requestAnimationFrame(() => {
@@ -565,12 +599,24 @@ export default function Home() {
   const { dialog: messageDialog, confirm: askConfirm, choose, notify } = useMessageDialog(locale === "ko");
   const planAllowsModel=(model:ModelConfig)=>config.planModelIds.includes(model.id)||config.planModelIds.includes(model.sourceModel);
   const configuredVisibleModels = config.models.filter((model) => model.visible !== false && planAllowsModel(model));
-  const connectedBaseModels = connectedModels(configuredVisibleModels.filter(model => !model.isAlias), config.connections, serverStates);
+  const configuredBaseModels = configuredVisibleModels.filter(model => !model.isAlias);
+  const connectedBaseModels = connectedModels(configuredBaseModels, config.connections, serverStates);
+  /**
+   * The base an alias runs on: the chat's or account's choice, else the recommendation. When that base's server is
+   * unavailable the recommendation is tried, then the next available base, so the alias stays usable; `fallback`
+   * marks a base nobody chose, which the composer announces before the next send.
+   */
+  function resolveAliasBase(alias: ModelConfig) {
+    const isConnected = (model?: ModelConfig) => Boolean(model && connectedBaseModels.some(candidate => candidate.id === model.id));
+    const intended = aliasBaseModel(alias, configuredVisibleModels, aliasBaseSelections[alias.id] || config.preferences.aliasBaseModelIds?.[alias.id]);
+    const recommended = aliasBaseModel(alias, configuredVisibleModels);
+    const base = !isConnected(intended) && isConnected(recommended) ? recommended : aliasFallbackBase(intended, configuredBaseModels, connectedBaseModels) || intended;
+    return { intended, base, fallback: Boolean(intended && base && base.id !== intended.id) };
+  }
   // Alias definitions keep the author's recommendation; only this runtime copy follows the account/chat choice.
   const visibleModels = configuredVisibleModels.map(model => {
     if (!model.isAlias) return model;
-    const baseId = aliasBaseSelections[model.id] || config.preferences.aliasBaseModelIds?.[model.id];
-    const base = connectedBaseModels.find(candidate => candidate.id === baseId) || aliasBaseModel(model, configuredVisibleModels);
+    const { base } = resolveAliasBase(model);
     return base ? aliasWithBaseModel(model, base) : model;
   });
   // Disconnected and disabled servers leave the model picker entirely. Servers answering with an
@@ -581,14 +627,36 @@ export default function Home() {
   const selectedModel = pickerModels.find((model) => model.id === selectedModelId) || pickerModels[0];
   // A selection whose server is offline or switched off moves to the default model, or else the first online one.
   const replacementModel = selectedModelId ? onlineReplacement(selectedModelId, onlineModels, config.preferences.defaultModelId) : undefined;
+  // Remembers a replacement nobody chose, so the composer can announce it before the next send.
+  const [modelReplacement, setModelReplacement] = useState<{ from: string; to: string; toId: string } | null>(null);
   useEffect(() => {
     if (!replacementModel) return;
+    const previous = visibleModels.find(model => model.id === selectedModelIdRef.current);
+    if (previous) setModelReplacement({ from: previous.name, to: replacementModel.name, toId: replacementModel.id });
     selectedModelIdRef.current = replacementModel.id; setSelectedModelId(replacementModel.id);
     setSelectedPresetId((current) => replacementModel.reasoningPresets.some((preset) => preset.id === current) ? current : replacementModel.reasoningPresets.find((preset) => preset.id === config.preferences.defaultReasoningPresetId)?.id || replacementModel.reasoningPresets[0]?.id || "");
   }, [replacementModel, config.preferences.defaultReasoningPresetId]);
   const selectedPreset = selectedModel?.reasoningPresets.find((preset) => preset.id === selectedPresetId) || selectedModel?.reasoningPresets[0];
   const selectedAliasDefinition = selectedModel?.isAlias ? configuredVisibleModels.find(model => model.id === selectedModel.id) : undefined;
-  const selectedAliasBase = selectedAliasDefinition ? aliasBaseModel(selectedAliasDefinition, connectedBaseModels, aliasBaseSelections[selectedAliasDefinition.id] || config.preferences.aliasBaseModelIds?.[selectedAliasDefinition.id]) : undefined;
+  const selectedAliasResolution = selectedAliasDefinition ? resolveAliasBase(selectedAliasDefinition) : undefined;
+  const selectedAliasBase = selectedAliasResolution?.base && connectedBaseModels.some(model => model.id === selectedAliasResolution.base?.id) ? selectedAliasResolution.base : undefined;
+  // A model or alias base switched because its server went away is announced once above the reasoning button; the
+  // next press of send after that goes ahead with the switched model.
+  const automaticSwitch = selectedAliasResolution?.fallback && selectedAliasResolution.intended && selectedAliasBase
+    ? { from: selectedAliasResolution.intended.name, to: selectedAliasBase.name }
+    : modelReplacement && modelReplacement.toId === selectedModel?.id ? { from: modelReplacement.from, to: modelReplacement.to } : undefined;
+  const automaticSwitchKey = automaticSwitch ? [selectedModel?.id, selectedAliasBase?.id || "", automaticSwitch.from].join("\n") : "";
+  const [switchNoticeKey, setSwitchNoticeKey] = useState("");
+  const [acknowledgedSwitchKey, setAcknowledgedSwitchKey] = useState("");
+  const [sendHeld, setSendHeld] = useState(false);
+  const switchNotice = automaticSwitch && switchNoticeKey === automaticSwitchKey ? c.modelSwitchedNotice.replace("{from}", automaticSwitch.from).replace("{to}", automaticSwitch.to) : "";
+  // A held send goes out once the refresh has answered and any replacement it caused has settled, so it is
+  // checked against the current model list (and may stop at the switch notice instead).
+  useEffect(() => {
+    if (!sendHeld || serverCheckInFlight || replacementModel) return;
+    setSendHeld(false);
+    if (draft.trim() || draftAttachments.length) void sendMessage();
+  }, [sendHeld, serverCheckInFlight, replacementModel]);
   const isAdmin = config.account?.role === "admin" || config.account?.role === "superadmin";
   const showModelWeights = config.showModelWeights === true;
   const canManageInference = isAdmin;
@@ -672,6 +740,7 @@ export default function Home() {
   }
 
   function chooseModel(model: ModelConfig) {
+    setModelReplacement(null);
     selectedModelIdRef.current = model.id; setSelectedModelId(model.id); setSelectedPresetId(model.reasoningPresets[0]?.id || ""); setModelMenuOpen(false);
   }
 
@@ -825,7 +894,8 @@ export default function Home() {
       }
       const next = normalizeConversationRevisions(body as Conversation);
       const branch = next.branches.find((item: ChatBranch) => item.id === next.activeBranchId) || next.branches[0];
-      autoFollowThreadRef.current = true;
+      autoFollowThreadRef.current = false;
+      revealLastRequestRef.current = true;
       setThreadAutoFollow(true);
       if (selectedBranchId && next.branches.some(item => item.id === selectedBranchId)) { next.activeBranchId = selectedBranchId; await saveConversationRequest(next, false); }
       temporaryIdRef.current = next.temporary ? next.id : ""; setTemporaryMode(next.temporary === true); setPromoting(false);
@@ -1001,7 +1071,8 @@ export default function Home() {
     const requestedModelId = options?.modelId || selectedModelIdRef.current;
     const liveModel = visibleModels.find((model) => model.id === requestedModelId);
     const liveAliasDefinition = liveModel?.isAlias ? configuredVisibleModels.find(model => model.id === liveModel.id) : undefined;
-    const runtimeAliasBaseModelId = options?.aliasBaseModelId || (liveAliasDefinition ? aliasBaseModel(liveAliasDefinition, connectedBaseModels, aliasBaseSelections[liveAliasDefinition.id] || config.preferences.aliasBaseModelIds?.[liveAliasDefinition.id])?.id : undefined);
+    const liveAliasBase = liveAliasDefinition ? resolveAliasBase(liveAliasDefinition).base : undefined;
+    const runtimeAliasBaseModelId = options?.aliasBaseModelId || (liveAliasBase && connectedBaseModels.some(model => model.id === liveAliasBase.id) ? liveAliasBase.id : undefined);
     if (liveModel) {
       const requestedPresetId = options?.reasoningPresetId || selectedPresetId;
       const livePreset = liveModel.reasoningPresets.find((preset) => preset.id === requestedPresetId) || liveModel.reasoningPresets[0];
@@ -1063,6 +1134,15 @@ export default function Home() {
     const text = draft.trim();
     const hasMessage = Boolean(text || draftAttachments.length);
     if(requestModel&&draftAttachments.some(attachment=>!attachmentAllowedForModel(requestModel,attachment))){setError(c.modelAttachmentUnsupported);return;}
+    if (hasMessage && !pendingChoice) {
+      // A model list refresh still in flight may be retrying a server; the send waits for its answer.
+      if (serverCheckInFlight) { setSendHeld(true); return; }
+      if (automaticSwitchKey && automaticSwitchKey !== acknowledgedSwitchKey) {
+        if (switchNoticeKey !== automaticSwitchKey) { setPresetMenuOpen(false); setSwitchNoticeKey(automaticSwitchKey); return; }
+        setAcknowledgedSwitchKey(automaticSwitchKey);
+      }
+      setSwitchNoticeKey("");
+    }
     if (isGenerating) {
       if (!hasMessage || pendingChoice) {
         const id = conversation?.id || pendingConversationIdRef.current;
@@ -1077,6 +1157,8 @@ export default function Home() {
     }
     if (!hasMessage || uploadingImages) return;
     if (!requestModel) { setError(c.noModel); return; }
+    // A reopened chat starts at its last request rather than following the bottom; a new request follows again.
+    revealHoldRef.current?.(); autoFollowThreadRef.current = true; setThreadAutoFollow(true);
     const attachments = draftAttachments;
     const userMessage: StoredMessage = { id: uid("user"), role: "user", content: text, attachments, createdAt: now() }; setDraft(""); setDraftAttachments([]);
     const options: CompletionOptions = { modelId: requestModel.id, aliasBaseModelId: requestModel.isAlias ? selectedAliasBase?.id : undefined, reasoningPresetId: requestPreset?.id, sendReasoning,
@@ -1277,7 +1359,7 @@ export default function Home() {
         </div>
 
         <div className="conversation-stage">
-          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} admin={isAdmin} applyingReasoningDefault={applyingDefault === "reasoning"} applyReasoningToEveryone={() => void applyDefaultToEveryone("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={persistedTool("internetSearch", setInternetSearchEnabled)} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={persistedTool("pageVisit", setPageVisitEnabled)} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={persistedTool("browser", setBrowserEnabled)} hostComputerToolAvailable={hostComputerToolAvailable} hostComputerEnabled={hostComputerEnabled} setHostComputerEnabled={persistedTool("hostComputer", setHostComputerEnabled)} storageAccessEnabled={storageAccessEnabled} setStorageAccessEnabled={persistedTool("storageAccess", setStorageAccessEnabled)} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={persistedTool("currentTime", setCurrentTimeEnabled)} locationEnabled={locationEnabled} setLocationEnabled={persistedTool("location", setLocationEnabled)} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={persistedTool("multipleChoice", setMultipleChoiceEnabled)} artifactEnabled={artifactEnabled} setArtifactEnabled={persistedTool("artifact",setArtifactEnabled)} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} /></div> : <>
+          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} admin={isAdmin} applyingReasoningDefault={applyingDefault === "reasoning"} applyReasoningToEveryone={() => void applyDefaultToEveryone("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={persistedTool("internetSearch", setInternetSearchEnabled)} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={persistedTool("pageVisit", setPageVisitEnabled)} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={persistedTool("browser", setBrowserEnabled)} hostComputerToolAvailable={hostComputerToolAvailable} hostComputerEnabled={hostComputerEnabled} setHostComputerEnabled={persistedTool("hostComputer", setHostComputerEnabled)} storageAccessEnabled={storageAccessEnabled} setStorageAccessEnabled={persistedTool("storageAccess", setStorageAccessEnabled)} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={persistedTool("currentTime", setCurrentTimeEnabled)} locationEnabled={locationEnabled} setLocationEnabled={persistedTool("location", setLocationEnabled)} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={persistedTool("multipleChoice", setMultipleChoiceEnabled)} artifactEnabled={artifactEnabled} setArtifactEnabled={persistedTool("artifact",setArtifactEnabled)} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} /></div> : <>
             <div className="thread-shell">
               <div className={`thread ${activityHidden ? "activity-hidden" : ""}`} ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
                 {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
@@ -1285,7 +1367,7 @@ export default function Home() {
               </div>
               {!threadAutoFollow && <button type="button" className="scroll-resume thread-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeThreadAutoFollow}><ArrowDown size={18} /></button>}
             </div>
-            <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} admin={isAdmin} applyingReasoningDefault={applyingDefault === "reasoning"} applyReasoningToEveryone={() => void applyDefaultToEveryone("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={persistedTool("internetSearch", setInternetSearchEnabled)} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={persistedTool("pageVisit", setPageVisitEnabled)} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={persistedTool("browser", setBrowserEnabled)} hostComputerToolAvailable={hostComputerToolAvailable} hostComputerEnabled={hostComputerEnabled} setHostComputerEnabled={persistedTool("hostComputer", setHostComputerEnabled)} storageAccessEnabled={storageAccessEnabled} setStorageAccessEnabled={persistedTool("storageAccess", setStorageAccessEnabled)} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={persistedTool("currentTime", setCurrentTimeEnabled)} locationEnabled={locationEnabled} setLocationEnabled={persistedTool("location", setLocationEnabled)} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={persistedTool("multipleChoice", setMultipleChoiceEnabled)} artifactEnabled={artifactEnabled} setArtifactEnabled={persistedTool("artifact",setArtifactEnabled)} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} />
+            <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} admin={isAdmin} applyingReasoningDefault={applyingDefault === "reasoning"} applyReasoningToEveryone={() => void applyDefaultToEveryone("reasoning")} sendReasoning={sendReasoning} toggleSendReasoning={toggleSendReasoning} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={persistedTool("internetSearch", setInternetSearchEnabled)} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={persistedTool("pageVisit", setPageVisitEnabled)} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={persistedTool("browser", setBrowserEnabled)} hostComputerToolAvailable={hostComputerToolAvailable} hostComputerEnabled={hostComputerEnabled} setHostComputerEnabled={persistedTool("hostComputer", setHostComputerEnabled)} storageAccessEnabled={storageAccessEnabled} setStorageAccessEnabled={persistedTool("storageAccess", setStorageAccessEnabled)} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={persistedTool("currentTime", setCurrentTimeEnabled)} locationEnabled={locationEnabled} setLocationEnabled={persistedTool("location", setLocationEnabled)} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={persistedTool("multipleChoice", setMultipleChoiceEnabled)} artifactEnabled={artifactEnabled} setArtifactEnabled={persistedTool("artifact",setArtifactEnabled)} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} />
           </>}
         </div>
       </section>
@@ -1452,8 +1534,8 @@ function ContextWindowIndicator({ c, locale, model, models, usage, includeReason
 /** Inline padding plus the gaps between the composer's three cells. */
 const INLINE_COMPOSER_CHROME = 26;
 
-function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextBreakdown: ContextUsage; harnessSettings?: HarnessSettings; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; admin: boolean; applyingReasoningDefault: boolean; applyReasoningToEveryone: () => void; sendReasoning: boolean; toggleSendReasoning: (value: boolean) => void; error: string; clearError: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onOpenStorage: () => void; onRemoveAttachment: (attachment: StoredAttachment) => void; internetSearchEnabled: boolean; setInternetSearchEnabled: (value: boolean) => void; pageVisitEnabled: boolean; setPageVisitEnabled: (value: boolean) => void; browserToolAvailable: boolean; browserEnabled: boolean; setBrowserEnabled: (value: boolean) => void; hostComputerToolAvailable: boolean; hostComputerEnabled: boolean; setHostComputerEnabled: (value: boolean) => void; storageAccessEnabled:boolean;setStorageAccessEnabled:(value:boolean)=>void; currentTimeEnabled: boolean; setCurrentTimeEnabled: (value: boolean) => void; locationEnabled: boolean; setLocationEnabled: (value: boolean) => void; multipleChoiceEnabled: boolean; setMultipleChoiceEnabled: (value: boolean) => void;artifactEnabled:boolean;setArtifactEnabled:(value:boolean)=>void; pendingChoice?: ToolEvent; pendingHostApproval?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean> }) {
-  const { c, appearance, draft, setDraft, sendMessage, keyDown, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextBreakdown, harnessSettings, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, admin, applyingReasoningDefault, applyReasoningToEveryone, sendReasoning, toggleSendReasoning, error, clearError, attachments, maxAttachments, uploadingImages, onFiles, onOpenStorage, onRemoveAttachment, internetSearchEnabled, setInternetSearchEnabled, pageVisitEnabled, setPageVisitEnabled, browserToolAvailable, browserEnabled, setBrowserEnabled, hostComputerToolAvailable, hostComputerEnabled, setHostComputerEnabled, storageAccessEnabled,setStorageAccessEnabled,currentTimeEnabled, setCurrentTimeEnabled, locationEnabled, setLocationEnabled, multipleChoiceEnabled, setMultipleChoiceEnabled,artifactEnabled,setArtifactEnabled, pendingChoice, pendingHostApproval, onChoiceSubmit } = props;
+function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextBreakdown: ContextUsage; harnessSettings?: HarnessSettings; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; admin: boolean; applyingReasoningDefault: boolean; applyReasoningToEveryone: () => void; sendReasoning: boolean; toggleSendReasoning: (value: boolean) => void; error: string; clearError: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onOpenStorage: () => void; onRemoveAttachment: (attachment: StoredAttachment) => void; internetSearchEnabled: boolean; setInternetSearchEnabled: (value: boolean) => void; pageVisitEnabled: boolean; setPageVisitEnabled: (value: boolean) => void; browserToolAvailable: boolean; browserEnabled: boolean; setBrowserEnabled: (value: boolean) => void; hostComputerToolAvailable: boolean; hostComputerEnabled: boolean; setHostComputerEnabled: (value: boolean) => void; storageAccessEnabled:boolean;setStorageAccessEnabled:(value:boolean)=>void; currentTimeEnabled: boolean; setCurrentTimeEnabled: (value: boolean) => void; locationEnabled: boolean; setLocationEnabled: (value: boolean) => void; multipleChoiceEnabled: boolean; setMultipleChoiceEnabled: (value: boolean) => void;artifactEnabled:boolean;setArtifactEnabled:(value:boolean)=>void; pendingChoice?: ToolEvent; pendingHostApproval?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean>; sendHeld: boolean; switchNotice: string }) {
+  const { c, appearance, draft, setDraft, sendMessage, keyDown, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextBreakdown, harnessSettings, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, admin, applyingReasoningDefault, applyReasoningToEveryone, sendReasoning, toggleSendReasoning, error, clearError, attachments, maxAttachments, uploadingImages, onFiles, onOpenStorage, onRemoveAttachment, internetSearchEnabled, setInternetSearchEnabled, pageVisitEnabled, setPageVisitEnabled, browserToolAvailable, browserEnabled, setBrowserEnabled, hostComputerToolAvailable, hostComputerEnabled, setHostComputerEnabled, storageAccessEnabled,setStorageAccessEnabled,currentTimeEnabled, setCurrentTimeEnabled, locationEnabled, setLocationEnabled, multipleChoiceEnabled, setMultipleChoiceEnabled,artifactEnabled,setArtifactEnabled, pendingChoice, pendingHostApproval, onChoiceSubmit, sendHeld, switchNotice } = props;
   const aliasBasePicker = useContext(AliasBaseContext);
   const {connections:mcpConnections,selectedIds:mcpConnectionIds,setSelectedIds:setMcpConnectionIds,selectedTools:mcpToolNames,setSelectedTools:setMcpToolNames}=useContext(McpToolsContext);
   const storagePermissions=useContext(StorageToolsContext);
@@ -1477,8 +1559,17 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
   const trailRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const switchNoticeRef = useRef<HTMLParagraphElement>(null);
+  const presetTriggerRef = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [shellWidth, setShellWidth] = useState(0);
+  // On narrow screens the notice is placed against the whole trail, so its pointer is moved under the reasoning button.
+  useLayoutEffect(() => {
+    const notice = switchNoticeRef.current; const trigger = presetTriggerRef.current;
+    if (!notice || !trigger) return;
+    const box = notice.getBoundingClientRect(); const target = trigger.getBoundingClientRect();
+    notice.style.setProperty("--switch-arrow-right", `${Math.max(12, Math.round(box.right - (target.left + target.right) / 2 - 5))}px`);
+  }, [switchNotice, selectedPreset?.name, shellWidth]);
   const locale: Locale = c === translations.ko ? "ko" : "en";
   const { mounted: addMenuMounted, closing: addMenuClosing } = usePopoverPresence(addMenuOpen);
   const { mounted: presetMounted, closing: presetClosing } = usePopoverPresence(presetOpen);
@@ -1548,7 +1639,8 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
       <div className="composer-trail" ref={trailRef}>
         <ContextWindowIndicator c={c} locale={locale} model={selectedModel} models={models} usage={contextBreakdown} includeReasoning={sendReasoning} harnessSettings={harnessSettings} />
         <div className="preset-switcher">
-          <button type="button" className="preset-trigger" disabled={!selectedModel?.reasoningPresets.length} onClick={() => setPresetOpen(!presetOpen)}><Lightbulb size={16} /><span>{selectedPreset?.name || c.default}</span><ChevronDown size={14} className={presetOpen ? "rotate" : ""} /></button>
+          {switchNotice && <p ref={switchNoticeRef} className="model-switch-notice" role="status">{switchNotice}</p>}
+          <button ref={presetTriggerRef} type="button" className="preset-trigger" disabled={!selectedModel?.reasoningPresets.length} onClick={() => setPresetOpen(!presetOpen)}><Lightbulb size={16} /><span>{selectedPreset?.name || c.default}</span><ChevronDown size={14} className={presetOpen ? "rotate" : ""} /></button>
           {presetMounted && <div className={`popover preset-popover ${aliasBasePicker ? "with-alias-base" : ""} ${presetClosing ? "closing" : ""}`}>
             <p>{c.reasoningPreset}</p>
             {selectedModel?.reasoningPresets.map((preset) => { const note = appearance.showReasoningNotes ? reasoningNote(preset.effort, appearance, locale) : ""; return <button type="button" key={preset.id} onClick={() => { setPreset(preset.id); setPresetOpen(false); }}><span className="selection-dot">{preset.id === selectedPreset?.id && <Check size={12} />}</span><span>{preset.name}<small>{note || (preset.kind === "builtin" ? `${c.native} · ${preset.effort || c.default}` : `${c.template}${preset.effort ? ` · ${preset.effort}` : ""}`)}</small></span></button>; })}
@@ -1558,7 +1650,7 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
             {admin && <button type="button" className="default-choice-action" disabled={!selectedPreset || applyingReasoningDefault} onClick={applyReasoningToEveryone}>{applyingReasoningDefault ? <LoaderCircle className="spin" size={14} /> : <Users size={14} />}{applyingReasoningDefault ? c.applyingToEveryone : c.applyToEveryone}</button>}
           </div>}
         </div>
-        <button className={`send-button ${showStop ? "stopping" : ""}`} type="submit" disabled={!showStop && (uploadingImages || Boolean(pendingInput))} aria-label={showStop ? c.stop : pendingInput ? c.choiceWaiting : isGenerating ? c.addToQueue : c.send}>{showStop ? <Square size={14} fill="currentColor" /> : <ArrowUp size={20} />}</button>
+        <button className={`send-button ${showStop ? "stopping" : ""} ${sendHeld ? "held" : ""}`} type="submit" disabled={!showStop && (uploadingImages || Boolean(pendingInput))} aria-busy={sendHeld || undefined} title={sendHeld ? c.sendHeld : undefined} aria-label={sendHeld ? c.sendHeld : showStop ? c.stop : pendingInput ? c.choiceWaiting : isGenerating ? c.addToQueue : c.send}>{sendHeld ? <LoaderCircle className="spin" size={18} /> : showStop ? <Square size={14} fill="currentColor" /> : <ArrowUp size={20} />}</button>
       </div>
     </form>
     <p className="composer-note">{c.disclaimer}</p>
@@ -1860,7 +1952,7 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
     ? createPortal(<MobileMessageActions c={c} locale={locale} role={message.role} canCopy={Boolean(message.content)} onClose={() => setMobileActionsOpen(false)} onRegenerate={regenerateMessage} onEdit={editMessage} onCopy={() => void copyMessage()} onDelete={message.role === "user" ? () => { setMobileActionsOpen(false); onDeleteUser(message.id); } : undefined} />, document.body)
     : null;
 
-  if (message.role === "user") return <div className="message-row user-message"><div className="user-message-actions"><div className="user-message-toolbar"><button title={c.regenerateRequest} aria-label={c.regenerateRequest} onClick={() => onRegenerateUser(message.id)}><RefreshCw size={13} /></button>{message.content && <button title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={13} /></button>}<button title={c.editBranch} aria-label={c.editBranch} onClick={() => setEditing(true)}><Pencil size={13} /></button><button className="delete" title={c.deleteMessage} aria-label={c.deleteMessage} onClick={() => onDeleteUser(message.id)}><Trash2 size={13} /></button></div><div className="user-message-stack long-press-target" {...longPress}><div className="user-message-content">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}{message.content && <div className="message-bubble">{message.content}</div>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /></div></div>{editing && <TextDialog ko={locale === "ko"} title={c.editMessage} value={message.content} multiline saveLabel={c.forkSend} saveIcon={<GitBranch size={14} />} cancelLabel={c.cancel} preface={message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null} onClose={() => setEditing(false)} onSave={(value) => { if (value !== message.content) onFork(message.id, value); setEditing(false); }} />}{actions}</div>;
+  if (message.role === "user") return <div className="message-row user-message" data-message-id={message.id}><div className="user-message-actions"><div className="user-message-toolbar"><button title={c.regenerateRequest} aria-label={c.regenerateRequest} onClick={() => onRegenerateUser(message.id)}><RefreshCw size={13} /></button>{message.content && <button title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={13} /></button>}<button title={c.editBranch} aria-label={c.editBranch} onClick={() => setEditing(true)}><Pencil size={13} /></button><button className="delete" title={c.deleteMessage} aria-label={c.deleteMessage} onClick={() => onDeleteUser(message.id)}><Trash2 size={13} /></button></div><div className="user-message-stack long-press-target" {...longPress}><div className="user-message-content">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}{message.content && <div className="message-bubble">{message.content}</div>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /></div></div>{editing && <TextDialog ko={locale === "ko"} title={c.editMessage} value={message.content} multiline saveLabel={c.forkSend} saveIcon={<GitBranch size={14} />} cancelLabel={c.cancel} preface={message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null} onClose={() => setEditing(false)} onSave={(value) => { if (value !== message.content) onFork(message.id, value); setEditing(false); }} />}{actions}</div>;
   const steps = transcriptSteps(message);
   const liveContentIndex = lastContentStep(steps);
   const wholeReasoning = reasoningStepIsWhole(message);

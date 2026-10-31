@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aliasBaseModel, aliasWithBaseModel } from "./alias-base-model.ts";
+import { aliasBaseModel, aliasFallbackBase, aliasWithBaseModel } from "./alias-base-model.ts";
 import type { ModelConfig } from "./types.ts";
 
 const served = (id: string, effort: string, connectionId: string): ModelConfig => ({
@@ -28,4 +28,15 @@ test("a runtime alias follows the selected base connection and native reasoning 
   assert.deepEqual(runtime.reasoningPresets.map(preset => preset.id).sort(), ["custom", "high"]);
   assert.equal(runtime.reasoningPresets.find(preset => preset.id === "custom")?.systemPrompt, "Careful");
   assert.equal(alias.sourceModel, first.sourceModel, "the saved recommendation remains unchanged");
+});
+
+test("an alias whose preferred base is unavailable runs on the next available base in order", () => {
+  const third = served("third", "low", "server-c");
+  const ordered = [first, second, third];
+  assert.equal(aliasFallbackBase(first, ordered, ordered), first);
+  assert.equal(aliasFallbackBase(first, ordered, [third]), third);
+  assert.equal(aliasFallbackBase(first, ordered, [second, third]), second);
+  assert.equal(aliasFallbackBase(third, ordered, [first, second]), first, "the order wraps around");
+  assert.equal(aliasFallbackBase(undefined, ordered, [second]), second);
+  assert.equal(aliasFallbackBase(first, ordered, []), undefined);
 });

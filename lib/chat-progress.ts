@@ -1,3 +1,4 @@
+import { isConnectFailure, TRANSPORT_RETRY_DELAYS_MS } from "./transport-retry.ts";
 import type { ChatWaitPhase, Locale } from "./types.ts";
 
 /** Only call the server unresponsive after a real response timeout window, not a short token gap. */
@@ -53,19 +54,17 @@ export async function withSlowProgress<T>(operation: () => Promise<T>, onSlow: (
   try { return await operation(); } finally { stopTimer(); stopTimerOn?.removeEventListener("abort", stopTimer); }
 }
 
-/** Retry only connection refusal / DNS failure, where no inference was dispatched. */
-export async function progressFetch(url: string, init: RequestInit, onPhase: (phase: ChatWaitPhase) => void, phase: ChatWaitPhase, request: typeof fetch = fetch, serverResponseTimeoutMs = SERVER_RESPONSE_TIMEOUT_MS, stopTimerOn?: AbortSignal): Promise<Response> {
+/** Retry only failures where the request never reached the server, on the shared seven-attempt schedule. */
+export async function progressFetch(url: string, init: RequestInit, onPhase: (phase: ChatWaitPhase) => void, phase: ChatWaitPhase, request: typeof fetch = fetch, serverResponseTimeoutMs = SERVER_RESPONSE_TIMEOUT_MS, stopTimerOn?: AbortSignal, retryDelaysMs = TRANSPORT_RETRY_DELAYS_MS): Promise<Response> {
   const signal = init.signal || AbortSignal.timeout(300_000);
-  const started = Date.now();
-  for (;;) {
+  for (let attempt = 0; ; attempt += 1) {
     signal.throwIfAborted(); onPhase(phase);
     try {
       const response = await withSlowProgress(() => request(url, { ...init, signal }), () => onPhase("waiting-server"), serverResponseTimeoutMs, stopTimerOn);
       onPhase(phase); return response;
     } catch (error) {
-      const code = (error as { cause?: { code?: string } })?.cause?.code;
-      if (signal.aborted || !["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"].includes(code || "") || Date.now() - started >= 30_000) throw error;
-      await delayWithSignal(1_000, signal);
+      if (signal.aborted || !isConnectFailure(error) || attempt >= retryDelaysMs.length) throw error;
+      await delayWithSignal(retryDelaysMs[attempt], signal);
     }
   }
 }

@@ -16,6 +16,16 @@ test('ambiguous inference failures are not automatically replayed', async () => 
   await assert.rejects(progressFetch('http://host', { method: 'POST' }, () => {}, 'preparing-response', request));
   assert.equal(requests, 1);
 });
+test('a refused connection is retried for seven attempts in all, then reported', async () => {
+  let requests = 0;
+  const request: typeof fetch = async () => { requests++; throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } }); };
+  await assert.rejects(progressFetch('http://host', { method: 'POST' }, () => {}, 'preparing-response', request, undefined, undefined, [0, 0, 0, 0, 0, 0]));
+  assert.equal(requests, 7);
+  requests = 0;
+  const recovers: typeof fetch = async () => { if (++requests < 3) throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } }); return new Response('ok'); };
+  assert.equal((await progressFetch('http://host', {}, () => {}, 'preparing-response', recovers, undefined, undefined, [0, 0, 0, 0, 0, 0])).status, 200);
+  assert.equal(requests, 3);
+});
 test('a server response timeout shows the wait message and can be cancelled', async () => {
   const controller = new AbortController(); const phases: string[] = [];
   const request: typeof fetch = async (_url, init) => new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true }));

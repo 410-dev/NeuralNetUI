@@ -410,6 +410,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .preset-trigger > svg:first-child { color: var(--text); }
 .preset-popover { bottom: 40px; right: 0; width: 260px; max-height: min(58dvh, 420px); overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
 .preset-popover.with-alias-base { width: min(360px, calc(100vw - 28px)); }
+.model-switch-notice { position: absolute; z-index: 36; right: 0; bottom: 42px; width: max-content; max-width: min(300px, calc(100vw - 48px)); margin: 0; padding: 9px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: #e2e4e8; background: #17171b; box-shadow: var(--shadow); font-size: 12px; line-height: 1.45; animation: switch-notice-in .16s ease-out both; }
+.model-switch-notice::after { content: ""; position: absolute; right: var(--switch-arrow-right, 22px); bottom: -6px; width: 10px; height: 10px; border-right: 1px solid var(--border-strong); border-bottom: 1px solid var(--border-strong); background: #17171b; transform: rotate(45deg); }
+@keyframes switch-notice-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.send-button.held { cursor: progress; }
 @media (max-width: 560px) {
   .composer-trail { position: relative; }
   .composer-trail .preset-switcher { position: static; }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { connectionProbe, connectionStates, probeConnection } from "./connection-status.ts";
+import { connectionProbe, connectionStates, probeConnection, probeWithRetry } from "./connection-status.ts";
 
 const probe = { driver: "openai" as const, baseUrl: "http://model.test/v1", headers: {} };
 
@@ -35,7 +35,22 @@ test("disabled servers are reported without a probe and others as online, error 
     { ...base, id: "state-down", baseUrl: "http://down.test/v1" },
     { ...base, id: "state-bad", baseUrl: "http://bad.test/v1" },
     { ...base, id: "state-off", baseUrl: "http://off.test/v1", disabled: true },
-  ], "", fetcher);
+  ], "", fetcher, []);
   assert.deepEqual(states, { "state-up": "online", "state-down": "offline", "state-bad": "error", "state-off": "disabled" });
   assert.equal(urls.some(url => url.includes("off.test")), false);
+});
+
+test("a refused listing is retried up to seven attempts before the server counts as offline", async () => {
+  let attempts = 0;
+  const refused = (async () => { attempts++; throw new TypeError("fetch failed"); }) as typeof fetch;
+  assert.equal(await probeWithRetry(probe, refused, [0, 0, 0, 0, 0, 0]), "offline");
+  assert.equal(attempts, 7);
+  attempts = 0;
+  const recovers = (async () => { if (++attempts < 4) throw new TypeError("fetch failed"); return new Response('{"data":[]}'); }) as typeof fetch;
+  assert.equal(await probeWithRetry(probe, recovers, [0, 0, 0, 0, 0, 0]), "online");
+  assert.equal(attempts, 4);
+  attempts = 0;
+  const timesOut = (async () => { attempts++; throw new DOMException("timed out", "TimeoutError"); }) as typeof fetch;
+  assert.equal(await probeWithRetry(probe, timesOut, [0, 0, 0, 0, 0, 0]), "offline");
+  assert.equal(attempts, 1);
 });
