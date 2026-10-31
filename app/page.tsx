@@ -559,6 +559,24 @@ export default function Home() {
     };
   }, []);
 
+  // The on-screen keyboard shrinks the app to the visible viewport. A reader at the end of the thread keeps the end
+  // in view above the keyboard instead of having it covered, for as long as the shrinking lasts.
+  const hasThread = messages.length > 0;
+  useEffect(() => {
+    const element = threadRef.current;
+    if (!element) return;
+    let lastHeight = element.clientHeight;
+    // Judged from the height before the shrink: a resized page can deliver a scroll event first, after which the
+    // reader no longer looks like they were at the end.
+    const observer = new ResizeObserver(() => {
+      const height = element.clientHeight;
+      if (height < lastHeight && isNearScrollBottom({ scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: lastHeight })) element.scrollTop = element.scrollHeight;
+      lastHeight = height;
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hasThread]);
+
   useLayoutEffect(() => {
     const element = threadRef.current;
     if (!revealLastRequestRef.current || !element) return;
