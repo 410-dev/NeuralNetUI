@@ -35,7 +35,8 @@ export function normalizeReasoning(model: ModelConfig): ModelConfig {
   }
   const options = [...new Set(model.reasoningEfforts || [])].filter(v => supportedOptions.has(v));
   const hasEffort = options.some(v => !isReasoningToggle(v));
-  const choices = (model.reasoningSupported ? options : []).filter(v => !(hasEffort && v === "on") && !(v === "none" && options.includes("off")));
+  // Forced values are guesses, not levels to offer: the model's templates are its only choices.
+  const choices = (model.reasoningSupported && !model.reasoningForceApi ? options : []).filter(v => !(hasEffort && v === "on") && !(v === "none" && options.includes("off")));
   choices.sort((a, b) => Number(b === "off" || b === "none") - Number(a === "off" || a === "none"));
   const custom = model.reasoningPresets.filter(p => p.kind === "custom");
   const usedIds = new Set(custom.map(p => p.id));
@@ -50,5 +51,10 @@ export function normalizeReasoning(model: ModelConfig): ModelConfig {
 }
 
 export function inheritReasoning(alias: ModelConfig, base?: ModelConfig): ModelConfig {
-  return normalizeReasoning({ ...alias, reasoningSupported: base?.reasoningSupported ?? false, reasoningEfforts: base?.reasoningEfforts || [] });
+  return normalizeReasoning({ ...alias, reasoningSupported: base?.reasoningSupported ?? false, reasoningEfforts: base?.reasoningEfforts || [], reasoningForceApi: base?.reasoningForceApi });
+}
+
+/** The presets a chat offers. In forced API mode the placeholder Default gives way to any template the viewer has. */
+export function offeredPresets(model: ModelConfig, presets = model.reasoningPresets) {
+  return model.reasoningForceApi && presets.some(p => p.kind === "custom") ? presets.filter(p => p.kind === "custom") : presets;
 }

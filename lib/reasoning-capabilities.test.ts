@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { inferReasoning, normalizeReasoning, inheritReasoning, FORCED_REASONING_EFFORTS } from "./reasoning-capabilities.ts";
+import { inferReasoning, normalizeReasoning, inheritReasoning, offeredPresets, FORCED_REASONING_EFFORTS } from "./reasoning-capabilities.ts";
 import { reasoningEffort } from "./model-edits.ts";
 import type { ModelConfig } from "./types.ts";
 
@@ -40,8 +40,8 @@ test("forced API mode sends fallback values for models that advertise none, and 
   const forced = normalizeReasoning({ ...model([]), reasoningSupported: false, reasoningForceApi: true });
   assert.equal(forced.reasoningSupported, true);
   assert.deepEqual(forced.reasoningEfforts, FORCED_REASONING_EFFORTS);
-  assert.equal(reasoningEffort(forced, forced.reasoningPresets.find(p => p.effort === "high")), "high");
-  assert.equal(reasoningEffort(forced, forced.reasoningPresets.find(p => p.effort === "off")), "none");
+  assert.deepEqual(forced.reasoningPresets.map(p => p.name), ["Default"]);
+  assert.equal(reasoningEffort(forced, { id: "t", name: "Deep", kind: "custom", effort: "high" }), "high");
   const advertised = normalizeReasoning({ ...model(["off", "on"]), reasoningForceApi: true });
   assert.equal(advertised.reasoningForceApi, undefined);
   assert.deepEqual(advertised.reasoningEfforts, ["off", "on"]);
@@ -54,4 +54,14 @@ test("template presets send their typed API value verbatim; built-ins still need
   assert.equal(reasoningEffort(base, custom("  ")), undefined);
   assert.equal(reasoningEffort({ ...base, reasoningSupported: false }, custom("high")), undefined);
   assert.equal(reasoningEffort(base, { id: "b", name: "Ultra", kind: "builtin", effort: "ultra" }), undefined);
+});
+test("forced API mode offers only the model's templates, and aliases follow the forced base", () => {
+  const template = { id: "t", name: "Deep", kind: "custom" as const, effort: "high" };
+  const forced = normalizeReasoning({ ...model([]), reasoningSupported: false, reasoningForceApi: true, reasoningPresets: [template] });
+  assert.deepEqual(forced.reasoningPresets.map(p => p.name).sort(), ["Deep", "Default"]);
+  assert.deepEqual(offeredPresets(forced).map(p => p.name), ["Deep"]);
+  assert.deepEqual(offeredPresets(normalizeReasoning({ ...model([]), reasoningSupported: false, reasoningForceApi: true })).map(p => p.name), ["Default"]);
+  const alias = inheritReasoning({ ...model([]), id: "alias", isAlias: true, reasoningPresets: [template] }, forced);
+  assert.deepEqual(offeredPresets(alias).map(p => p.name), ["Deep"]);
+  assert.equal(reasoningEffort(alias, template), "high");
 });
