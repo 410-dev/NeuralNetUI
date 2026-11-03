@@ -545,6 +545,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .kind-icon { width: 27px; height: 27px; display: grid; place-items: center; color: var(--muted); background: transparent; }
 .preset-editor-body { border-top: 1px solid var(--border); padding: 12px 14px 14px; display: grid; grid-template-columns: 170px minmax(0,1fr); gap: 13px; }
 .preset-editor-body select { height: 35px; }.preset-editor-body textarea { min-height: 62px; padding: 8px 10px; resize: vertical; line-height: 1.45; }
+.preset-editor-body input { height: 35px; }.preset-editor-body label > small { display: block; margin: 6px 0 0 2px; color: var(--dim); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; }
 .preset-editor-body label:only-child { grid-column: 1/-1; }
 .empty-state { min-height: 120px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); display: grid; place-items: center; align-content: center; gap: 7px; color: var(--dim); }.empty-state p { margin: 0; font-size: 11px; }
 

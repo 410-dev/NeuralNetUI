@@ -7,7 +7,7 @@
 | 종류 | 동작 |
 | --- | --- |
 | **Built-in** | 선택한 값을 OpenAI 호환 요청의 `reasoning_effort`로 전달합니다 |
-| **Custom template** | 선택한 내장 effort를 전달한 뒤, 템플릿 내용을 모델/alias 시스템 프롬프트와 조합합니다 |
+| **Custom template** | 템플릿 이름이 레이블이고, 직접 입력한 **API로 전송할 값**을 그대로 `reasoning_effort`로 전달한 뒤(비우면 생략), 템플릿 내용을 모델/alias 시스템 프롬프트와 조합합니다 |
 
 커스텀 템플릿의 시스템 프롬프트는 세 가지 방식으로 모델 프롬프트와 합쳐집니다.
 
@@ -39,7 +39,7 @@
 | `on` | Thinking (강도 단계 없음) |
 | 지원 정보 없음 | Default |
 
-Chat Completions 경로에서는 `off`/`on`이 각각 `none`/`medium`으로 매핑되고, 지원하지 않는 프리셋 값은 요청에서 생략됩니다.
+Chat Completions 경로에서는 내장 프리셋의 `off`/`on`이 각각 `none`/`medium`으로 매핑되고, 지원하지 않는 내장 값은 요청에서 생략됩니다. 커스텀 템플릿의 값은 매핑 없이 입력한 그대로 전송됩니다(추론 전달 방식이 API일 때만).
 
 Qwen3.8의 화면상 **Extra High**는 실제 서버가 허용하는 API 값인 `xhigh`로 전송됩니다.
 

@@ -10,9 +10,18 @@ export function mergeModelPresets(existing: ModelConfig, candidate: ModelConfig 
   return { ...(admin ? candidate : existing), reasoningPresets: applyPreferredOrder([...editable, ...protectedPresets], (admin ? candidate : existing).reasoningPresets.map(p => p.id)) };
 }
 
+/** The value a preset sends as-is. A template's typed value is trusted verbatim; a built-in must be advertised. */
+export function presetEffortValue(model: ModelConfig, preset?: ReasoningPreset) {
+  const effort = preset?.effort?.trim();
+  if (!model.reasoningSupported || !effort) return undefined;
+  if (preset!.kind === "custom") return effort;
+  return model.reasoningEfforts?.includes(effort) ? effort : undefined;
+}
+
 export function reasoningEffort(model: ModelConfig, preset?: ReasoningPreset) {
-  if (!model.reasoningSupported || !preset?.effort) return undefined;
-  if (!model.reasoningEfforts?.includes(preset.effort)) return undefined;
+  const effort = presetEffortValue(model, preset);
+  if (!effort) return undefined;
+  if (preset!.kind === "custom") return effort;
   // LM Studio advertises off/on natively; Chat Completions accepts OpenAI values.
-  return preset.effort === "off" ? "none" : preset.effort === "on" ? "medium" : preset.effort;
+  return effort === "off" ? "none" : effort === "on" ? "medium" : effort;
 }

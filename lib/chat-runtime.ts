@@ -6,7 +6,7 @@ import { harnessCompletion, prepareContext, compactForResume, compactToolContext
 import { effectiveContextWindowTokens } from "./model-context";
 import { db } from "./database";
 import { registerChatDisposal } from "./chat-disposal";
-import { reasoningEffort } from "./model-edits";
+import { presetEffortValue, reasoningEffort } from "./model-edits";
 import { restoreToolHistory, settlePendingTools } from "./conversation-messages";
 import { describeMcpApproval } from "./mcp-approval";
 import { readSsePayload } from "./stream-protocol";
@@ -721,7 +721,7 @@ async function run(job: ChatJob) {
       try {
         const configuredThreshold = contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined;
         const streamThreshold = configuredThreshold && projectedInput >= configuredThreshold && contextWindow ? Math.floor(contextWindow * .95) : configuredThreshold;
-        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: model.reasoningSupported && model.reasoningEfforts?.includes(preset?.effort || "") ? preset?.effort : undefined } : undefined, progressEnabled, harness.contextMode === "compacting" ? streamThreshold : undefined, projectedInput, chargeModelId, connection.driver === "nnui" ? { eventsUrl: nnuiEventsEndpoint(connection.baseUrl), sessionId, model: model.sourceModel } : undefined, connection.driver === "lmstudio");
+        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: presetEffortValue(model, preset) } : undefined, progressEnabled, harness.contextMode === "compacting" ? streamThreshold : undefined, projectedInput, chargeModelId, connection.driver === "nnui" ? { eventsUrl: nnuiEventsEndpoint(connection.baseUrl), sessionId, model: model.sourceModel } : undefined, connection.driver === "lmstudio");
       } catch (error) {
         const overflow = contextOverflowDetails(error);
         if (!overflow) throw error;

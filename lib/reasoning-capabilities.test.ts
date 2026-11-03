@@ -24,15 +24,16 @@ test("aliases follow base capabilities and preserve custom prompt content and ow
   const inherited = inheritReasoning(alias, { ...model(["off", "on"]), visionImageMode:"original" as const, visionMaxEdgePixels:2048 });
   assert.deepEqual(inherited.reasoningEfforts, ["off", "on"]);
   assert.deepEqual(inherited.reasoningPresets.find(p => p.id === "custom"), custom);
-  assert.equal(reasoningEffort(inherited, custom), undefined);
+  assert.equal(reasoningEffort(inherited, custom), "high");
+  assert.equal(reasoningEffort(inheritReasoning(alias, undefined), custom), undefined);
   assert.equal(reasoningEffort(inherited, inherited.reasoningPresets.find(p => p.effort === "off")), "none");
   assert.deepEqual({mode:inherited.visionImageMode,pixels:inherited.visionMaxEdgePixels},{mode:"max-resolution",pixels:640});
   assert.equal(inheritReasoning(alias, undefined).reasoningSupported, false);
 });
-test("unsupported models have Default and never send unadvertised effort", () => {
+test("unsupported models have Default and send nothing in system prompt mode", () => {
   const unsupported = normalizeReasoning({ ...model([]), reasoningSupported: false });
   assert.equal(unsupported.reasoningPresets[0].name, "Default");
-  assert.equal(reasoningEffort(model([]), { id: "high", name: "High", kind: "custom", effort: "high" }), undefined);
+  assert.equal(reasoningEffort(unsupported, { id: "high", name: "High", kind: "custom", effort: "high" }), undefined);
   assert.deepEqual(normalizeReasoning(model(["on"])).reasoningPresets.map(p => p.name), ["Thinking"]);
 });
 test("forced API mode sends fallback values for models that advertise none, and yields to real metadata", () => {
@@ -44,4 +45,13 @@ test("forced API mode sends fallback values for models that advertise none, and 
   const advertised = normalizeReasoning({ ...model(["off", "on"]), reasoningForceApi: true });
   assert.equal(advertised.reasoningForceApi, undefined);
   assert.deepEqual(advertised.reasoningEfforts, ["off", "on"]);
+});
+test("template presets send their typed API value verbatim; built-ins still need advertised values", () => {
+  const base = normalizeReasoning(model(["low", "high"]));
+  const custom = (effort?: string) => ({ id: "t", name: "Deep", kind: "custom" as const, ...(effort === undefined ? {} : { effort }) });
+  assert.equal(reasoningEffort(base, custom(" ultra ")), "ultra");
+  assert.equal(reasoningEffort(base, custom("off")), "off");
+  assert.equal(reasoningEffort(base, custom("  ")), undefined);
+  assert.equal(reasoningEffort({ ...base, reasoningSupported: false }, custom("high")), undefined);
+  assert.equal(reasoningEffort(base, { id: "b", name: "Ultra", kind: "builtin", effort: "ultra" }), undefined);
 });

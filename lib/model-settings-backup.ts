@@ -34,7 +34,7 @@ function readPreset(value: unknown): ReasoningPreset | undefined {
   const id = text(raw.id, 500), kind = raw.kind === "builtin" || raw.kind === "custom" ? raw.kind : undefined;
   if (!id || !kind) return;
   const mode = raw.systemPromptMode === "replace" || raw.systemPromptMode === "prepend" || raw.systemPromptMode === "append" ? raw.systemPromptMode : "append";
-  return { id, name: text(raw.name, 500)?.trim() || id, kind, ...(text(raw.effort, 40) !== undefined ? { effort: text(raw.effort, 40) } : {}), ...(text(raw.systemPrompt) !== undefined ? { systemPrompt: text(raw.systemPrompt) } : {}), systemPromptMode: mode };
+  return { id, name: text(raw.name, 500)?.trim() || id, kind, ...(text(raw.effort, 100) !== undefined ? { effort: text(raw.effort, 100) } : {}), ...(text(raw.systemPrompt) !== undefined ? { systemPrompt: text(raw.systemPrompt) } : {}), systemPromptMode: mode };
 }
 
 /** Reads each model on its own and keeps only fields this version understands, so older or newer images still restore what they can. */
