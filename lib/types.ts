@@ -57,6 +57,8 @@ export interface ModelConfig {
   reasoningSupported: boolean;
   reasoningEfforts?: string[];
   reasoningPresets: ReasoningPreset[];
+  /** Administrator choice: reasoning values are sent through the API although the server advertises none. `reasoningEfforts` then holds the forced fallback list. */
+  reasoningForceApi?: boolean;
   /** User-configured limit. Kept separately so API discovery never overwrites it. */
   contextWindowTokens?: number;
   /** Context limit advertised by the OpenAI-compatible model API. */

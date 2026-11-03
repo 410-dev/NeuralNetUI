@@ -23,8 +23,16 @@ export function inferReasoning(record: Record<string, unknown>, id: string, driv
   return { reasoningSupported: options.length > 0, reasoningEfforts: [...new Set(options)] };
 }
 
+/** Values tried through the API when a model is forced into API mode without advertised options. */
+export const FORCED_REASONING_EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
 /** Preserve custom templates and the user's ordering while rebuilding valid built-ins. */
 export function normalizeReasoning(model: ModelConfig): ModelConfig {
+  // Forced API mode stands in for missing metadata; it is dropped once the server advertises options.
+  if (model.reasoningForceApi) {
+    const advertised = model.reasoningEfforts?.length && model.reasoningEfforts.join() !== FORCED_REASONING_EFFORTS.join();
+    model = advertised ? { ...model, reasoningForceApi: undefined } : { ...model, reasoningSupported: true, reasoningEfforts: FORCED_REASONING_EFFORTS };
+  }
   const options = [...new Set(model.reasoningEfforts || [])].filter(v => supportedOptions.has(v));
   const hasEffort = options.some(v => !isReasoningToggle(v));
   const choices = (model.reasoningSupported ? options : []).filter(v => !(hasEffort && v === "on") && !(v === "none" && options.includes("off")));

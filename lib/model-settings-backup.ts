@@ -67,6 +67,7 @@ export function readModelSettingsLeniently(value: unknown): { models: Portable[]
       ...(typeof item.isPublic === "boolean" ? { isPublic: item.isPublic } : {}),
       ...(typeof item.rememberReasoning === "boolean" ? { rememberReasoning: item.rememberReasoning } : {}),
       ...(typeof item.systemPromptEditable === "boolean" ? { systemPromptEditable: item.systemPromptEditable } : {}),
+      ...(typeof item.reasoningForceApi === "boolean" ? { reasoningForceApi: item.reasoningForceApi } : {}),
     });
   }
   const defaults = raw.defaults && typeof raw.defaults === "object" ? raw.defaults as Record<string, unknown> : {};
@@ -141,6 +142,7 @@ export function applyModelSettingsImage(models: ModelConfig[], image: unknown, t
         contextWindowTokens: model.contextWindowTokens, visionImageMode: model.visionImageMode ?? current.visionImageMode, visionMaxEdgePixels: model.visionMaxEdgePixels ?? current.visionMaxEdgePixels,
         imageGeneration: model.imageGeneration ?? current.imageGeneration, imageInput: model.imageInput ?? current.imageInput,
         rememberReasoning: model.rememberReasoning ?? current.rememberReasoning, systemPromptEditable: model.systemPromptEditable ?? current.systemPromptEditable,
+        reasoningForceApi: model.reasoningForceApi ?? current.reasoningForceApi,
         reasoningPresets: merged.presets,
       };
       if (!current.isAlias) report.servedModels++;

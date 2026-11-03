@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { inferReasoning, normalizeReasoning, inheritReasoning } from "./reasoning-capabilities.ts";
+import { inferReasoning, normalizeReasoning, inheritReasoning, FORCED_REASONING_EFFORTS } from "./reasoning-capabilities.ts";
 import { reasoningEffort } from "./model-edits.ts";
 import type { ModelConfig } from "./types.ts";
 
@@ -34,4 +34,14 @@ test("unsupported models have Default and never send unadvertised effort", () =>
   assert.equal(unsupported.reasoningPresets[0].name, "Default");
   assert.equal(reasoningEffort(model([]), { id: "high", name: "High", kind: "custom", effort: "high" }), undefined);
   assert.deepEqual(normalizeReasoning(model(["on"])).reasoningPresets.map(p => p.name), ["Thinking"]);
+});
+test("forced API mode sends fallback values for models that advertise none, and yields to real metadata", () => {
+  const forced = normalizeReasoning({ ...model([]), reasoningSupported: false, reasoningForceApi: true });
+  assert.equal(forced.reasoningSupported, true);
+  assert.deepEqual(forced.reasoningEfforts, FORCED_REASONING_EFFORTS);
+  assert.equal(reasoningEffort(forced, forced.reasoningPresets.find(p => p.effort === "high")), "high");
+  assert.equal(reasoningEffort(forced, forced.reasoningPresets.find(p => p.effort === "off")), "none");
+  const advertised = normalizeReasoning({ ...model(["off", "on"]), reasoningForceApi: true });
+  assert.equal(advertised.reasoningForceApi, undefined);
+  assert.deepEqual(advertised.reasoningEfforts, ["off", "on"]);
 });

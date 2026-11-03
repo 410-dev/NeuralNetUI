@@ -531,6 +531,12 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .danger-action { display: flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 15px; border-radius: var(--radius-pill); background: var(--danger-soft); color: var(--danger); font-size: 11px; }
 .danger-action:hover { background: var(--danger-soft); }
 .reason-capability { margin-bottom: 13px; }
+.reason-mode-switch { flex: none; display: flex; padding: 3px; gap: 3px; border: 1px solid var(--border); border-radius: var(--radius-md); background: rgba(255,255,255,.03); }
+.reason-mode-switch > button { padding: 6px 11px; border-radius: var(--radius-sm); color: var(--muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.reason-mode-switch > button:hover:not(:disabled) { color: var(--text); }
+.reason-mode-switch > button.active { color: var(--text); background: var(--accent-soft); box-shadow: inset 0 0 0 1px rgb(var(--accent-bright-rgb) / .32); }
+.reason-mode-switch > button:disabled { cursor: default; opacity: .6; }
+.reason-mode-switch > button.active:disabled { opacity: 1; }
 .toggle { width: 39px; height: 22px; flex: 0 0 auto; border-radius: var(--radius-pill); background: #3c3c43; padding: 3px; transition: background .18s; }.toggle span { display: block; width: 16px; height: 16px; border-radius: 50%; background: #c9cbd1; transition: transform .18s; }.toggle.on { background: var(--accent); }.toggle.on span { transform: translateX(17px); background: white; }
 .preset-list { display: flex; flex-direction: column; gap: 10px; }
 .preset-editor { border-radius: var(--radius-md); border: 1px solid var(--border); background: rgba(255,255,255,.018); overflow: hidden; }

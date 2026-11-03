@@ -30,6 +30,7 @@ const modelSchema = z.object({
   isPublic: z.boolean().optional(),
   rememberReasoning: z.boolean().optional(),
   systemPromptEditable: z.boolean().optional(),
+  reasoningForceApi: z.boolean().optional(),
 }).strict();
 
 const exportSchema = z.object({
