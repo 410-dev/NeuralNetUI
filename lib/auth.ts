@@ -236,7 +236,7 @@ export function removeOwnedConfigEntries(userId: string) {
   const stored = db.prepare("SELECT value FROM app_config WHERE id = 1").get() as { value: string } | undefined;
   if (stored) {
     try {
-      type StoredModel = { isAlias?: boolean; ownerId?: string; reasoningPresets?: Array<{ ownerId?: string }> };
+      type StoredModel = { isAlias?: boolean; ownerId?: string; reasoningPresets?: Array<{ ownerId?: string; global?: boolean }> };
       const config = JSON.parse(stored.value) as {
         models?: StoredModel[];
         connections?: Array<{ models?: StoredModel[] }>;
