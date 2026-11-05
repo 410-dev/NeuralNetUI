@@ -26,7 +26,16 @@ export function inferReasoning(record: Record<string, unknown>, id: string, driv
 /** Values tried through the API when a model is forced into API mode without advertised options. */
 export const FORCED_REASONING_EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-/** Preserve custom templates and the user's ordering while rebuilding valid built-ins. */
+/** Whether an account sees a template: its own, a global one, or one with no owner. */
+export function presetVisibleTo(preset: ReasoningPreset, userId: string) {
+  return preset.kind === "builtin" || preset.global === true || !preset.ownerId || preset.ownerId === userId;
+}
+
+/**
+ * Keeps the advertised options and the templates in their saved order. Reasoning levels are never
+ * generated from the server's metadata: a model offers only the templates an administrator (or the
+ * owner of a custom model) wrote, and without one it runs at its own default.
+ */
 export function normalizeReasoning(model: ModelConfig): ModelConfig {
   // Forced API mode stands in for missing metadata; it is dropped once the server advertises options.
   if (model.reasoningForceApi) {
@@ -34,27 +43,15 @@ export function normalizeReasoning(model: ModelConfig): ModelConfig {
     model = advertised ? { ...model, reasoningForceApi: undefined } : { ...model, reasoningSupported: true, reasoningEfforts: FORCED_REASONING_EFFORTS };
   }
   const options = [...new Set(model.reasoningEfforts || [])].filter(v => supportedOptions.has(v));
-  const hasEffort = options.some(v => !isReasoningToggle(v));
-  // Forced values are guesses, not levels to offer: the model's templates are its only choices.
-  const choices = (model.reasoningSupported && !model.reasoningForceApi ? options : []).filter(v => !(hasEffort && v === "on") && !(v === "none" && options.includes("off")));
-  choices.sort((a, b) => Number(b === "off" || b === "none") - Number(a === "off" || a === "none"));
-  const custom = model.reasoningPresets.filter(p => p.kind === "custom");
-  const usedIds = new Set(custom.map(p => p.id));
-  const builtin: ReasoningPreset[] = (choices.length ? choices : [""]).map(effort => {
-    const previous = model.reasoningPresets.find(p => p.kind === "builtin" && (p.effort || "") === effort);
-    let id = previous?.id || effort || "default";
-    while (usedIds.has(id)) id = `builtin-${id}`;
-    usedIds.add(id);
-    return { id, name: effort ? reasoningOptionName(effort) : "Default", kind: "builtin", ...(effort ? { effort } : {}) };
-  });
-  return { ...model, reasoningEfforts: options, reasoningPresets: applyPreferredOrder([...builtin, ...custom], model.reasoningPresets.map(p => p.id)) };
+  const templates = model.reasoningPresets.filter(p => p.kind === "custom");
+  return { ...model, reasoningEfforts: options, reasoningPresets: applyPreferredOrder(templates, model.reasoningPresets.map(p => p.id)) };
 }
 
 export function inheritReasoning(alias: ModelConfig, base?: ModelConfig): ModelConfig {
   return normalizeReasoning({ ...alias, reasoningSupported: base?.reasoningSupported ?? false, reasoningEfforts: base?.reasoningEfforts || [], reasoningForceApi: base?.reasoningForceApi });
 }
 
-/** The presets a chat offers. In forced API mode the placeholder Default gives way to any template the viewer has. */
-export function offeredPresets(model: ModelConfig, presets = model.reasoningPresets) {
-  return model.reasoningForceApi && presets.some(p => p.kind === "custom") ? presets.filter(p => p.kind === "custom") : presets;
+/** The presets a chat offers: the templates only, never a generated level. */
+export function offeredPresets(_model: ModelConfig, presets = _model.reasoningPresets) {
+  return presets.filter(p => p.kind === "custom");
 }

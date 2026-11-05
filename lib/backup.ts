@@ -10,6 +10,7 @@ import { AuthError, type AuthUser, verifyPassword, logAdminAudit, removeOwnedCon
 import { encryptBackup, decryptBackup, validateCredentials, type BackupCredentials } from "./backup-crypto";
 import { dataDir, db } from "./database";
 import { readConfig, writeConfig } from "./config";
+import { presetVisibleTo } from "./reasoning-capabilities";
 import { applyModelSettingsImage, modelSettingsImage, type ModelSettingsReport } from "./model-settings-backup";
 import { discardChatJobs } from "./chat-disposal";
 
@@ -76,7 +77,7 @@ type ModelSettingsOutcome=({status:"restored"}&ModelSettingsReport)|{status:"abs
 async function restorePersonalModelSettings(data:ImageData,userId:string,mode:RestoreMode):Promise<ModelSettingsOutcome>{const role=(db.prepare("SELECT role FROM users WHERE id=?").get(userId) as {role:string}).role;let outcome:ModelSettingsOutcome={status:"absent"};let idMap=new Map<string,string>();let config=await readConfig();if(data.modelSettings!==undefined){try{const result=applyModelSettingsImage(config.models,data.modelSettings,{id:userId,admin:isAdminRole(role)},mode);if(!result)outcome={status:"invalid"};else{config=await writeConfig({...config,models:result.models});idMap=result.idMap;outcome={status:"restored",...result.report};}}catch(error){console.error("Unable to restore backup model settings",error);outcome={status:"failed"};}}
   const usable=config.models.filter(model=>!model.isAlias||!model.ownerId||model.ownerId===userId||model.isPublic===true);const preferences=readPreferences((db.prepare("SELECT preferences FROM users WHERE id=?").get(userId) as {preferences:string}).preferences);const next={...preferences};
   if(typeof next.defaultModelId==="string"){next.defaultModelId=idMap.get(next.defaultModelId)||next.defaultModelId;if(!usable.some(model=>model.id===next.defaultModelId))delete next.defaultModelId;}
-  if(typeof next.defaultReasoningPresetId==="string"&&!usable.some(model=>model.reasoningPresets.some(preset=>preset.id===next.defaultReasoningPresetId&&(preset.kind==="builtin"||!preset.ownerId||preset.ownerId===userId))))delete next.defaultReasoningPresetId;
+  if(typeof next.defaultReasoningPresetId==="string"&&!usable.some(model=>model.reasoningPresets.some(preset=>preset.id===next.defaultReasoningPresetId&&presetVisibleTo(preset,userId))))delete next.defaultReasoningPresetId;
   if(JSON.stringify(next)!==JSON.stringify(preferences))db.prepare("UPDATE users SET preferences=?,updated_at=? WHERE id=?").run(JSON.stringify(next),new Date().toISOString(),userId);
   return outcome;}
 // Aliases that must take a private identifier on this workspace keep their conversations pointing at them.

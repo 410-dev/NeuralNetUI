@@ -44,6 +44,8 @@ export interface ReasoningPreset {
   systemPrompt?: string;
   systemPromptMode?: SystemPromptMode;
   ownerId?: string;
+  /** Set by an administrator: every account that can use the model sees the template. */
+  global?: boolean;
 }
 
 export interface ModelConfig {

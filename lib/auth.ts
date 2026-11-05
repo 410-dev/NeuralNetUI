@@ -247,11 +247,11 @@ export function removeOwnedConfigEntries(userId: string) {
           .map((model) => ({
             ...model,
             reasoningPresets: Array.isArray(model.reasoningPresets)
-              ? model.reasoningPresets.filter((preset) => preset.ownerId !== userId)
+              ? model.reasoningPresets.filter((preset) => (preset.global || preset.ownerId !== userId))
               : model.reasoningPresets,
           }));
       }
-      for (const connection of config.connections || []) if (Array.isArray(connection.models)) connection.models = connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets?.filter((preset) => preset.ownerId !== userId) }));
+      for (const connection of config.connections || []) if (Array.isArray(connection.models)) connection.models = connection.models.map((model) => ({ ...model, reasoningPresets: model.reasoningPresets?.filter((preset) => (preset.global || preset.ownerId !== userId)) }));
       db.prepare("UPDATE app_config SET value = ?, updated_at = ? WHERE id = 1")
         .run(JSON.stringify(config), new Date().toISOString());
     } catch { /* invalid config is recovered by the config module */ }

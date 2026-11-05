@@ -8,6 +8,7 @@ const presetSchema = z.object({
   effort: z.string().optional(),
   systemPrompt: z.string().optional(),
   systemPromptMode: z.enum(["replace", "prepend", "append"]).optional(),
+  global: z.boolean().optional(),
 }).strict();
 
 const modelSchema = z.object({

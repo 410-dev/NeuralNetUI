@@ -1,12 +1,24 @@
 import type { ModelConfig, ReasoningPreset } from "./types";
 import { applyPreferredOrder } from "./ordered-list.ts";
 
+/**
+ * Applies one account's preset edits. A global template belongs to the administrators: any of them
+ * may edit it (it keeps its author), and nobody else can change, remove or create one. Private
+ * templates stay with their owner.
+ */
 export function mergeModelPresets(existing: ModelConfig, candidate: ModelConfig | undefined, userId: string, admin: boolean): ModelConfig {
   if (!candidate) return existing;
-  const protectedPresets = existing.reasoningPresets.filter(p => p.kind === "builtin" ? !admin : Boolean(p.ownerId && p.ownerId !== userId));
+  const ownedByOther = (p: ReasoningPreset) => Boolean(p.ownerId && p.ownerId !== userId);
+  const protectedPresets = existing.reasoningPresets.filter(p => p.kind === "builtin" ? !admin : p.global ? !admin : ownedByOther(p));
   const protectedIds = new Set(protectedPresets.map(p => p.id));
-  const editable = candidate.reasoningPresets.filter(p => !protectedIds.has(p.id) && (p.kind === "builtin" ? admin : !p.ownerId || p.ownerId === userId))
-    .map(p => p.kind === "custom" ? { ...p, ownerId: userId } : p);
+  const editable = candidate.reasoningPresets.filter(p => !protectedIds.has(p.id) && (p.kind === "builtin" ? admin : admin && existing.reasoningPresets.some(e => e.id === p.id && e.global) || !ownedByOther(p)))
+    .map(p => {
+      if (p.kind !== "custom") return p;
+      const previous = existing.reasoningPresets.find(e => e.id === p.id);
+      // An administrator editing another administrator's global template leaves its author in place.
+      const ownerId = admin && previous?.global ? previous.ownerId || userId : userId;
+      return { ...p, ownerId, global: admin && p.global === true ? true : undefined };
+    });
   return { ...(admin ? candidate : existing), reasoningPresets: applyPreferredOrder([...editable, ...protectedPresets], (admin ? candidate : existing).reasoningPresets.map(p => p.id)) };
 }
 

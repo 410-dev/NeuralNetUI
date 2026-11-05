@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { serializeModelSettings } from "./model-settings.ts";
 import { applyPreferredOrder } from "./ordered-list.ts";
+import { presetVisibleTo } from "./reasoning-capabilities.ts";
 import type { ModelConfig, ReasoningPreset } from "./types";
 
 /**
@@ -19,7 +20,7 @@ const presetKey = (modelId: string, presetId: string) => `${modelId}\0${presetId
 
 export function modelSettingsImage(models: ModelConfig[], owner: ModelSettingsTarget, defaults: { modelId?: string; reasoningPresetId?: string }): ModelSettingsImage {
   const usable = models.filter((model) => !model.isAlias || !model.ownerId || model.ownerId === owner.id || model.isPublic === true)
-    .map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => preset.kind === "builtin" || !preset.ownerId || preset.ownerId === owner.id) }));
+    .map((model) => ({ ...model, reasoningPresets: model.reasoningPresets.filter((preset) => presetVisibleTo(preset, owner.id)) }));
   const cleanDefaults = { ...(defaults.modelId ? { modelId: defaults.modelId } : {}), ...(defaults.reasoningPresetId ? { reasoningPresetId: defaults.reasoningPresetId } : {}) };
   return {
     settings: JSON.parse(serializeModelSettings(usable, cleanDefaults)),

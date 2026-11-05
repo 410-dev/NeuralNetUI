@@ -14,12 +14,12 @@ import { dataDir, db } from "./database";
 import { inferApiContextWindowTokens } from "./model-context";
 import { mergeModelPresets } from "./model-edits";
 import { readSystemPromptOverrides } from "./system-prompt";
-import { inferReasoning, normalizeReasoning, offeredPresets } from "./reasoning-capabilities";
+import { inferReasoning, normalizeReasoning, offeredPresets, presetVisibleTo } from "./reasoning-capabilities";
 import { resolveConnectionModels } from "./connection-drivers";
 import { isHostComputerAvailable } from "./host-environment";
 import { HOST_PERMISSION_KEYS, hostPermissionsFromRiskLevels, type HostPermissionKey } from "./host-permissions";
 
-const presetSchema = z.object({ id: z.string().min(1), name: z.string().min(1), kind: z.enum(["builtin", "custom"]), effort: z.string().optional(), systemPrompt: z.string().optional(), systemPromptMode: z.enum(["replace", "prepend", "append"]).default("append"), ownerId: z.string().optional() });
+const presetSchema = z.object({ id: z.string().min(1), name: z.string().min(1), kind: z.enum(["builtin", "custom"]), effort: z.string().optional(), systemPrompt: z.string().optional(), systemPromptMode: z.enum(["replace", "prepend", "append"]).default("append"), ownerId: z.string().optional(), global: z.boolean().optional() });
 const modelSchema = z.object({ id: z.string().min(1), name: z.string().min(1), sourceModel: z.string().min(1), description: z.string().optional(), systemPrompt: z.string().optional(), isAlias: z.boolean(), visible: z.boolean().default(true), reasoningSupported: z.boolean(), reasoningEfforts: z.array(z.string()).optional(), reasoningPresets: z.array(presetSchema), contextWindowTokens: z.number().int().positive().optional(), apiContextWindowTokens: z.number().int().positive().optional(), visionImageMode: z.enum(["original", "max-resolution"]).default("original"), visionMaxEdgePixels: z.number().int().min(128).max(8192).default(1024), imageGeneration: z.boolean().default(false), imageInput: z.boolean().default(true), ownerId: z.string().optional(), isPublic: z.boolean().optional(), connectionId: z.string().min(1).optional(), rememberReasoning: z.boolean().optional(), systemPromptEditable: z.boolean().optional(), reasoningForceApi: z.boolean().optional() });
 const connectionSchema = z.object({ id: z.string().min(1), name: z.string().min(1), driver: z.enum(["openai", "lmstudio", "nnui"]), baseUrl: z.string().url(), apiKey: z.string(), clearApiKey: z.boolean().optional(), disabled: z.boolean().optional(), maxResidentModels: z.number().int().min(0).max(128).default(0), modelWaitPolicy: z.enum(["capacity", "serial"]).default("capacity"), models: z.array(modelSchema).default([]) });
 
@@ -119,7 +119,7 @@ export async function writeConfig(input: unknown): Promise<AppConfig> {
 }
 function isAdmin(user: AuthUser) { return user.role === "admin" || user.role === "superadmin"; }
 export function canUseModel(model: ModelConfig, user: AuthUser) { return !model.isAlias || !model.ownerId || model.ownerId === user.id || model.isPublic === true; }
-function visiblePreset(preset: ReasoningPreset, user: AuthUser) { return preset.kind === "builtin" || !preset.ownerId || preset.ownerId === user.id; }
+function visiblePreset(preset: ReasoningPreset, user: AuthUser) { return presetVisibleTo(preset, user.id); }
 
 export function publicConfig(config: AppConfig, user: AuthUser): PublicConfig {
   const rawAliasBases = user.preferences.aliasBaseModelIds && typeof user.preferences.aliasBaseModelIds === "object" && !Array.isArray(user.preferences.aliasBaseModelIds) ? user.preferences.aliasBaseModelIds as Record<string, unknown> : config.preferences.aliasBaseModelIds || {};
@@ -151,7 +151,7 @@ export async function writeConfigForUser(input: unknown, user: AuthUser): Promis
     // Served models, including their reasoning templates, are an administrator's to shape. A
     // standard account only owns its aliases, so everything else is carried over untouched.
     // Remembering reasoning is an administrator's per-model choice, so an owner's save keeps whatever was set.
-    const aliases = current.models.filter((model) => model.isAlias && model.ownerId !== user.id).concat(incoming.models.filter((model) => model.isAlias && (!model.ownerId || model.ownerId === user.id)).map((model) => ({ ...model, ownerId: user.id, rememberReasoning: current.models.find((item) => item.isAlias && item.id === model.id)?.rememberReasoning, systemPromptEditable: undefined, reasoningPresets: model.reasoningPresets.map((preset) => preset.kind === "custom" ? { ...preset, ownerId: user.id } : preset) })));
+    const aliases = current.models.filter((model) => model.isAlias && model.ownerId !== user.id).concat(incoming.models.filter((model) => model.isAlias && (!model.ownerId || model.ownerId === user.id)).map((model) => ({ ...model, ownerId: user.id, rememberReasoning: current.models.find((item) => item.isAlias && item.id === model.id)?.rememberReasoning, systemPromptEditable: undefined, reasoningPresets: model.reasoningPresets.map((preset) => preset.kind === "custom" ? { ...preset, ownerId: user.id, global: undefined } : preset) })));
     return writeConfig({ ...current, models: aliases });
   }
   const existing = new Map(current.connections.map((connection) => [connection.id, connection]));

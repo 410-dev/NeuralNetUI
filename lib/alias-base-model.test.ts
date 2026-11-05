@@ -25,7 +25,7 @@ test("a runtime alias follows the selected base connection and native reasoning 
   assert.equal(runtime.sourceModel, second.sourceModel);
   assert.equal(runtime.connectionId, second.connectionId);
   assert.deepEqual(runtime.reasoningEfforts, ["high"]);
-  assert.deepEqual(runtime.reasoningPresets.map(preset => preset.id).sort(), ["custom", "high"]);
+  assert.deepEqual(runtime.reasoningPresets.map(preset => preset.id), ["custom"]);
   assert.equal(runtime.reasoningPresets.find(preset => preset.id === "custom")?.systemPrompt, "Careful");
   assert.equal(alias.sourceModel, first.sourceModel, "the saved recommendation remains unchanged");
 });

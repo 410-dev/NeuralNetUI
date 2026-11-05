@@ -7,6 +7,7 @@ import { effectiveContextWindowTokens } from "./model-context";
 import { db } from "./database";
 import { registerChatDisposal } from "./chat-disposal";
 import { presetEffortValue, reasoningEffort } from "./model-edits";
+import { presetVisibleTo } from "./reasoning-capabilities";
 import { restoreToolHistory, settlePendingTools } from "./conversation-messages";
 import { describeMcpApproval } from "./mcp-approval";
 import { readSsePayload } from "./stream-protocol";
@@ -555,7 +556,7 @@ async function run(job: ChatJob) {
     const connection = connectionForModel(config.connections, model);
     if (!connection) throw new Error("The selected model's connection is unavailable.");
     if (connection.disabled) throw new Error("The selected model's server is disabled.");
-    const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId && (item.kind === "builtin" || !item.ownerId || item.ownerId === job.userId));
+    const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId && presetVisibleTo(item, job.userId));
     const effort = reasoningEffort(model, preset);
     // An account's own rewrite of this model and preset replaces the composed prompt, where the model allows it.
     const promptOverride = systemPromptEditable(selected) ? systemPromptOverride(readSystemPromptOverrides(readUserPreferences(job.userId).systemPromptOverrides), selected.id, preset?.id) : undefined;
