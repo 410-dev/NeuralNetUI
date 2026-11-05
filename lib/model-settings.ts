@@ -5,6 +5,7 @@ const presetSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   kind: z.enum(["builtin", "custom"]),
+  description: z.string().max(200).optional(),
   effort: z.string().optional(),
   systemPrompt: z.string().optional(),
   systemPromptMode: z.enum(["replace", "prepend", "append"]).optional(),

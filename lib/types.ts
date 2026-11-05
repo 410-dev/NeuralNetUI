@@ -40,6 +40,8 @@ export interface ReasoningPreset {
   id: string;
   name: string;
   kind: ReasoningKind;
+  /** Shown under the name in the chat picker, in place of the effort's generic note. */
+  description?: string;
   effort?: string;
   systemPrompt?: string;
   systemPromptMode?: SystemPromptMode;
