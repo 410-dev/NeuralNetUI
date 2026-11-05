@@ -18,6 +18,59 @@ export function transcriptSteps(message: StoredMessage): MessageStep[] {
   return legacy;
 }
 
+export type DisplayStep = MessageStep & {
+  /** True when the step that is still being written was merged into this one. */
+  live?: boolean;
+};
+
+/**
+ * Folds the recorded stages into what the transcript shows. Only text the reader is meant to
+ * read starts a new section: until it appears, every reasoning stage joins one reasoning block
+ * and every tool round joins one tool group, each placed where its kind first appeared. Tool
+ * rounds that happened between two reasoning stages become markers inside the merged reasoning,
+ * produced by `toolMarker` when given.
+ */
+export function displaySteps(steps: MessageStep[], toolMarker?: (ids: string[]) => string): DisplayStep[] {
+  const shown: DisplayStep[] = [];
+  let reasoning: Extract<DisplayStep, { kind: "reasoning" }> | undefined;
+  let tools: Extract<DisplayStep, { kind: "tools" }> | undefined;
+  let pendingToolIds: string[] = [];
+  steps.forEach((step, index) => {
+    const last = index === steps.length - 1;
+    if (step.kind === "content") {
+      if (!step.text.trim()) return;
+      reasoning = undefined; tools = undefined; pendingToolIds = [];
+      shown.push({ ...step, ...(last ? { live: true } : {}) });
+      return;
+    }
+    if (step.kind === "reasoning") {
+      if (!reasoning) {
+        reasoning = { ...step };
+        shown.push(reasoning);
+      } else {
+        const marker = pendingToolIds.length && toolMarker ? toolMarker(pendingToolIds) : "";
+        const joined = [reasoning.text.replace(/\s+$/, ""), marker, step.text.replace(/^\s+/, "")].filter(Boolean).join("\n\n");
+        reasoning.text = joined;
+        if (reasoning.seconds !== undefined || step.seconds !== undefined) reasoning.seconds = (reasoning.seconds ?? 0) + (step.seconds ?? 0);
+      }
+      pendingToolIds = [];
+      reasoning.live = last && step.seconds === undefined;
+      return;
+    }
+    if (step.kind === "tools") {
+      if (!tools) {
+        tools = { ...step, ids: [...step.ids] };
+        shown.push(tools);
+      } else tools.ids.push(...step.ids);
+      if (reasoning) pendingToolIds.push(...step.ids);
+      if (last) tools.live = true;
+      return;
+    }
+    shown.push({ ...step, ...(last ? { live: true } : {}) });
+  });
+  return shown;
+}
+
 /** Index of the step still being written, so only that one animates while a response streams. */
 export function lastContentStep(steps: MessageStep[]): number {
   for (let index = steps.length - 1; index >= 0; index -= 1) if (steps[index].kind === "content") return index;

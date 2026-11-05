@@ -24,7 +24,7 @@ import { SelectMenu, usePopoverPresence } from "./select-menu";
 import { NeuralMark } from "./neural-mark";
 import { ACCENT_PALETTES, accentColorOf, accentVariables, DEFAULT_APPEARANCE, DEFAULT_LOGIN_APPEARANCE, defaultReasoningNote, normalizeHexColor, reasoningNote, REASONING_NOTE_KEYS } from "@/lib/appearance";
 import { capabilitySummary, driverCapabilities } from "@/lib/driver-capabilities";
-import { lastContentStep, reasoningStepIsWhole, replaceAssistantContent, stepToolEvents, transcriptSteps } from "@/lib/transcript";
+import { displaySteps, lastContentStep, reasoningStepIsWhole, replaceAssistantContent, stepToolEvents, transcriptSteps } from "@/lib/transcript";
 import { greetingFor, greetingsFor, BAND_STARTS, timeBandFor } from "@/lib/greetings";
 import { chatWaitLabel } from "@/lib/chat-progress";
 import { normalizeReasoning, reasoningOptionName, isReasoningToggle } from "@/lib/reasoning-capabilities";
@@ -51,7 +51,7 @@ import { advertisedContextWindowTokens, contextUsageDisplayLimitTokens, effectiv
 import { shouldExpandComposer } from "@/lib/composer-layout";
 import { createClientId } from "@/lib/client-id";
 import { multipleChoiceAnswers, pendingMultipleChoiceEvent } from "@/lib/conversation-messages";
-import { formatReasoningForDisplay, getToolGroupLabel, getToolGroupState, getToolStatusLabel } from "@/lib/tool-presentation";
+import { formatReasoningForDisplay, formatToolCallMarkers, getToolGroupLabel, getToolGroupState, getToolStatusLabel } from "@/lib/tool-presentation";
 import { APP_VERSION } from "@/lib/version";
 import { isNearScrollBottom } from "@/lib/chat-scroll";
 import { parseModelSettings, serializeModelSettings } from "@/lib/model-settings";
@@ -1975,7 +1975,6 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
   const [editing, setEditing] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [imagePreview,setImagePreview]=useState<{src:string;alt:string}>();
-  const isThinking = pending && Boolean(message.reasoning) && message.reasoningDurationSeconds === undefined;
   const displayedReasoning = formatReasoningForDisplay(message.reasoning || "", message.toolEvents || [], locale);
   const waitingForChoice = (message.toolEvents || []).some((event) => (["ask_multiple_choice", "host_computer"].includes(event.name)||event.name.startsWith("mcp_")) && event.status === "waiting");
   const longPress = useLongPress(() => setMobileActionsOpen(true), pending || editing);
@@ -1987,15 +1986,15 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
     : null;
 
   if (message.role === "user") return <div className="message-row user-message" data-message-id={message.id}><div className="user-message-actions"><div className="user-message-toolbar"><button title={c.regenerateRequest} aria-label={c.regenerateRequest} onClick={() => onRegenerateUser(message.id)}><RefreshCw size={13} /></button>{message.content && <button title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={13} /></button>}<button title={c.editBranch} aria-label={c.editBranch} onClick={() => setEditing(true)}><Pencil size={13} /></button><button className="delete" title={c.deleteMessage} aria-label={c.deleteMessage} onClick={() => onDeleteUser(message.id)}><Trash2 size={13} /></button></div><div className="user-message-stack long-press-target" {...longPress}><div className="user-message-content">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}{message.content && <div className="message-bubble">{message.content}</div>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /></div></div>{editing && <TextDialog ko={locale === "ko"} title={c.editMessage} value={message.content} multiline saveLabel={c.forkSend} saveIcon={<GitBranch size={14} />} cancelLabel={c.cancel} preface={message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null} onClose={() => setEditing(false)} onSave={(value) => { if (value !== message.content) onFork(message.id, value); setEditing(false); }} />}{actions}</div>;
-  const steps = transcriptSteps(message);
+  const steps = displaySteps(transcriptSteps(message), (ids) => formatToolCallMarkers(stepToolEvents(ids, message.toolEvents), locale));
   const liveContentIndex = lastContentStep(steps);
   const wholeReasoning = reasoningStepIsWhole(message);
   const waitStatus = pending && waitPhase ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
   return <div className="message-row assistant-message long-press-target" {...longPress}>
     {message.attachments?.length ? <AssistantAttachmentGallery attachments={message.attachments} /> : null}
     {steps.map((step, index) => {
-      if (step.kind === "reasoning") return <ReasoningStep key={index} c={c} locale={locale} text={wholeReasoning ? displayedReasoning : step.text} seconds={step.seconds} live={pending && isThinking && index === steps.length - 1} />;
-      if (step.kind === "compaction") return <CompactionStep key={index} c={c} locale={locale} step={step} live={pending && index === steps.length - 1 && step.seconds === undefined} />;
+      if (step.kind === "reasoning") return <ReasoningStep key={index} c={c} locale={locale} text={wholeReasoning ? displayedReasoning : step.text} seconds={step.seconds} live={pending && Boolean(step.live)} />;
+      if (step.kind === "compaction") return <CompactionStep key={index} c={c} locale={locale} step={step} live={pending && Boolean(step.live) && step.seconds === undefined} />;
       if (step.kind === "tools") {
         const events = stepToolEvents(step.ids, message.toolEvents);
         const tools = events.filter((event) => !["ask_multiple_choice","create_artifact"].includes(event.name));

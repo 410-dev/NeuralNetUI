@@ -57,6 +57,17 @@ export function getToolGroupLabel(events: ReadonlyArray<ToolSummaryEvent>, local
   return `Used ${toolCount}${failedCount}`;
 }
 
+function toolCallMarker(name: string, locale: Locale) {
+  return locale === "ko"
+    ? `[${getToolDisplayName(name, locale)} 도구 호출함]`
+    : `[Called ${getToolDisplayName(name, locale).toLowerCase()} tool]`;
+}
+
+/** Display-only markers for the tool calls made between two merged reasoning passages. */
+export function formatToolCallMarkers(events: ReadonlyArray<{ name: string }>, locale: Locale) {
+  return events.map((event) => toolCallMarker(event.name, locale)).join("\n");
+}
+
 export function formatReasoningForDisplay(
   reasoning: string,
   events: ReadonlyArray<{ name: string; reasoningOffset?: number }>,
@@ -66,9 +77,7 @@ export function formatReasoningForDisplay(
   const calls = events.map((event, index) => ({
     index,
     offset: Math.max(0, Math.min(reasoning.length, event.reasoningOffset ?? reasoning.length)),
-    label: locale === "ko"
-      ? `[${getToolDisplayName(event.name, locale)} 도구 호출함]`
-      : `[Called ${getToolDisplayName(event.name, locale).toLowerCase()} tool]`,
+    label: toolCallMarker(event.name, locale),
   })).sort((left, right) => left.offset - right.offset || left.index - right.index);
 
   let cursor = 0;
