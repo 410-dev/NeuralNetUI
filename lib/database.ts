@@ -483,6 +483,33 @@ function openDatabase() {
     if(!columns.some(column=>column.name==="tool_timeout_seconds"))connection.exec("ALTER TABLE mcp_connections ADD COLUMN tool_timeout_seconds INTEGER NOT NULL DEFAULT 20 CHECK (tool_timeout_seconds >= 5 AND tool_timeout_seconds <= 600);");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(23, new Date().toISOString());
   })();
+  const conversationPinVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (conversationPinVersion.version < 24) connection.transaction(() => {
+    // Pinned chats sit above the rest of the history list, newest pin first.
+    const columns=connection.prepare("PRAGMA table_info(conversations)").all() as Array<{name:string}>;
+    if(!columns.some(column=>column.name==="pinned_at"))connection.exec("ALTER TABLE conversations ADD COLUMN pinned_at TEXT;");
+    // "Apply to everyone" is gone: the admin's model and template order is the default now. Defaults that were only
+    // stamped onto accounts by that button match the old workspace default and are cleared; choices people made stay.
+    try {
+      const row = connection.prepare("SELECT value FROM app_config WHERE id = 1").get() as { value: string } | undefined;
+      const config = row ? JSON.parse(row.value) : undefined;
+      const workspace = config?.preferences || {};
+      const stamped = { defaultModelId: workspace.defaultModelId, defaultReasoningPresetId: workspace.defaultReasoningPresetId };
+      if (typeof stamped.defaultModelId === "string" || typeof stamped.defaultReasoningPresetId === "string") {
+        const users = connection.prepare("SELECT id, preferences FROM users").all() as Array<{ id: string; preferences: string }>;
+        const update = connection.prepare("UPDATE users SET preferences = ? WHERE id = ?");
+        for (const user of users) {
+          let preferences: Record<string, unknown>; try { preferences = JSON.parse(user.preferences || "{}"); } catch { continue; }
+          let changed = false;
+          for (const key of ["defaultModelId", "defaultReasoningPresetId"] as const) if (typeof stamped[key] === "string" && preferences[key] === stamped[key]) { delete preferences[key]; changed = true; }
+          if (changed) update.run(JSON.stringify(preferences), user.id);
+        }
+        delete workspace.defaultModelId; delete workspace.defaultReasoningPresetId;
+        connection.prepare("UPDATE app_config SET value = ? WHERE id = 1").run(JSON.stringify(config));
+      }
+    } catch { /* An unreadable configuration keeps its stored defaults. */ }
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(24, new Date().toISOString());
+  })();
   return connection;
 }
 

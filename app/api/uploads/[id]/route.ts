@@ -3,6 +3,7 @@ import { Readable } from "node:stream";
 import { deleteUpload, purgeDeletedUploads, readUpload, renameStoredFile, replaceStoredTextFile } from "@/lib/uploads";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { readConfig } from "@/lib/config";
+import { isTextAttachmentType } from "@/lib/text-attachments";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,10 +16,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const query = new URL(request.url).searchParams;
     const thumbnail = query.get("variant") === "thumbnail" && metadata.mimeType.startsWith("image/") && existsSync(paths.thumbnail);
     const stream = Readable.toWeb(createReadStream(thumbnail ? paths.thumbnail : paths.original)) as ReadableStream;
-    const safeInline = metadata.mimeType.startsWith("image/") || metadata.mimeType === "application/pdf";
+    // Text opens as plain text, so markup in an attached file is shown rather than rendered.
+    const text = isTextAttachmentType(metadata.mimeType);
+    const safeInline = metadata.mimeType.startsWith("image/") || metadata.mimeType === "application/pdf" || text;
     const download = query.get("download") === "1" || !safeInline;
     return new Response(stream, { headers: {
-      "Content-Type": thumbnail ? "image/jpeg" : metadata.mimeType,
+      "Content-Type": thumbnail ? "image/jpeg" : text && !download ? "text/plain; charset=utf-8" : metadata.mimeType,
       "Content-Disposition": `${download ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(metadata.name)}`,
       "Cache-Control": "private, no-store",
       "Vary": "Cookie",

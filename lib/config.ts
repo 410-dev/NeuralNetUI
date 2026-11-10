@@ -5,7 +5,7 @@ import path from "node:path";
 import { z } from "zod";
 import type { AppConfig, ConnectionConfig, ConnectionDriver, ExperimentalFeatures, ModelConfig, PublicConfig, ReasoningPreset, ToolSettings } from "./types";
 import type { AuthUser } from "./auth";
-import { overwriteUserPreference, updateUserPreferences } from "./auth";
+import { updateUserPreferences } from "./auth";
 import { planModelWeights } from "./plans";
 import { modelAllowedByPlan } from "./plan-usage";
 import { listMcpConnections, mcpEntitlement } from "./mcp";
@@ -124,7 +124,7 @@ function visiblePreset(preset: ReasoningPreset, user: AuthUser) { return presetV
 export function publicConfig(config: AppConfig, user: AuthUser): PublicConfig {
   const rawAliasBases = user.preferences.aliasBaseModelIds && typeof user.preferences.aliasBaseModelIds === "object" && !Array.isArray(user.preferences.aliasBaseModelIds) ? user.preferences.aliasBaseModelIds as Record<string, unknown> : config.preferences.aliasBaseModelIds || {};
   const aliasBaseModelIds = Object.fromEntries(Object.entries(rawAliasBases).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-  const preferences: AppConfig["preferences"] = { ...config.preferences, sendReasoningToModel: typeof user.preferences.sendReasoningToModel === "boolean" ? user.preferences.sendReasoningToModel : config.preferences.sendReasoningToModel, exportReasoning: typeof user.preferences.exportReasoning === "boolean" ? user.preferences.exportReasoning : config.preferences.exportReasoning, language: user.preferences.language === "ko" || user.preferences.language === "en" ? user.preferences.language : config.preferences.language, showModelIdentifiers: typeof user.preferences.showModelIdentifiers === "boolean" ? user.preferences.showModelIdentifiers : config.preferences.showModelIdentifiers, renderStrikethrough: typeof user.preferences.renderStrikethrough === "boolean" ? user.preferences.renderStrikethrough : config.preferences.renderStrikethrough, defaultModelId: typeof user.preferences.defaultModelId === "string" ? user.preferences.defaultModelId : config.preferences.defaultModelId, defaultReasoningPresetId: typeof user.preferences.defaultReasoningPresetId === "string" ? user.preferences.defaultReasoningPresetId : config.preferences.defaultReasoningPresetId, aliasBaseModelIds, appearance: normalizeAppearance((user.preferences.appearance as Partial<typeof DEFAULT_APPEARANCE>) || config.preferences.appearance), enabledTools: normalizeEnabledTools(user.preferences.enabledTools), systemPromptOverrides: readSystemPromptOverrides(user.preferences.systemPromptOverrides) };
+  const preferences: AppConfig["preferences"] = { ...config.preferences, sendReasoningToModel: typeof user.preferences.sendReasoningToModel === "boolean" ? user.preferences.sendReasoningToModel : config.preferences.sendReasoningToModel, exportReasoning: typeof user.preferences.exportReasoning === "boolean" ? user.preferences.exportReasoning : config.preferences.exportReasoning, language: user.preferences.language === "ko" || user.preferences.language === "en" ? user.preferences.language : config.preferences.language, showModelIdentifiers: typeof user.preferences.showModelIdentifiers === "boolean" ? user.preferences.showModelIdentifiers : config.preferences.showModelIdentifiers, renderStrikethrough: typeof user.preferences.renderStrikethrough === "boolean" ? user.preferences.renderStrikethrough : config.preferences.renderStrikethrough, defaultModelId: typeof user.preferences.defaultModelId === "string" ? user.preferences.defaultModelId : undefined, defaultReasoningPresetId: typeof user.preferences.defaultReasoningPresetId === "string" ? user.preferences.defaultReasoningPresetId : undefined, aliasBaseModelIds, appearance: normalizeAppearance((user.preferences.appearance as Partial<typeof DEFAULT_APPEARANCE>) || config.preferences.appearance), enabledTools: normalizeEnabledTools(user.preferences.enabledTools), systemPromptOverrides: readSystemPromptOverrides(user.preferences.systemPromptOverrides) };
   const superadmin = user.role === "superadmin";
   const planRow=user.planId?db.prepare("SELECT served_model_ids AS ids FROM plans WHERE id=?").get(user.planId) as {ids:string}|undefined:undefined;
   let planModels:string[]=[];try{const parsed=planRow?JSON.parse(planRow.ids):[];planModels=Array.isArray(parsed)?parsed.filter((value):value is string=>typeof value==="string"):[];}catch{/* malformed plans expose no chat models until an administrator saves them */}
@@ -172,18 +172,6 @@ export async function writeConfigForUser(input: unknown, user: AuthUser): Promis
     },
   };
   return writeConfig({ ...hostProtected, connections, models: [...orderedIncoming, ...protectedAliases], profile: current.profile, preferences: { ...current.preferences, ...incoming.preferences } });
-}
-
-/**
- * Makes one choice the workspace default and stamps it onto every account, replacing only that
- * key so a person's other saved preferences survive the change.
- */
-export async function applyGlobalDefault(kind: "model" | "reasoning", id: string): Promise<AppConfig> {
-  const key = kind === "model" ? "defaultModelId" : "defaultReasoningPresetId";
-  const current = await readConfig();
-  const saved = await writeConfig({ ...current, preferences: { ...current.preferences, [key]: id } });
-  overwriteUserPreference(key, id);
-  return saved;
 }
 
 export function inferModel(input: string | Record<string, unknown>, driver: ConnectionDriver = "openai", connectionId?: string): ModelConfig {

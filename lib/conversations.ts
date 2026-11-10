@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { isTextAttachmentType } from "./text-attachments";
 import type { ChatBranch, Conversation, ConversationSummary, StoredAttachment, StoredMessage } from "./types";
 import { completeStorageMigration, dataDir, db, storageMigrationCompleted } from "./database";
 import { deleteUploadFiles, ensureLegacyUploadsMigrated } from "./uploads";
@@ -40,7 +41,7 @@ const messageSchema = z.object({
   attachments: z.array(z.object({
     id: z.string().regex(/^[a-zA-Z0-9_-]+$/),
     name: z.string(),
-    mimeType: z.string().refine((value) => value.startsWith("image/") || value === "application/pdf", "Unsupported attachment type"),
+    mimeType: z.string().refine((value) => value.startsWith("image/") || value === "application/pdf" || isTextAttachmentType(value), "Unsupported attachment type"),
     size: z.number().nonnegative(),
     width: z.number().positive().optional(),
     height: z.number().positive().optional(),
@@ -87,8 +88,8 @@ const legacyMigrationName = "legacy-conversations-v1";
 let legacyMigration: Promise<void> | undefined;
 
 const insertConversation = db.prepare(`
-  INSERT INTO conversations(id, title, model_id, reasoning_preset_id, active_branch_id, created_at, updated_at, user_id, temporary)
-  VALUES (@id, @title, @modelId, @reasoningPresetId, @activeBranchId, @createdAt, @updatedAt, @userId, @temporary)
+  INSERT INTO conversations(id, title, model_id, reasoning_preset_id, active_branch_id, created_at, updated_at, user_id, temporary, pinned_at)
+  VALUES (@id, @title, @modelId, @reasoningPresetId, @activeBranchId, @createdAt, @updatedAt, @userId, @temporary, @pinnedAt)
 `);
 const insertBranch = db.prepare(`
   INSERT INTO branches(id, conversation_id, name, parent_branch_id, forked_from_message_id, position, created_at, updated_at)
@@ -108,7 +109,7 @@ const insertAttachment = db.prepare("INSERT OR IGNORE INTO message_attachments(m
 
 function storeConversation(record: Conversation, userId: string, guard?: () => boolean) {
   db.transaction(() => {
-    const owner = db.prepare("SELECT user_id, title, title_managed, temporary, deleted_at FROM conversations WHERE id = ?").get(record.id) as { user_id: string | null; title: string; title_managed: number; temporary: number; deleted_at:string|null } | undefined;
+    const owner = db.prepare("SELECT user_id, title, title_managed, temporary, deleted_at, pinned_at FROM conversations WHERE id = ?").get(record.id) as { user_id: string | null; title: string; title_managed: number; temporary: number; deleted_at:string|null; pinned_at:string|null } | undefined;
     if (guard && (!guard() || !owner)) throw new Error("Conversation was deleted or its task was replaced.");
     if (owner && owner.user_id !== userId) throw new Error("Conversation not found.");
     if (owner?.deleted_at) throw new Error("Conversation was deleted.");
@@ -116,7 +117,7 @@ function storeConversation(record: Conversation, userId: string, guard?: () => b
     if (owner?.title_managed) record.title = owner.title;
     db.prepare("DELETE FROM conversations WHERE id = ? AND user_id = ?").run(record.id, userId);
     const temporary = owner ? owner.temporary : Number(record.temporary === true);
-    insertConversation.run({ ...record, userId, reasoningPresetId: record.reasoningPresetId ?? null, temporary });
+    insertConversation.run({ ...record, userId, reasoningPresetId: record.reasoningPresetId ?? null, temporary, pinnedAt: owner?.pinned_at ?? null });
     record.temporary = temporary === 1;
     for (const [branchPosition, branch] of record.branches.entries()) {
       insertBranch.run({
@@ -200,14 +201,15 @@ export function isTemporaryConversation(id: string, userId: string) {
 
 export async function listConversations(userId: string): Promise<ConversationSummary[]> {
   await ensureLegacyConversationsMigrated(userId);
-  return db.prepare(`
-    SELECT c.id, c.title, c.active_branch_id AS activeBranchId, COUNT(b.id) AS branchCount, c.updated_at AS updatedAt
+  const rows = db.prepare(`
+    SELECT c.id, c.title, c.active_branch_id AS activeBranchId, COUNT(b.id) AS branchCount, c.updated_at AS updatedAt, c.pinned_at AS pinnedAt
     FROM conversations c
     LEFT JOIN branches b ON b.conversation_id = c.id
     WHERE c.user_id = ? AND c.temporary = 0 AND c.deleted_at IS NULL
     GROUP BY c.id
-    ORDER BY c.updated_at DESC
-  `).all(userId) as ConversationSummary[];
+    ORDER BY c.pinned_at IS NULL, c.pinned_at DESC, c.updated_at DESC
+  `).all(userId) as Array<ConversationSummary & { pinnedAt: string | null }>;
+  return rows.map(row => ({ ...row, pinnedAt: row.pinnedAt || undefined }));
 }
 
 export async function listManagedConversationIds(userId:string){await ensureLegacyConversationsMigrated(userId);return(db.prepare("SELECT id FROM conversations WHERE user_id=? AND temporary=0 ORDER BY updated_at DESC").all(userId) as Array<{id:string}>).map(row=>row.id);}
@@ -489,6 +491,11 @@ export async function deleteAllConversations(userId: string) {
 export function renameConversation(id: string, userId: string, title: string, automatic = false) {
   const clean = z.string().trim().min(1).max(200).parse(title);
   return db.prepare(`UPDATE conversations SET title = ?, title_managed = 1 WHERE id = ? AND user_id = ? AND deleted_at IS NULL ${automatic ? "AND title_managed = 0" : ""}`).run(clean, id, userId).changes > 0;
+}
+
+/** Pins a saved chat to the top of the history list, or unpins it. */
+export function setConversationPinned(id: string, userId: string, pinned: boolean) {
+  return db.prepare("UPDATE conversations SET pinned_at = ? WHERE id = ? AND user_id = ? AND temporary = 0 AND deleted_at IS NULL").run(pinned ? new Date().toISOString() : null, id, userId).changes > 0;
 }
 
 export async function searchConversations(userId: string, query: string) {

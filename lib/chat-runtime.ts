@@ -715,7 +715,8 @@ async function run(job: ChatJob) {
         ? (remainingTokens ? Math.min(harness.maxOutputTokens, remainingTokens) : harness.maxOutputTokens)
         : remainingTokens;
       const outputLimit=planOutputLimit===undefined?configuredOutputLimit:configuredOutputLimit?Math.min(configuredOutputLimit,planOutputLimit):planOutputLimit;
-      if(outputLimit!==undefined&&outputLimit<=0)throw new Error("토큰 출력 한도에 도달했습니다.");
+      // 0 from the configured side means "no cap"; only an exhausted plan allowance stops the request.
+      if(planOutputLimit!==undefined&&planOutputLimit<=0)throw new Error("토큰 출력 한도에 도달했습니다.");
       if (!releaseModel) releaseModel = await acquireModel();
       const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(outputLimit ? { max_tokens: outputLimit } : {}), stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
       let result: Awaited<ReturnType<typeof streamTurn>>;

@@ -425,6 +425,8 @@ export interface ConversationSummary {
   branchCount: number;
   updatedAt: string;
   deletedAt?: string;
+  /** Set while the chat is pinned to the top of the history list. */
+  pinnedAt?: string;
 }
 
 export type PublicConnectionConfig = Omit<ConnectionConfig, "apiKey"> & { apiKey: string; hasApiKey: boolean };

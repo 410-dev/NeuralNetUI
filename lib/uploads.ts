@@ -2,11 +2,12 @@ import { constants, promises as fs, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import sharp from "sharp";
-import { assertUploadSignature, extractPdf, isSupportedUploadMimeType, pdfModelContent, sniffRasterMimeType, type ModelContentPart, type PdfExtraction } from "./document-processing.ts";
+import { assertUploadSignature, decodeTextDocument, extractPdf, isSupportedUploadMimeType, pdfModelContent, sniffRasterMimeType, type ModelContentPart, type PdfExtraction } from "./document-processing.ts";
 import type { ArtifactKind, ModelConfig, StorageFile, StoredAttachment, ToolSettings } from "./types.ts";
 import { completeStorageMigration, dataDir, db, storageMigrationCompleted } from "./database.ts";
 import { resolvedVisionSettings } from "./vision-settings.ts";
 import { isEditableStorageFile } from "./storage-file-view.ts";
+import { isTextAttachmentType, textAttachmentMimeType } from "./text-attachments.ts";
 
 const uploadsDir = path.join(dataDir, "uploads");
 const legacyMigrationName = "legacy-uploads-v1";
@@ -272,20 +273,27 @@ export async function saveArtifactFile(title:string,kind:ArtifactKind,content:st
   }
 }
 
+/** Text attachments may be as large as the larger of the text download and PDF limits; the model sees a character-capped excerpt. */
+export function textAttachmentLimitMb(settings: ToolSettings) {
+  return Math.max(settings.textDownloadLimitMb, settings.pdfSizeLimitMb);
+}
+
 export async function saveUpload(file: File, thumbnail: File | undefined, userId: string, settings: ToolSettings, dimensions?: { width?: number; height?: number }, retained = false): Promise<StoredAttachment> {
   await ensureLegacyUploadsMigrated();
   const pdf = file.type.toLowerCase() === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-  const mimeType = pdf ? "application/pdf" : file.type.toLowerCase();
-  if (!isSupportedUploadMimeType(mimeType)) throw new Error("Only safe raster images and PDF files are supported.");
-  const sizeLimitMb = pdf ? settings.pdfSizeLimitMb : settings.imageUploadLimitMb;
+  const textType = pdf || isSupportedUploadMimeType(file.type) ? undefined : textAttachmentMimeType(file.name, file.type);
+  const text = Boolean(textType);
+  const mimeType = pdf ? "application/pdf" : textType || file.type.toLowerCase();
+  if (!text && !isSupportedUploadMimeType(mimeType)) throw new Error("Only safe raster images, PDF files, and plain-text files are supported.");
+  const sizeLimitMb = pdf ? settings.pdfSizeLimitMb : text ? textAttachmentLimitMb(settings) : settings.imageUploadLimitMb;
   if (file.size > sizeLimitMb * 1024 * 1024) throw new Error(`${file.name} exceeds the configured ${sizeLimitMb} MB limit.`);
-  if (!pdf && (!thumbnail || !isSupportedUploadMimeType(thumbnail.type) || !thumbnail.type.startsWith("image/") || thumbnail.size > settings.imageUploadLimitMb * 1024 * 1024)) throw new Error("Invalid thumbnail.");
+  if (!pdf && !text && (!thumbnail || !isSupportedUploadMimeType(thumbnail.type) || !thumbnail.type.startsWith("image/") || thumbnail.size > settings.imageUploadLimitMb * 1024 * 1024)) throw new Error("Invalid thumbnail.");
   const id = randomUUID();
   const paths = pathsFor(id);
   const metadata: StoredAttachment = {
     id, name: file.name.slice(0, 240), mimeType, size: file.size,
     width: dimensions?.width, height: dimensions?.height,
-    url: `/api/uploads/${id}`, ...(pdf ? {} : { thumbnailUrl: `/api/uploads/${id}?variant=thumbnail` }),
+    url: `/api/uploads/${id}`, ...(pdf || text ? {} : { thumbnailUrl: `/api/uploads/${id}?variant=thumbnail` }),
   };
   await fs.mkdir(uploadsDir, { recursive: true });
   const originalTemp = `${paths.original}.${randomUUID()}.tmp`;
@@ -293,9 +301,11 @@ export async function saveUpload(file: File, thumbnail: File | undefined, userId
   const extractionTemp = `${paths.extraction}.${randomUUID()}.tmp`;
   try {
     const original = Buffer.from(await file.arrayBuffer());
-    assertUploadSignature(original, mimeType);
+    if (text) decodeTextDocument(original, mimeType, Number.MAX_SAFE_INTEGER);
+    else assertUploadSignature(original, mimeType);
     await fs.writeFile(originalTemp, original, { mode: 0o600 });
-    if (pdf) {
+    if (text) { /* Text is read straight from the original; nothing to derive. */ }
+    else if (pdf) {
       const extraction = await extractPdf(originalTemp, settings);
       await fs.writeFile(extractionTemp, JSON.stringify(extraction), { encoding: "utf8", mode: 0o600 });
     } else if (thumbnail) {
@@ -305,7 +315,7 @@ export async function saveUpload(file: File, thumbnail: File | undefined, userId
     }
     await fs.rename(originalTemp, paths.original);
     if (pdf) await fs.rename(extractionTemp, paths.extraction);
-    else await fs.rename(thumbnailTemp, paths.thumbnail);
+    else if (!text) await fs.rename(thumbnailTemp, paths.thumbnail);
     insertWithinQuota({ ...metadata, userId, retained });
     return metadata;
   } catch (error) {
@@ -353,7 +363,7 @@ export async function storagePage(userId:string,input:{page?:number;pageSize?:nu
   await ensureLegacyUploadsMigrated();
   const account=db.prepare(`SELECT u.storage_quota_bytes AS quotaBytes,u.trash_quota_bytes AS trashQuotaBytes,COALESCE(SUM(CASE WHEN up.deleted_at IS NULL THEN up.size ELSE 0 END),0) AS usedBytes,COALESCE(SUM(CASE WHEN up.deleted_at IS NOT NULL THEN up.size ELSE 0 END),0) AS trashUsedBytes FROM users u LEFT JOIN uploads up ON up.user_id=u.id WHERE u.id=? GROUP BY u.id`).get(userId) as {quotaBytes:number;trashQuotaBytes:number;usedBytes:number;trashUsedBytes:number}|undefined;
   if(!account)throw Object.assign(new Error("Storage owner not found."),{code:"ENOENT"});
-  const state=input.state==="all"||input.state==="deleted"?input.state:"active";const stateSql=state==="all"?"":state==="deleted"?"AND u.deleted_at IS NOT NULL":"AND u.deleted_at IS NULL";const attachableSql=input.attachableOnly?"AND (u.mime_type LIKE 'image/%' OR u.mime_type='application/pdf')":"";const query=String(input.query||"").trim().slice(0,200);const searchSql=query?"AND instr(lower(u.name),lower(?))>0":"";const filterArgs=query?[query]:[];
+  const state=input.state==="all"||input.state==="deleted"?input.state:"active";const stateSql=state==="all"?"":state==="deleted"?"AND u.deleted_at IS NOT NULL":"AND u.deleted_at IS NULL";const attachableSql=input.attachableOnly?"AND (u.mime_type LIKE 'image/%' OR u.mime_type='application/pdf' OR u.mime_type LIKE 'text/%' OR u.mime_type IN ('application/json','application/xml','application/yaml','application/x-yaml','application/toml'))":"";const query=String(input.query||"").trim().slice(0,200);const searchSql=query?"AND instr(lower(u.name),lower(?))>0":"";const filterArgs=query?[query]:[];
   const total=(db.prepare(`SELECT COUNT(*) AS total FROM uploads u WHERE u.user_id=? ${stateSql} ${attachableSql} ${searchSql}`).get(userId,...filterArgs) as {total:number}).total;
   const pageSize=Math.max(1,Math.min(100,Math.floor(input.pageSize||24)));const pageCount=Math.max(1,Math.ceil(total/pageSize));const page=Math.max(1,Math.min(pageCount,Math.floor(input.page||1)));
   const sort:StorageSort=(["created_desc","created_asc","name_asc","name_desc","size_asc","size_desc"] as StorageSort[]).includes(input.sort as StorageSort)?input.sort as StorageSort:"created_desc";
@@ -478,6 +488,12 @@ export async function readUploadModelContent(id: string, userId: string, setting
     }
     const processed = await pdfModelContent(paths.original, metadata.name, settings, cached, signal);
     return processed.content;
+  }
+  if (isTextAttachmentType(metadata.mimeType)) {
+    const limit = Math.max(settings.textCharacterLimit, settings.pdfTextCharacterLimit);
+    const decoded = decodeTextDocument(await fs.readFile(paths.original, signal ? { signal } : undefined), metadata.mimeType, limit);
+    const note = decoded.truncated ? `\n\n[Truncated after ${limit.toLocaleString("en-US")} characters.]` : "";
+    return [{ type: "text", text: `Attached text file: ${metadata.name}\n\n<file name=${JSON.stringify(metadata.name)}>\n${decoded.text}\n</file>${note}` }];
   }
   throw new Error("Unsupported attachment type.");
 }

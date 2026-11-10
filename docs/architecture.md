@@ -95,7 +95,6 @@
 | 라우트 | 메서드 | 설명 |
 | --- | --- | --- |
 | `/api/config` | GET, PUT | 권한에 맞게 걸러진 설정 읽기·쓰기 |
-| `/api/config/defaults` | PUT | 워크스페이스 기본값 한 키를 모든 계정에 적용(관리자) |
 | `/api/models/detect` | POST | 연결의 모델 목록 감지 |
 | `/api/mcp-connections` | GET, POST | 현재 사용자의 MCP 목록 조회·등록 |
 | `/api/mcp-connections/[id]` | PUT, DELETE | 소유 MCP 수정·삭제 |

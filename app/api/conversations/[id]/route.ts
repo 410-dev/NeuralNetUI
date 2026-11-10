@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { promoteConversation, renameConversation, deleteConversation, readConversation, writeConversation } from "@/lib/conversations";
+import { promoteConversation, renameConversation, setConversationPinned, deleteConversation, readConversation, writeConversation } from "@/lib/conversations";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { clearMcpSessionApprovals, getChatJob } from "@/lib/chat-runtime";
 import { settlePendingTools } from "@/lib/conversation-messages";
@@ -79,6 +79,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const title = await titleFromFirstExchange(id, user.id).catch(() => undefined);
     if (title) renameConversation(id, user.id, title, true);
     return NextResponse.json({ promoted: true, ...(title ? { title } : {}) });
+  }
+  if (typeof body.pinned === "boolean") {
+    return setConversationPinned(id, user.id, body.pinned) ? NextResponse.json({ pinned: body.pinned }) : NextResponse.json({ error: "Conversation not found" }, { status: 404 });
   }
   try {
     return renameConversation(id, user.id, body.title) ? NextResponse.json({ title: String(body.title).trim() }) : NextResponse.json({ error: "Conversation not found" }, { status: 404 });
