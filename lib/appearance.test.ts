@@ -48,7 +48,7 @@ test("stored notes keep only known keys and trim them", () => {
 });
 
 test("appearance preferences fall back to defaults and clamp the per-fragment fade duration", () => {
-  assert.deepEqual(normalizeAppearance(undefined), { lmStudioProgress: "both", accentPalette: "blue", accentColor: "#4d7fd8", streamReveal: "instant", streamFadeDurationMs: 240, showReasoningNotes: true, thinkingIncludesPromptTime: false, thinkingShowsPromptTime: false, reasoningNotes: {}, greetings: {} });
+  assert.deepEqual(normalizeAppearance(undefined), { lmStudioProgress: "both", accentPalette: "blue", accentColor: "#4d7fd8", streamReveal: "instant", streamFadeDurationMs: 240, showReasoningNotes: true, thinkingIncludesPromptTime: true, thinkingShowsPromptTime: true, reasoningNotes: {}, greetings: {} });
   const normalized = normalizeAppearance({ accentPalette: "nope" as never, streamReveal: "fade", streamFadeDurationMs: 999 });
   assert.equal(normalized.accentPalette, "blue");
   assert.equal(normalized.streamFadeDurationMs, 800);
@@ -56,9 +56,9 @@ test("appearance preferences fall back to defaults and clamp the per-fragment fa
 });
 
 test("the two prompt-time options are read independently", () => {
-  const sum = normalizeAppearance({ thinkingIncludesPromptTime: true });
+  const sum = normalizeAppearance({ thinkingShowsPromptTime: false });
   assert.equal(sum.thinkingIncludesPromptTime, true); assert.equal(sum.thinkingShowsPromptTime, false);
-  const beside = normalizeAppearance({ thinkingShowsPromptTime: true, thinkingIncludesPromptTime: "yes" as never });
+  const beside = normalizeAppearance({ thinkingIncludesPromptTime: false });
   assert.equal(beside.thinkingShowsPromptTime, true); assert.equal(beside.thinkingIncludesPromptTime, false);
 });
 

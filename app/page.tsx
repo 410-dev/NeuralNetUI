@@ -157,7 +157,7 @@ const translations = {
     returnToRegularChat: "Return to regular chat", temporaryGreeting: "Hello, traveler", temporaryChatHint: "Chats are not saved",
     reasoningNotesTitle: "Reasoning descriptions", reasoningNotesHelp: "Show a short line under each reasoning choice in the chat picker, and word it however you like.", reasoningNotesReset: "Leave a field empty to use the built-in wording.",
     experimental: "Experimental", experimentalTitle: "Experimental features", experimentalDesc: "Unfinished capabilities. Switch one on to offer it in the chat tool menu.", experimentalBrowser: "Browser tool", experimentalBrowserDesc: "Let the model and you share an isolated headed Chromium session. Open its live split view to click, scroll, type, or complete a human-only step.", experimentalHost: "Host computer tool", experimentalHostDesc: "Superadmin-only control of files, PowerShell/Bash, background programs, temporary uploads, and the current screen. Available only when NeuralNetUI is not running in a container.", experimentalHelp: "While a feature is off, the tool is hidden from the chat menu and refused by the server even if a client asks for it.",
-    outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token", promptProcessingTime: "Prompt processing", reasoningTime: "Thinking", toolTime: "Tool use", totalResponseTime: "Whole response", thinkingTimingTitle: "Thinking time", thinkingTimingHelp: "Choose how prompt processing shows up next to the time a model spent thinking.", thinkingIncludesPrompt: "Count prompt processing as thinking time", thinkingIncludesPromptDesc: "The thinking timer also runs while the prompt is processed, and the total includes it.", thinkingShowsPrompt: "Show prompt processing time alongside", thinkingShowsPromptDesc: "Shows e.g. “Thought for 12 sec (prompt processed in 3 sec)”.",
+    outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token", promptProcessingTime: "Prompt processing", reasoningTime: "Thinking", toolTime: "Tool use", totalResponseTime: "Whole response", thinkingTimingTitle: "Thinking time", thinkingTimingHelp: "Choose how prompt processing shows up next to the time a model spent thinking.", thinkingIncludesPrompt: "Count prompt processing as thinking time", thinkingIncludesPromptDesc: "While a later prompt stage runs, the thinking time above it keeps rising too, and the finished time includes prompt processing.", thinkingShowsPrompt: "Show prompt processing time alongside", thinkingShowsPromptDesc: "Shows e.g. “Thought for 12 sec (prompt processed for 3 sec)”.",
   },
   ko: {
     newChat: "새 채팅", search: "검색", storageManager: "저장소 관리", searchChats: "채팅 검색…", histories: "채팅 기록", pinChat: "상단 고정", unpinChat: "고정 해제", pinnedChat: "고정됨", exportChat: "채팅 내보내기", deleteChat: "대화 삭제", deleteAllChats: "전체 대화 삭제", confirmDeleteChat: "이 대화를 삭제할까요?", confirmDeleteAllChats: "모든 대화 기록을 삭제할까요?",
@@ -205,7 +205,7 @@ const translations = {
     returnToRegularChat: "일반 채팅으로 돌아가기", temporaryGreeting: "안녕하세요, 여행자", temporaryChatHint: "채팅이 저장되지 않습니다",
     reasoningNotesTitle: "추론 강도 설명", reasoningNotesHelp: "채팅의 추론 선택 창에서 각 항목 아래에 짧은 설명을 표시하고, 문구를 직접 바꿉니다.", reasoningNotesReset: "비워 두면 기본 문구를 사용합니다.",
     experimental: "실험적 기능", experimentalTitle: "실험적 기능", experimentalDesc: "아직 완성되지 않은 기능입니다. 켜면 채팅의 도구 메뉴에 나타납니다.", experimentalBrowser: "브라우저 도구", experimentalBrowserDesc: "모델과 사용자가 격리된 화면형 Chromium 세션을 공유합니다. 실시간 스플릿 뷰에서 클릭, 스크롤, 입력 및 사람만 가능한 단계를 처리할 수 있습니다.", experimentalHost: "호스트 컴퓨터 도구", experimentalHostDesc: "Superadmin만 파일, PowerShell/Bash, 백그라운드 프로그램, 임시 업로드 및 현재 화면을 제어할 수 있습니다. NeuralNetUI가 컨테이너 밖에서 실행될 때만 제공됩니다.", experimentalHelp: "기능이 꺼져 있으면 채팅 메뉴에서 도구가 숨겨지고, 클라이언트가 요청해도 서버가 거부합니다.",
-    outputTokens: "출력 토큰", reasoningTokens: "reasoning", tokensPerSecond: "토큰/초", timeToFirstToken: "첫 토큰 도착 시간", promptProcessingTime: "프롬프트 처리", reasoningTime: "생각", toolTime: "도구 사용", totalResponseTime: "최종 응답까지", thinkingTimingTitle: "생각 시간 표시", thinkingTimingHelp: "모델이 생각한 시간 옆에 프롬프트 처리 시간을 어떻게 보여 줄지 정합니다.", thinkingIncludesPrompt: "생각 시간에 프롬프트 처리 시간 합산해서 보이기", thinkingIncludesPromptDesc: "프롬프트를 처리하는 동안에도 생각 시간이 함께 늘어나고, 끝난 뒤에도 합산된 시간으로 표시합니다.", thinkingShowsPrompt: "프롬프트 처리 시간 같이 보이기", thinkingShowsPromptDesc: "“12초 동안 생각함 (3초 프롬프트 처리함)”처럼 함께 표시합니다.",
+    outputTokens: "출력 토큰", reasoningTokens: "reasoning", tokensPerSecond: "토큰/초", timeToFirstToken: "첫 토큰 도착 시간", promptProcessingTime: "프롬프트 처리", reasoningTime: "생각", toolTime: "도구 사용", totalResponseTime: "최종 응답까지", thinkingTimingTitle: "생각 시간 표시", thinkingTimingHelp: "모델이 생각한 시간 옆에 프롬프트 처리 시간을 어떻게 보여 줄지 정합니다.", thinkingIncludesPrompt: "생각 시간에 프롬프트 처리 시간 합산해서 보이기", thinkingIncludesPromptDesc: "다음 프롬프트를 처리하는 동안 위의 생각 시간도 함께 늘어나고, 끝난 뒤에도 프롬프트 처리 시간을 더한 값으로 표시합니다.", thinkingShowsPrompt: "프롬프트 처리 시간 같이 보이기", thinkingShowsPromptDesc: "“12초 동안 생각함 (3초 동안 프롬프트 처리함)”처럼 함께 표시하며, 프롬프트를 처리하는 동안 괄호 안의 시간이 늘어납니다.",
   },
 } as const;
 type CopySet = typeof translations.en | typeof translations.ko;
@@ -2122,12 +2122,16 @@ function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, r
   if (message.role === "user") return <div className="message-row user-message" data-message-id={message.id}><div className="user-message-actions"><div className="user-message-toolbar"><button title={c.regenerateRequest} aria-label={c.regenerateRequest} onClick={() => onRegenerateUser(message.id)}><RefreshCw size={13} /></button>{message.content && <button title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={13} /></button>}<button title={c.editBranch} aria-label={c.editBranch} onClick={() => setEditing(true)}><Pencil size={13} /></button><button className="delete" title={c.deleteMessage} aria-label={c.deleteMessage} onClick={() => onDeleteUser(message.id)}><Trash2 size={13} /></button></div><div className="user-message-stack long-press-target" {...longPress}><div className="user-message-content">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}{message.content && <div className="message-bubble">{message.content}</div>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /></div></div>{editing && <TextDialog ko={locale === "ko"} title={c.editMessage} value={message.content} multiline saveLabel={c.forkSend} saveIcon={<GitBranch size={14} />} cancelLabel={c.cancel} preface={message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null} onClose={() => setEditing(false)} onSave={(value) => { if (value !== message.content) onFork(message.id, value); setEditing(false); }} />}{actions}</div>;
   const steps = displaySteps(transcriptSteps(message), (ids) => formatToolCallMarkers(stepToolEvents(ids, message.toolEvents), locale));
   const liveContentIndex = lastContentStep(steps);
+  // A prompt stage running now belongs to the last thinking block when no answer text has come after it, since the
+  // next round's reasoning will be merged into that same block.
+  const lastReasoningIndex = steps.findLastIndex(step => step.kind === "reasoning");
+  const promptStageStartedAt = pending && waitPhase === "processing-prompt" && lastReasoningIndex >= 0 && !steps.slice(lastReasoningIndex + 1).some(step => step.kind === "content") ? waitStartedAt ?? Date.now() : undefined;
   const wholeReasoning = reasoningStepIsWhole(message);
-  const waitStatus = pending && waitPhase ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{waitPhase === "processing-prompt" ? <PromptWaitLabel locale={locale} startedAt={waitStartedAt} appearance={appearance} /> : chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
+  const waitStatus = pending && waitPhase ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{waitPhase === "processing-prompt" ? <PromptWaitLabel locale={locale} startedAt={waitStartedAt} /> : chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
   return <div className="message-row assistant-message long-press-target" {...longPress}>
     {message.attachments?.length ? <AssistantAttachmentGallery attachments={message.attachments} /> : null}
     {steps.map((step, index) => {
-      if (step.kind === "reasoning") return <ReasoningStep key={index} c={c} locale={locale} text={wholeReasoning ? displayedReasoning : step.text} seconds={step.seconds} startedAt={step.startedAt} promptSeconds={step.promptSeconds} appearance={appearance} live={pending && Boolean(step.live)} />;
+      if (step.kind === "reasoning") return <ReasoningStep key={index} c={c} locale={locale} text={wholeReasoning ? displayedReasoning : step.text} seconds={step.seconds} startedAt={step.startedAt} promptSeconds={step.promptSeconds} promptStageStartedAt={index === lastReasoningIndex ? promptStageStartedAt : undefined} appearance={appearance} live={pending && Boolean(step.live)} />;
       if (step.kind === "compaction") return <CompactionStep key={index} c={c} locale={locale} step={step} live={pending && Boolean(step.live) && step.seconds === undefined} />;
       if (step.kind === "tools") {
         const events = stepToolEvents(step.ids, message.toolEvents);
@@ -2199,41 +2203,42 @@ function RollingDuration({ seconds, locale, live }: { seconds: number; locale: L
   return <span className="rolling-duration" aria-hidden="true">{minutes > 0 && <><RollingNumber value={minutes} live={live} fresh={mounted.current} />{locale === "ko" ? "분 " : " min "}</>}<RollingNumber value={rest} live={live} />{locale === "ko" ? "초" : " sec"}</span>;
 }
 
-/** "12초 동안 생각 중", "1분 3초 동안 생각함", with an optional "(3초 프롬프트 처리함)". Each part says 중 or 함 by its own state. */
+/** "12초 동안 생각 중", "1분 3초 동안 생각함", with an optional "(3초 동안 프롬프트 처리함)". Each part says 중 or 함 by its own state. */
 function ThinkingLabel({ locale, seconds, live, promptSeconds, promptLive }: { locale: Locale; seconds: number; live: boolean; promptSeconds?: number; promptLive: boolean }) {
   const ko = locale === "ko";
   const thinking = ko ? `${durationText(seconds, locale)} 동안 ${live ? "생각 중" : "생각함"}` : `${live ? "Thinking for" : "Thought for"} ${durationText(seconds, locale)}`;
-  const prompt = promptSeconds === undefined ? "" : ko ? ` (${durationText(promptSeconds, locale)} 프롬프트 ${promptLive ? "처리 중" : "처리함"})` : ` (${promptLive ? "processing prompt for" : "prompt processed in"} ${durationText(promptSeconds, locale)})`;
+  const prompt = promptSeconds === undefined ? "" : ko ? ` (${durationText(promptSeconds, locale)} 동안 프롬프트 ${promptLive ? "처리 중" : "처리함"})` : ` (${promptLive ? "processing prompt for" : "prompt processed for"} ${durationText(promptSeconds, locale)})`;
   const time = <RollingDuration seconds={seconds} locale={locale} live={live} />;
   const promptTime = promptSeconds === undefined ? null : <RollingDuration seconds={promptSeconds} locale={locale} live={promptLive} />;
   return <span className="timed-label"><span className="visually-hidden">{thinking}{prompt}</span>
     {ko ? <span aria-hidden="true">{time} 동안 {live ? "생각 중" : "생각함"}</span> : <span aria-hidden="true">{live ? "Thinking for" : "Thought for"} {time}</span>}
-    {promptTime && <span className="timed-label-aside" aria-hidden="true">{ko ? <>({promptTime} 프롬프트 {promptLive ? "처리 중" : "처리함"})</> : <>({promptLive ? "processing prompt for" : "prompt processed in"} {promptTime})</>}</span>}
+    {promptTime && <span className="timed-label-aside" aria-hidden="true">{ko ? <>({promptTime} 동안 프롬프트 {promptLive ? "처리 중" : "처리함"})</> : <>({promptLive ? "processing prompt for" : "prompt processed for"} {promptTime})</>}</span>}
   </span>;
 }
 
-/**
- * The live prompt-processing line. Each stage counts from its own start; stages are not added together. With
- * "include prompt time in thinking" on, it already counts as thinking; with "show prompt time" on, both are named.
- */
-function PromptWaitLabel({ locale, startedAt, appearance }: { locale: Locale; startedAt?: number; appearance: AppearancePreferences }) {
+/** The live prompt-processing line: "12초 동안 프롬프트 처리 중". Each stage counts from its own start; stages are not added together. */
+function PromptWaitLabel({ locale, startedAt }: { locale: Locale; startedAt?: number }) {
   const mountedAt = useRef(Date.now());
   const now = useTicker(true);
   const seconds = Math.floor(Math.max(0, now - (startedAt ?? mountedAt.current)) / 1000);
-  if (appearance.thinkingIncludesPromptTime) return <ThinkingLabel locale={locale} seconds={seconds} live promptSeconds={appearance.thinkingShowsPromptTime ? seconds : undefined} promptLive />;
   const text = locale === "ko" ? `${durationText(seconds, locale)} 동안 프롬프트 처리 중` : `Processing prompt for ${durationText(seconds, locale)}`;
   const time = <RollingDuration seconds={seconds} locale={locale} live />;
   return <span className="timed-label"><span className="visually-hidden">{text}</span><span aria-hidden="true">{locale === "ko" ? <>{time} 동안 프롬프트 처리 중</> : <>Processing prompt for {time}</>}</span></span>;
 }
 
-function ReasoningStep({ c, locale, text, seconds, startedAt, promptSeconds, appearance, live }: { c: CopySet; locale: Locale; text: string; seconds?: number; startedAt?: number; promptSeconds?: number; appearance: AppearancePreferences; live: boolean }) {
+function ReasoningStep({ c, locale, text, seconds, startedAt, promptSeconds, promptStageStartedAt, appearance, live }: { c: CopySet; locale: Locale; text: string; seconds?: number; startedAt?: number; promptSeconds?: number; promptStageStartedAt?: number; appearance: AppearancePreferences; live: boolean }) {
   const [open, setOpen] = useState(false);
   const mountedAt = useRef(Date.now());
-  const now = useTicker(live);
-  // Whole seconds, so the prompt time added to thinking matches the prompt time shown beside it.
-  const prompt = Math.floor(promptSeconds || 0);
+  const stageLive = promptStageStartedAt !== undefined;
+  const now = useTicker(live || stageLive);
+  // Whole seconds throughout, so the prompt time added to thinking matches the prompt time shown beside it.
+  const stageSeconds = stageLive ? Math.floor(Math.max(0, now - promptStageStartedAt) / 1000) : 0;
+  const prompt = Math.floor(promptSeconds || 0) + stageSeconds;
   const thought = live ? (seconds || 0) + Math.max(0, (now - (startedAt !== undefined ? startedAt + serverClockOffset : mountedAt.current)) / 1000) : Math.max(1, seconds || 1);
-  const shownThought = appearance.thinkingIncludesPromptTime ? thought + prompt : thought;
+  const summed = appearance.thinkingIncludesPromptTime;
+  const shownThought = summed ? thought + prompt : thought;
+  // The thinking number is counting whenever the model reasons, or, with prompt time added in, while a prompt stage runs.
+  const thinkingLive = live || summed && stageLive;
   const [autoFollow, setAutoFollow] = useState(true);
   const autoFollowRef = useRef(true);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -2253,7 +2258,7 @@ function ReasoningStep({ c, locale, text, seconds, startedAt, promptSeconds, app
   }
   const shown = live || open;
   return <div className={`thinking-block ${live ? "streaming" : ""}`}>
-    <button onClick={() => !live && setOpen((value) => !value)} aria-expanded={shown}><Lightbulb size={15} /> <ThinkingLabel locale={locale} seconds={live ? Math.floor(shownThought) : Math.max(1, Math.round(shownThought))} live={live} promptSeconds={appearance.thinkingShowsPromptTime && prompt >= 1 ? prompt : undefined} promptLive={false} /> {!live && <ChevronRight size={14} className={open ? "disclosure-open" : ""} />}</button>
+    <button onClick={() => !live && setOpen((value) => !value)} aria-expanded={shown}><Lightbulb size={15} /> <ThinkingLabel locale={locale} seconds={live ? Math.floor(shownThought) : Math.max(1, Math.round(shownThought))} live={thinkingLive} promptSeconds={appearance.thinkingShowsPromptTime && (prompt >= 1 || stageLive) ? prompt : undefined} promptLive={stageLive} /> {!live && <ChevronRight size={14} className={open ? "disclosure-open" : ""} />}</button>
     {shown && <div className="thinking-preview-shell"><div ref={bodyRef} className={`thinking-preview ${live ? "live" : ""}`} onScroll={handleScroll}>{text}</div>{live && !autoFollow && <button type="button" className="scroll-resume reasoning-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeAutoFollow}><ArrowDown size={16} /></button>}</div>}
   </div>;
 }
