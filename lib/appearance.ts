@@ -18,6 +18,8 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   streamReveal: "instant",
   streamFadeDurationMs: 240,
   showReasoningNotes: true,
+  thinkingIncludesPromptTime: false,
+  thinkingShowsPromptTime: false,
   reasoningNotes: {},
   greetings: {},
 };
@@ -141,6 +143,8 @@ export function normalizeAppearance(input: Partial<AppearancePreferences> | unde
     streamReveal: input?.streamReveal === "fade" ? "fade" : "instant",
     streamFadeDurationMs: clamp(Math.floor(Number(input?.streamFadeDurationMs) || DEFAULT_APPEARANCE.streamFadeDurationMs), 80, 800),
     showReasoningNotes: input?.showReasoningNotes !== false,
+    thinkingIncludesPromptTime: input?.thinkingIncludesPromptTime === true,
+    thinkingShowsPromptTime: input?.thinkingShowsPromptTime === true,
     reasoningNotes: normalizeReasoningNotes(input?.reasoningNotes),
     greetings: normalizeGreetings(input?.greetings),
   };

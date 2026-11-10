@@ -52,6 +52,9 @@ export function displaySteps(steps: MessageStep[], toolMarker?: (ids: string[]) 
         const joined = [reasoning.text.replace(/\s+$/, ""), marker, step.text.replace(/^\s+/, "")].filter(Boolean).join("\n\n");
         reasoning.text = joined;
         if (reasoning.seconds !== undefined || step.seconds !== undefined) reasoning.seconds = (reasoning.seconds ?? 0) + (step.seconds ?? 0);
+        // A live merged block counts the finished rounds (seconds) plus the open round from its own start.
+        if (step.startedAt !== undefined) reasoning.startedAt = step.startedAt;
+        if (reasoning.promptSeconds !== undefined || step.promptSeconds !== undefined) reasoning.promptSeconds = Math.round(((reasoning.promptSeconds ?? 0) + (step.promptSeconds ?? 0)) * 10) / 10;
       }
       pendingToolIds = [];
       reasoning.live = last && step.seconds === undefined;

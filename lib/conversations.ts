@@ -22,8 +22,10 @@ const messageSchema = z.object({
   completionDurationSeconds: z.number().nonnegative().optional(),
   contextTokens: z.number().int().nonnegative().optional(),
   timeToFirstTokenSeconds: z.number().nonnegative().optional(),
+  promptProcessingSeconds: z.number().nonnegative().optional(),
+  totalDurationSeconds: z.number().nonnegative().optional(),
   steps: z.array(z.discriminatedUnion("kind", [
-    z.object({ kind: z.literal("reasoning"), text: z.string(), seconds: z.number().nonnegative().optional() }),
+    z.object({ kind: z.literal("reasoning"), text: z.string(), seconds: z.number().nonnegative().optional(), startedAt: z.number().nonnegative().optional(), promptSeconds: z.number().nonnegative().optional() }),
     z.object({ kind: z.literal("content"), text: z.string() }),
     z.object({ kind: z.literal("tools"), ids: z.array(z.string().min(1)) }),
     z.object({ kind: z.literal("compaction"), seconds: z.number().nonnegative().optional(), summary: z.string().optional(), reasoning: z.string().optional(), retainedToolIds: z.array(z.string().min(1)).optional() }),
@@ -147,7 +149,7 @@ function storeConversation(record: Conversation, userId: string, guard?: () => b
           toolEvents: message.toolEvents?.length ? JSON.stringify(message.toolEvents) : null,
           steps: message.steps?.length ? JSON.stringify(message.steps) : null,
         });
-        db.prepare("UPDATE messages SET context_tokens = ? WHERE id = ? AND conversation_id = ?").run(message.contextTokens ?? null, message.id, record.id);
+        db.prepare("UPDATE messages SET context_tokens = ?, prompt_processing_seconds = ?, total_duration_seconds = ? WHERE id = ? AND conversation_id = ?").run(message.contextTokens ?? null, message.promptProcessingSeconds ?? null, message.totalDurationSeconds ?? null, message.id, record.id);
         insertBranchMessage.run(branch.id, message.id, messagePosition);
         for (const [attachmentPosition, attachment] of (message.attachments || []).entries()) {
           insertAttachment.run(message.id, attachment.id, attachmentPosition);
@@ -323,6 +325,8 @@ type MessageRow = {
   total_tokens: number | null;
   completion_duration_seconds: number | null;
   time_to_first_token_seconds: number | null;
+  prompt_processing_seconds: number | null;
+  total_duration_seconds: number | null;
   context_tokens: number | null;
   tool_events: string | null;
   steps: string | null;
@@ -347,7 +351,7 @@ async function readConversationRecord(id: string, userId: string, includeDeleted
   const branchRows = db.prepare("SELECT id, name, parent_branch_id, forked_from_message_id, created_at, updated_at FROM branches WHERE conversation_id = ? ORDER BY position").all(id) as BranchRow[];
   const messageRows = db.prepare(`
     SELECT bm.branch_id, m.id, m.revision_group_id, m.role, m.content, m.reasoning, m.reasoning_duration_seconds,
-           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.context_tokens, m.tool_events, m.steps, m.created_at
+           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.prompt_processing_seconds, m.total_duration_seconds, m.context_tokens, m.tool_events, m.steps, m.created_at
     FROM branch_messages bm
     JOIN messages m ON m.id = bm.message_id
     JOIN branches b ON b.id = bm.branch_id
@@ -390,6 +394,8 @@ async function readConversationRecord(id: string, userId: string, includeDeleted
       completionDurationSeconds: row.completion_duration_seconds ?? undefined,
       contextTokens: row.context_tokens ?? undefined,
       timeToFirstTokenSeconds: row.time_to_first_token_seconds ?? undefined,
+      promptProcessingSeconds: row.prompt_processing_seconds ?? undefined,
+      totalDurationSeconds: row.total_duration_seconds ?? undefined,
       toolEvents: row.tool_events ? JSON.parse(row.tool_events) : undefined,
       steps: row.steps ? JSON.parse(row.steps) : undefined,
       attachments: attachments.get(row.id),

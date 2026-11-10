@@ -50,6 +50,10 @@ export type ChatJobSnapshot = {
   waitProgress?: number;
   /** The latest loop found in this response; the client offers to stop, retry or ignore it. */
   repetition?: RepetitionFinding;
+  /** Server clock (epoch ms) when the current wait phase began, for a live "n seconds" label. */
+  waitPhaseStartedAt?: number;
+  /** Server clock when this snapshot was made, so the browser can correct for its own clock. */
+  serverTime: number;
 };
 
 export type StartChatJobInput = {
@@ -97,6 +101,10 @@ type ChatJob = {
   repetitionRules: RepetitionSettings;
   repetition?: RepetitionFinding;
   repetitionCheck: { size: number; at: number };
+  startedAt: number;
+  waitPhaseStartedAt?: number;
+  /** The prompt-processing stage that just ended, waiting to be stamped on the reasoning step that follows it. */
+  lastPromptSeconds?: number;
 };
 
 declare global {
@@ -124,11 +132,37 @@ function appendStep(job: ChatJob, kind: "reasoning" | "content", text: string) {
   const steps = job.message.steps ? [...job.message.steps] : [];
   const last = steps.at(-1);
   if (last && last.kind === kind) steps[steps.length - 1] = { ...last, text: last.text + text };
-  else steps.push(kind === "reasoning" ? { kind, text } : { kind, text });
+  else {
+    steps.push(kind === "reasoning" ? { kind, text, startedAt: Date.now(), ...(job.lastPromptSeconds ? { promptSeconds: roundTenth(job.lastPromptSeconds) } : {}) } : { kind, text });
+    job.lastPromptSeconds = undefined;
+  }
   job.message = { ...job.message, steps };
 }
 
+const roundTenth = (seconds: number) => Math.round(seconds * 10) / 10;
+
+/**
+ * Times wait phases. Leaving a prompt-processing stage adds it to the message's total and keeps it for the reasoning
+ * step that follows; stages are not merged, so each one is shown on its own.
+ */
+function trackPhase(job: ChatJob, next?: ChatWaitPhase) {
+  if (job.waitPhase === next) return;
+  const now = Date.now();
+  if (job.waitPhase === "processing-prompt" && job.waitPhaseStartedAt) {
+    const seconds = Math.max(0, (now - job.waitPhaseStartedAt) / 1000);
+    job.message = { ...job.message, promptProcessingSeconds: roundTenth((job.message.promptProcessingSeconds || 0) + seconds) };
+    job.lastPromptSeconds = seconds;
+  }
+  job.waitPhaseStartedAt = next ? now : undefined;
+}
+
+/** Stamps how long the whole response took, from the request reaching the server. */
+function stampTotalDuration(job: ChatJob) {
+  job.message = { ...job.message, totalDurationSeconds: roundTenth(Math.max(0, (Date.now() - job.startedAt) / 1000)) };
+}
+
 function pushStep(job: ChatJob, step: MessageStep) {
+  if (step.kind === "tools") job.lastPromptSeconds = undefined;
   job.message = { ...job.message, steps: [...(job.message.steps || []), step] };
 }
 
@@ -177,7 +211,7 @@ function beginToolCompaction(job: ChatJob) {
 }
 
 function snapshot(job: ChatJob): ChatJobSnapshot {
-  return { conversationId: job.input.conversationId, branchId: job.input.branchId, status: job.status, message: job.message, waitPhase: job.waitPhase, waitProgress: job.waitProgress, ...(job.repetition ? { repetition: job.repetition } : {}), ...(job.error ? { error: job.error } : {}) };
+  return { conversationId: job.input.conversationId, branchId: job.input.branchId, status: job.status, message: job.message, waitPhase: job.waitPhase, waitProgress: job.waitProgress, ...(job.repetition ? { repetition: job.repetition } : {}), ...(job.waitPhase && job.waitPhaseStartedAt ? { waitPhaseStartedAt: job.waitPhaseStartedAt } : {}), serverTime: Date.now(), ...(job.error ? { error: job.error } : {}) };
 }
 
 /**
@@ -202,7 +236,7 @@ function inspectRepetition(job: ChatJob, streamingCalls: ToolCall[] = [], force 
 
 function setWaitPhase(job: ChatJob, phase?: ChatWaitPhase) {
   if (job.discarded || job.controller.signal.aborted || !["running", "waiting"].includes(job.status) || job.waitPhase === phase) return;
-  job.waitPhase = phase; job.waitProgress = undefined;
+  trackPhase(job, phase); job.waitPhase = phase; job.waitProgress = undefined;
   if (phase === "compacting-context" && !(job.message.steps || []).some(step => step.kind === "compaction" && step.seconds === undefined)) pushStep(job, { kind: "compaction" });
   broadcast(job, true);
 }
@@ -211,7 +245,7 @@ function setWaitProgress(job: ChatJob, phase: ChatWaitPhase, progress: number) {
   if (job.discarded || job.controller.signal.aborted || job.status !== "running" || !Number.isFinite(progress)) return;
   const percent = Math.round(Math.max(0, Math.min(1, progress)) * 100);
   if (job.waitPhase === phase && job.waitProgress === percent) return;
-  job.waitPhase = phase; job.waitProgress = percent;
+  trackPhase(job, phase); job.waitPhase = phase; job.waitProgress = percent;
   // A cached prompt may finish inside the text stream's 80ms batching interval.
   // Publish progress transitions before the first output clears them.
   broadcast(job, true);
@@ -619,7 +653,7 @@ async function run(job: ChatJob) {
         completionDurationSeconds: elapsedSeconds,
       };
       recordTokenUsage(job.userId, chargeModelId, generated.usage.inputTokens, generated.usage.outputTokens);
-      job.waitPhase = undefined; job.waitProgress = undefined; job.status = "completed";
+      trackPhase(job); stampTotalDuration(job); job.waitPhase = undefined; job.waitProgress = undefined; job.status = "completed";
       await persist(job); broadcast(job, true); finishSubscribers(job); return;
     }
     let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt, config.toolSettings, model);
@@ -810,7 +844,7 @@ async function run(job: ChatJob) {
           timeToFirstTokenSeconds: Math.max(0, (performance.now() - requestStartedAt - (result.visibleDurationSeconds || 0) * 1000) / 1000) };
         releaseModel?.(); releaseModel = undefined;
         if (harness.titleTiming === "after") await generateTitle();
-        job.waitPhase = undefined; job.waitProgress = undefined; job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
+        trackPhase(job); stampTotalDuration(job); job.waitPhase = undefined; job.waitProgress = undefined; job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
       }
       messages.push({ role: "assistant", content: result.content, ...(result.reasoning ? { reasoning_content: result.reasoning } : {}), tool_calls: result.calls });
       if (serverMeasuredInput) { measuredInput = serverMeasuredInput; measuredEstimate = estimateTokens(messages) + estimateTokens(tools); }
@@ -839,6 +873,7 @@ async function run(job: ChatJob) {
     throw new Error("The model repeated tool calls too many times.");
   } catch (error) {
     const stopped = (error as Error).name === "AbortError" || job.controller.signal.aborted;
+    trackPhase(job); stampTotalDuration(job);
     job.message = settlePendingTools([job.message])[0];
     job.waitPhase = undefined; job.waitProgress = undefined;
     job.status = stopped ? "stopped" : "error"; job.error = stopped ? undefined : error instanceof Error ? error.message : "Chat generation failed.";
@@ -872,6 +907,7 @@ export async function startChatJob(input: StartChatJobInput, userId: string, use
   const job: ChatJob = {
     userId, userRole, input, conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
     repetitionRules: normalizeRepetitionSettings(config.harnessSettings?.repetitionDetection), repetitionCheck: { size: 0, at: 0 },
+    startedAt: Date.now(), waitPhaseStartedAt: Date.now(),
     message: { id: input.assistantMessageId, revisionGroupId: input.revisionGroupId, role: "assistant", content: "", reasoning: "", toolEvents: [], createdAt: new Date().toISOString() },
   };
   if (existing) discardJob(existing);

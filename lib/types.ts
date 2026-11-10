@@ -25,6 +25,10 @@ export interface AppearancePreferences {
   streamFadeDurationMs: number;
   /** Show each reasoning choice's description in the chat picker. */
   showReasoningNotes: boolean;
+  /** Count the prompt-processing time into the thinking time shown on a reasoning step. */
+  thinkingIncludesPromptTime: boolean;
+  /** Show the prompt-processing time next to the thinking time, e.g. "12초 동안 생각함 (3초 프롬프트 처리함)". */
+  thinkingShowsPromptTime: boolean;
   /** Per-effort description overrides. An absent key falls back to the built-in wording. */
   reasoningNotes: Record<string, string>;
   greetings: GreetingOverrides;
@@ -310,7 +314,8 @@ export interface ToolSettings {
  * so copying, export and upstream history are unaffected.
  */
 export type MessageStep =
-  | { kind: "reasoning"; text: string; seconds?: number }
+  /** `startedAt` is the server clock (epoch ms) when the step opened; `promptSeconds` is the prompt-processing stage that ran just before it. */
+  | { kind: "reasoning"; text: string; seconds?: number; startedAt?: number; promptSeconds?: number }
   | { kind: "content"; text: string }
   | { kind: "tools"; ids: string[] }
   | { kind: "compaction"; seconds?: number; summary?: string; reasoning?: string; retainedToolIds?: string[] };
@@ -329,6 +334,10 @@ export interface StoredMessage {
   completionDurationSeconds?: number;
   timeToFirstTokenSeconds?: number;
   contextTokens?: number;
+  /** Every prompt-processing stage of the response added together. */
+  promptProcessingSeconds?: number;
+  /** From the request reaching the server to the response ending. */
+  totalDurationSeconds?: number;
   /** Absent on messages written before the sequential transcript existed. */
   steps?: MessageStep[];
   toolEvents?: ToolEvent[];

@@ -34,6 +34,8 @@ const appearanceSchema = z.object({
   streamReveal: z.enum(["instant", "fade"]).default("instant"),
   streamFadeDurationMs: z.number().int().min(80).max(800).default(DEFAULT_APPEARANCE.streamFadeDurationMs),
   showReasoningNotes: z.boolean().default(true),
+  thinkingIncludesPromptTime: z.boolean().default(false),
+  thinkingShowsPromptTime: z.boolean().default(false),
   greetings: z.object({
     ko: z.partialRecord(z.enum(["earlyDawn", "morning", "midday", "afternoon", "evening", "night", "lateNight"]), z.array(z.string().max(200)).max(5)).optional(),
     en: z.partialRecord(z.enum(["earlyDawn", "morning", "midday", "afternoon", "evening", "night", "lateNight"]), z.array(z.string().max(200)).max(5)).optional(),

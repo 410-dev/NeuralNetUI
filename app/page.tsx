@@ -86,7 +86,7 @@ type QueuedPrompt = {
   tools: EnabledTools;
 };
 type CompletionOptions = Omit<QueuedPrompt, "id" | "content" | "attachments">;
-type ChatJobSnapshot = { conversationId: string; branchId: string; status: "running" | "waiting" | "completed" | "stopped" | "error"; message: StoredMessage; error?: string; waitPhase?: ChatWaitPhase; waitProgress?: number; repetition?: RepetitionFinding };
+type ChatJobSnapshot = { conversationId: string; branchId: string; status: "running" | "waiting" | "completed" | "stopped" | "error"; message: StoredMessage; error?: string; waitPhase?: ChatWaitPhase; waitProgress?: number; repetition?: RepetitionFinding; waitPhaseStartedAt?: number; serverTime?: number };
 const emptyConfig: PublicConfig = {
   connections: [{ id: "openai-default", name: "OpenAI API", driver: "openai", baseUrl: "http://localhost:8888/v1", apiKey: "", hasApiKey: false, models: [] }],
   profile: { name: "" },
@@ -157,7 +157,7 @@ const translations = {
     returnToRegularChat: "Return to regular chat", temporaryGreeting: "Hello, traveler", temporaryChatHint: "Chats are not saved",
     reasoningNotesTitle: "Reasoning descriptions", reasoningNotesHelp: "Show a short line under each reasoning choice in the chat picker, and word it however you like.", reasoningNotesReset: "Leave a field empty to use the built-in wording.",
     experimental: "Experimental", experimentalTitle: "Experimental features", experimentalDesc: "Unfinished capabilities. Switch one on to offer it in the chat tool menu.", experimentalBrowser: "Browser tool", experimentalBrowserDesc: "Let the model and you share an isolated headed Chromium session. Open its live split view to click, scroll, type, or complete a human-only step.", experimentalHost: "Host computer tool", experimentalHostDesc: "Superadmin-only control of files, PowerShell/Bash, background programs, temporary uploads, and the current screen. Available only when NeuralNetUI is not running in a container.", experimentalHelp: "While a feature is off, the tool is hidden from the chat menu and refused by the server even if a client asks for it.",
-    outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token",
+    outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token", promptProcessingTime: "Prompt processing", reasoningTime: "Thinking", toolTime: "Tool use", totalResponseTime: "Whole response", thinkingTimingTitle: "Thinking time", thinkingTimingHelp: "Choose how prompt processing shows up next to the time a model spent thinking.", thinkingIncludesPrompt: "Count prompt processing as thinking time", thinkingIncludesPromptDesc: "The thinking timer also runs while the prompt is processed, and the total includes it.", thinkingShowsPrompt: "Show prompt processing time alongside", thinkingShowsPromptDesc: "Shows e.g. “Thought for 12 sec (prompt processed in 3 sec)”.",
   },
   ko: {
     newChat: "새 채팅", search: "검색", storageManager: "저장소 관리", searchChats: "채팅 검색…", histories: "채팅 기록", pinChat: "상단 고정", unpinChat: "고정 해제", pinnedChat: "고정됨", exportChat: "채팅 내보내기", deleteChat: "대화 삭제", deleteAllChats: "전체 대화 삭제", confirmDeleteChat: "이 대화를 삭제할까요?", confirmDeleteAllChats: "모든 대화 기록을 삭제할까요?",
@@ -205,7 +205,7 @@ const translations = {
     returnToRegularChat: "일반 채팅으로 돌아가기", temporaryGreeting: "안녕하세요, 여행자", temporaryChatHint: "채팅이 저장되지 않습니다",
     reasoningNotesTitle: "추론 강도 설명", reasoningNotesHelp: "채팅의 추론 선택 창에서 각 항목 아래에 짧은 설명을 표시하고, 문구를 직접 바꿉니다.", reasoningNotesReset: "비워 두면 기본 문구를 사용합니다.",
     experimental: "실험적 기능", experimentalTitle: "실험적 기능", experimentalDesc: "아직 완성되지 않은 기능입니다. 켜면 채팅의 도구 메뉴에 나타납니다.", experimentalBrowser: "브라우저 도구", experimentalBrowserDesc: "모델과 사용자가 격리된 화면형 Chromium 세션을 공유합니다. 실시간 스플릿 뷰에서 클릭, 스크롤, 입력 및 사람만 가능한 단계를 처리할 수 있습니다.", experimentalHost: "호스트 컴퓨터 도구", experimentalHostDesc: "Superadmin만 파일, PowerShell/Bash, 백그라운드 프로그램, 임시 업로드 및 현재 화면을 제어할 수 있습니다. NeuralNetUI가 컨테이너 밖에서 실행될 때만 제공됩니다.", experimentalHelp: "기능이 꺼져 있으면 채팅 메뉴에서 도구가 숨겨지고, 클라이언트가 요청해도 서버가 거부합니다.",
-    outputTokens: "출력 토큰", reasoningTokens: "reasoning", tokensPerSecond: "토큰/초", timeToFirstToken: "첫 토큰 도착 시간",
+    outputTokens: "출력 토큰", reasoningTokens: "reasoning", tokensPerSecond: "토큰/초", timeToFirstToken: "첫 토큰 도착 시간", promptProcessingTime: "프롬프트 처리", reasoningTime: "생각", toolTime: "도구 사용", totalResponseTime: "최종 응답까지", thinkingTimingTitle: "생각 시간 표시", thinkingTimingHelp: "모델이 생각한 시간 옆에 프롬프트 처리 시간을 어떻게 보여 줄지 정합니다.", thinkingIncludesPrompt: "생각 시간에 프롬프트 처리 시간 합산해서 보이기", thinkingIncludesPromptDesc: "프롬프트를 처리하는 동안에도 생각 시간이 함께 늘어나고, 끝난 뒤에도 합산된 시간으로 표시합니다.", thinkingShowsPrompt: "프롬프트 처리 시간 같이 보이기", thinkingShowsPromptDesc: "“12초 동안 생각함 (3초 프롬프트 처리함)”처럼 함께 표시합니다.",
   },
 } as const;
 type CopySet = typeof translations.en | typeof translations.ko;
@@ -255,12 +255,6 @@ function ModelImageBadge({model,c}:{model:ModelConfig;c:CopySet}){
   if(model.imageGeneration!==true)return null;
   const input=model.imageInput!==false,label=input?c.imageGenerationBadge:c.imageGenerationNoInputBadge;
   return <b className={`model-image-badge ${input?"":"no-input"}`} title={label} aria-label={label}>{input?<ImageIcon size={12}/>:<ImageOff size={12}/>}</b>;
-}
-
-function formatThoughtDuration(totalSeconds: number, locale: Locale) {
-  const total = Math.max(1, Math.round(totalSeconds)); const minutes = Math.floor(total / 60); const seconds = total % 60;
-  if (locale === "ko") return `${minutes ? `${minutes}분 ` : ""}${seconds}초 동안 생각함`;
-  return `Thought for ${minutes ? `${minutes} min ` : ""}${seconds} sec`;
 }
 
 function formatCompactionDuration(totalSeconds: number, locale: Locale) {
@@ -376,7 +370,7 @@ export default function Home() {
   const [exportOpen, setExportOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [pendingWait, setPendingWait] = useState<{ messageId: string; phase: ChatWaitPhase; progress?: number } | null>(null);
+  const [pendingWait, setPendingWait] = useState<{ messageId: string; phase: ChatWaitPhase; progress?: number; startedAt?: number } | null>(null);
   const [error, setError] = useState("");
   const [searching, setSearching] = useState(false);
   const [storageOpen, setStorageOpen] = useState(false);
@@ -1113,7 +1107,8 @@ export default function Home() {
               const next = JSON.parse(data) as ChatJobSnapshot;
               baseMessages = [...baseMessages.filter((message) => message.id !== next.message.id), next.message];
               setMessages(baseMessages);
-              setPendingWait(next.waitPhase ? { messageId: next.message.id, phase: next.waitPhase, progress: next.waitProgress } : null);
+              if (next.serverTime) serverClockOffset = Date.now() - next.serverTime;
+              setPendingWait(next.waitPhase ? { messageId: next.message.id, phase: next.waitPhase, progress: next.waitProgress, startedAt: next.waitPhaseStartedAt === undefined ? undefined : next.waitPhaseStartedAt + serverClockOffset } : null);
               setRepetitionAlert(next.repetition && ["running", "waiting"].includes(next.status) ? { conversationId: next.conversationId, messageId: next.message.id, finding: next.repetition } : null);
               setConversation((current) => current ? { ...current, branches: current.branches.map((item) => item.id === next.branchId ? { ...item, messages: baseMessages } : item) } : current);
               const waitingLocation = next.message.toolEvents?.find((event) => event.name === "get_current_location" && event.status === "waiting");
@@ -1479,7 +1474,7 @@ export default function Home() {
             <div className="thread-shell">
               <div className={`thread ${activityHidden ? "activity-hidden" : ""}`} ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
                 {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
-                {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
+                {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} waitStartedAt={pendingWait?.messageId === message.id ? pendingWait.startedAt : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
               </div>
               {!threadAutoFollow && <button type="button" className="scroll-resume thread-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeThreadAutoFollow}><ArrowDown size={18} /></button>}
             </div>
@@ -1869,15 +1864,34 @@ function MobileMessageActions({ c, locale, role, canCopy, onClose, onRegenerate,
   </div>;
 }
 
+/** Seconds spent in each part of a response: prompt processing, reasoning, tool calls, and the whole response. */
+function responseTimings(message: StoredMessage) {
+  const reasoning = (message.steps || []).reduce((sum, step) => sum + (step.kind === "reasoning" ? step.seconds || 0 : 0), 0) || message.reasoningDurationSeconds || 0;
+  const tools = (message.toolEvents || []).reduce((sum, event) => {
+    const start = Date.parse(event.startedAt), end = event.completedAt ? Date.parse(event.completedAt) : NaN;
+    return Number.isFinite(start) && Number.isFinite(end) && end >= start ? sum + (end - start) / 1000 : sum;
+  }, 0);
+  return { prompt: message.promptProcessingSeconds || 0, reasoning, tools, total: message.totalDurationSeconds || 0 };
+}
+
 function MessageTokenStats({ c, locale, message }: { c: CopySet; locale: Locale; message: StoredMessage }) {
-  if (message.outputTokens === undefined) return null;
-  const rate = message.completionDurationSeconds && message.completionDurationSeconds > 0
+  const rate = message.outputTokens !== undefined && message.completionDurationSeconds && message.completionDurationSeconds > 0
     ? message.outputTokens / message.completionDurationSeconds
     : undefined;
+  const timings = responseTimings(message);
+  const rows: Array<[string, number]> = [
+    ...(message.timeToFirstTokenSeconds !== undefined ? [[c.timeToFirstToken, message.timeToFirstTokenSeconds] as [string, number]] : []),
+    ...(timings.prompt > 0 ? [[c.promptProcessingTime, timings.prompt] as [string, number]] : []),
+    ...(timings.reasoning > 0 ? [[c.reasoningTime, timings.reasoning] as [string, number]] : []),
+    ...(timings.tools > 0 ? [[c.toolTime, timings.tools] as [string, number]] : []),
+    ...(timings.total > 0 ? [[c.totalResponseTime, timings.total] as [string, number]] : []),
+  ];
+  const summary = rows.map(([label, seconds]) => `${label}: ${formatLatency(seconds)}`).join(", ");
+  if (message.outputTokens === undefined && !rows.length) return null;
   return <small className="message-token-stats">
-    <span>{formatTokens(message.outputTokens, locale)} {c.outputTokens}</span>
+    {message.outputTokens !== undefined && <span>{formatTokens(message.outputTokens, locale)} {c.outputTokens}</span>}
     {message.reasoningTokens ? <span>({formatTokens(message.reasoningTokens, locale)} {c.reasoningTokens})</span> : null}
-    {rate !== undefined ? <><i>·</i><span className="token-rate" tabIndex={0} aria-label={`${rate.toFixed(1)} ${c.tokensPerSecond}${message.timeToFirstTokenSeconds !== undefined ? `, ${c.timeToFirstToken}: ${formatLatency(message.timeToFirstTokenSeconds)}` : ""}`}><span>{rate.toFixed(1)} {c.tokensPerSecond}</span><span className="token-rate-tooltip" role="tooltip"><strong>{rate.toFixed(1)} {c.tokensPerSecond}</strong>{message.timeToFirstTokenSeconds !== undefined && <small>{c.timeToFirstToken}: {formatLatency(message.timeToFirstTokenSeconds)}</small>}</span></span></> : null}
+    {rate !== undefined || rows.length ? <>{message.outputTokens !== undefined && <i>·</i>}<span className="token-rate" tabIndex={0} aria-label={[rate !== undefined ? `${rate.toFixed(1)} ${c.tokensPerSecond}` : "", summary].filter(Boolean).join(", ")}><span>{rate !== undefined ? `${rate.toFixed(1)} ${c.tokensPerSecond}` : formatLatency(timings.total || rows[0][1])}</span><span className="token-rate-tooltip" role="tooltip">{rate !== undefined && <strong>{rate.toFixed(1)} {c.tokensPerSecond}</strong>}{rows.map(([label, seconds]) => <small key={label}><span>{label}</span><b>{formatLatency(seconds)}</b></small>)}</span></span></> : null}
   </small>;
 }
 
@@ -2091,7 +2105,7 @@ function ChatMarkdown({ text, c, renderStrikethrough, onImagePreview, fadeDurati
   return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: true }], remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>{text}</ReactMarkdown>;
 }
 
-function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethrough, appearance, pending, revisions, onFork, onEditAssistant,onEditArtifact, onRegenerate, onRegenerateUser, onDeleteUser, onRevision }: { c: CopySet; locale: Locale; message: StoredMessage; waitPhase?: ChatWaitPhase; waitProgress?: number; renderStrikethrough: boolean; appearance: AppearancePreferences; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void;onEditArtifact:(eventId:string,artifact:ArtifactDocument)=>void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
+function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, renderStrikethrough, appearance, pending, revisions, onFork, onEditAssistant,onEditArtifact, onRegenerate, onRegenerateUser, onDeleteUser, onRevision }: { c: CopySet; locale: Locale; message: StoredMessage; waitPhase?: ChatWaitPhase; waitStartedAt?: number; waitProgress?: number; renderStrikethrough: boolean; appearance: AppearancePreferences; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void;onEditArtifact:(eventId:string,artifact:ArtifactDocument)=>void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [imagePreview,setImagePreview]=useState<{src:string;alt:string}>();
@@ -2109,11 +2123,11 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
   const steps = displaySteps(transcriptSteps(message), (ids) => formatToolCallMarkers(stepToolEvents(ids, message.toolEvents), locale));
   const liveContentIndex = lastContentStep(steps);
   const wholeReasoning = reasoningStepIsWhole(message);
-  const waitStatus = pending && waitPhase ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
+  const waitStatus = pending && waitPhase ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{waitPhase === "processing-prompt" ? <PromptWaitLabel locale={locale} startedAt={waitStartedAt} appearance={appearance} /> : chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
   return <div className="message-row assistant-message long-press-target" {...longPress}>
     {message.attachments?.length ? <AssistantAttachmentGallery attachments={message.attachments} /> : null}
     {steps.map((step, index) => {
-      if (step.kind === "reasoning") return <ReasoningStep key={index} c={c} locale={locale} text={wholeReasoning ? displayedReasoning : step.text} seconds={step.seconds} live={pending && Boolean(step.live)} />;
+      if (step.kind === "reasoning") return <ReasoningStep key={index} c={c} locale={locale} text={wholeReasoning ? displayedReasoning : step.text} seconds={step.seconds} startedAt={step.startedAt} promptSeconds={step.promptSeconds} appearance={appearance} live={pending && Boolean(step.live)} />;
       if (step.kind === "compaction") return <CompactionStep key={index} c={c} locale={locale} step={step} live={pending && Boolean(step.live) && step.seconds === undefined} />;
       if (step.kind === "tools") {
         const events = stepToolEvents(step.ids, message.toolEvents);
@@ -2136,8 +2150,90 @@ function Message({ c, locale, message, waitPhase, waitProgress, renderStrikethro
   </div>;
 }
 
-function ReasoningStep({ c, locale, text, seconds, live }: { c: CopySet; locale: Locale; text: string; seconds?: number; live: boolean }) {
+/** Browser clock minus server clock, refreshed from every job snapshot so live timers count from the server's start times. */
+let serverClockOffset = 0;
+
+/** The current time, re-read a few times a second while `active`. */
+function useTicker(active: boolean, intervalMs = 250) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), intervalMs);
+    return () => window.clearInterval(timer);
+  }, [active, intervalMs]);
+  return now;
+}
+
+/** One digit that rolls in from below, with a light rubber-band settle, whenever it changes (9 to 0 included). */
+function RollingDigit({ char, animateMount }: { char: string; animateMount: boolean }) {
+  const [previous, setPrevious] = useState<string | null>(null);
+  const [rolled, setRolled] = useState(animateMount);
+  const last = useRef(char);
+  useLayoutEffect(() => {
+    if (last.current === char) return;
+    setPrevious(last.current); setRolled(true); last.current = char;
+    const timer = window.setTimeout(() => setPrevious(null), 420);
+    return () => window.clearTimeout(timer);
+  }, [char]);
+  return <span className="rolling-digit"><span key={char} className={rolled ? "roll-in" : ""}>{char}</span>{previous !== null && <span key={`out-${previous}`} className="roll-out">{previous}</span>}</span>;
+}
+
+/** A whole number whose digits roll independently. Slots are keyed from the right, so the ones digit keeps its slot as the number grows. */
+function RollingNumber({ value, live, fresh = false }: { value: number; live: boolean; fresh?: boolean }) {
+  const chars = String(Math.max(0, Math.floor(value))).split("");
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; }, []);
+  return <span className="rolling-number">{chars.map((char, index) => <RollingDigit key={chars.length - 1 - index} char={char} animateMount={live && (mounted.current || fresh)} />)}</span>;
+}
+
+function durationText(seconds: number, locale: Locale) {
+  const total = Math.max(0, Math.floor(seconds)); const minutes = Math.floor(total / 60); const rest = total % 60;
+  return locale === "ko" ? `${minutes ? `${minutes}분 ` : ""}${rest}초` : `${minutes ? `${minutes} min ` : ""}${rest} sec`;
+}
+
+function RollingDuration({ seconds, locale, live }: { seconds: number; locale: Locale; live: boolean }) {
+  const total = Math.max(0, Math.floor(seconds)); const minutes = Math.floor(total / 60); const rest = total % 60;
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; }, []);
+  return <span className="rolling-duration" aria-hidden="true">{minutes > 0 && <><RollingNumber value={minutes} live={live} fresh={mounted.current} />{locale === "ko" ? "분 " : " min "}</>}<RollingNumber value={rest} live={live} />{locale === "ko" ? "초" : " sec"}</span>;
+}
+
+/** "12초 동안 생각 중", "1분 3초 동안 생각함", with an optional "(3초 프롬프트 처리함)". Each part says 중 or 함 by its own state. */
+function ThinkingLabel({ locale, seconds, live, promptSeconds, promptLive }: { locale: Locale; seconds: number; live: boolean; promptSeconds?: number; promptLive: boolean }) {
+  const ko = locale === "ko";
+  const thinking = ko ? `${durationText(seconds, locale)} 동안 ${live ? "생각 중" : "생각함"}` : `${live ? "Thinking for" : "Thought for"} ${durationText(seconds, locale)}`;
+  const prompt = promptSeconds === undefined ? "" : ko ? ` (${durationText(promptSeconds, locale)} 프롬프트 ${promptLive ? "처리 중" : "처리함"})` : ` (${promptLive ? "processing prompt for" : "prompt processed in"} ${durationText(promptSeconds, locale)})`;
+  const time = <RollingDuration seconds={seconds} locale={locale} live={live} />;
+  const promptTime = promptSeconds === undefined ? null : <RollingDuration seconds={promptSeconds} locale={locale} live={promptLive} />;
+  return <span className="timed-label"><span className="visually-hidden">{thinking}{prompt}</span>
+    {ko ? <span aria-hidden="true">{time} 동안 {live ? "생각 중" : "생각함"}</span> : <span aria-hidden="true">{live ? "Thinking for" : "Thought for"} {time}</span>}
+    {promptTime && <span className="timed-label-aside" aria-hidden="true">{ko ? <>({promptTime} 프롬프트 {promptLive ? "처리 중" : "처리함"})</> : <>({promptLive ? "processing prompt for" : "prompt processed in"} {promptTime})</>}</span>}
+  </span>;
+}
+
+/**
+ * The live prompt-processing line. Each stage counts from its own start; stages are not added together. With
+ * "include prompt time in thinking" on, it already counts as thinking; with "show prompt time" on, both are named.
+ */
+function PromptWaitLabel({ locale, startedAt, appearance }: { locale: Locale; startedAt?: number; appearance: AppearancePreferences }) {
+  const mountedAt = useRef(Date.now());
+  const now = useTicker(true);
+  const seconds = Math.floor(Math.max(0, now - (startedAt ?? mountedAt.current)) / 1000);
+  if (appearance.thinkingIncludesPromptTime) return <ThinkingLabel locale={locale} seconds={seconds} live promptSeconds={appearance.thinkingShowsPromptTime ? seconds : undefined} promptLive />;
+  const text = locale === "ko" ? `${durationText(seconds, locale)} 동안 프롬프트 처리 중` : `Processing prompt for ${durationText(seconds, locale)}`;
+  const time = <RollingDuration seconds={seconds} locale={locale} live />;
+  return <span className="timed-label"><span className="visually-hidden">{text}</span><span aria-hidden="true">{locale === "ko" ? <>{time} 동안 프롬프트 처리 중</> : <>Processing prompt for {time}</>}</span></span>;
+}
+
+function ReasoningStep({ c, locale, text, seconds, startedAt, promptSeconds, appearance, live }: { c: CopySet; locale: Locale; text: string; seconds?: number; startedAt?: number; promptSeconds?: number; appearance: AppearancePreferences; live: boolean }) {
   const [open, setOpen] = useState(false);
+  const mountedAt = useRef(Date.now());
+  const now = useTicker(live);
+  // Whole seconds, so the prompt time added to thinking matches the prompt time shown beside it.
+  const prompt = Math.floor(promptSeconds || 0);
+  const thought = live ? (seconds || 0) + Math.max(0, (now - (startedAt !== undefined ? startedAt + serverClockOffset : mountedAt.current)) / 1000) : Math.max(1, seconds || 1);
+  const shownThought = appearance.thinkingIncludesPromptTime ? thought + prompt : thought;
   const [autoFollow, setAutoFollow] = useState(true);
   const autoFollowRef = useRef(true);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -2157,7 +2253,7 @@ function ReasoningStep({ c, locale, text, seconds, live }: { c: CopySet; locale:
   }
   const shown = live || open;
   return <div className={`thinking-block ${live ? "streaming" : ""}`}>
-    <button onClick={() => !live && setOpen((value) => !value)} aria-expanded={shown}><Lightbulb size={15} /> {live ? c.thinking : formatThoughtDuration(seconds || 1, locale)} {!live && <ChevronRight size={14} className={open ? "disclosure-open" : ""} />}</button>
+    <button onClick={() => !live && setOpen((value) => !value)} aria-expanded={shown}><Lightbulb size={15} /> <ThinkingLabel locale={locale} seconds={live ? Math.floor(shownThought) : Math.max(1, Math.round(shownThought))} live={live} promptSeconds={appearance.thinkingShowsPromptTime && prompt >= 1 ? prompt : undefined} promptLive={false} /> {!live && <ChevronRight size={14} className={open ? "disclosure-open" : ""} />}</button>
     {shown && <div className="thinking-preview-shell"><div ref={bodyRef} className={`thinking-preview ${live ? "live" : ""}`} onScroll={handleScroll}>{text}</div>{live && !autoFollow && <button type="button" className="scroll-resume reasoning-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeAutoFollow}><ArrowDown size={16} /></button>}</div>}
   </div>;
 }
@@ -2502,6 +2598,11 @@ function AppearanceSettings({ c, draft, setDraft, admin }: { c: CopySet; draft: 
           }} />
         </label>)}
       </div><p className="settings-help">{c.reasoningNotesReset}</p></>}
+    </div>
+    <div className="general-setting-card thinking-timing-settings">
+      <div><strong>{c.thinkingTimingTitle}</strong><small>{c.thinkingTimingHelp}</small></div>
+      <div className="thinking-timing-toggle"><span><strong>{c.thinkingIncludesPrompt}</strong><small>{c.thinkingIncludesPromptDesc}</small></span><button type="button" role="switch" aria-checked={appearance.thinkingIncludesPromptTime} aria-label={c.thinkingIncludesPrompt} className={`toggle ${appearance.thinkingIncludesPromptTime ? "on" : ""}`} onClick={() => patch({ thinkingIncludesPromptTime: !appearance.thinkingIncludesPromptTime })}><i /></button></div>
+      <div className="thinking-timing-toggle"><span><strong>{c.thinkingShowsPrompt}</strong><small>{c.thinkingShowsPromptDesc}</small></span><button type="button" role="switch" aria-checked={appearance.thinkingShowsPromptTime} aria-label={c.thinkingShowsPrompt} className={`toggle ${appearance.thinkingShowsPromptTime ? "on" : ""}`} onClick={() => patch({ thinkingShowsPromptTime: !appearance.thinkingShowsPromptTime })}><i /></button></div>
     </div>
     <div className="general-setting-card">
       <div><strong>{locale === "ko" ? "모델 서버 진행률" : "Model server progress"}</strong><small>{locale === "ko" ? "모델 로드와 프롬프트 처리 상태의 표시 방식입니다. 서버에서 진행률을 제공하지 않으면 로딩 표시를 사용합니다." : "Display model loading and prompt processing progress. Loading indicators are used when the server provides no percentage."}</small></div>

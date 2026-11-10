@@ -510,6 +510,14 @@ function openDatabase() {
     } catch { /* An unreadable configuration keeps its stored defaults. */ }
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(24, new Date().toISOString());
   })();
+  const messageTimingVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (messageTimingVersion.version < 25) connection.transaction(() => {
+    // Prompt-processing total and end-to-end duration for the response-statistics popover.
+    const columns = connection.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "prompt_processing_seconds")) connection.exec("ALTER TABLE messages ADD COLUMN prompt_processing_seconds REAL;");
+    if (!columns.some(column => column.name === "total_duration_seconds")) connection.exec("ALTER TABLE messages ADD COLUMN total_duration_seconds REAL;");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(25, new Date().toISOString());
+  })();
   return connection;
 }
 

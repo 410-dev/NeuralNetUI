@@ -1963,3 +1963,22 @@ select:focus-visible {
   .repetition-rule > button { grid-row: 1; grid-column: 2; }
 }
 .repetition-rules > .general-setting-card + .general-setting-card { margin-top: 0; }
+
+/* Live timers: each digit rolls up from below and settles with a slight rubber-band overshoot. */
+.timed-label { display: inline-flex; align-items: baseline; flex-wrap: wrap; column-gap: .35em; }
+.timed-label-aside { color: var(--dim); }
+.rolling-duration { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rolling-number { display: inline-flex; }
+.rolling-digit { position: relative; display: inline-block; overflow: hidden; height: 1.25em; line-height: 1.25em; vertical-align: bottom; }
+.rolling-digit > span { display: block; }
+.rolling-digit > .roll-in { animation: digit-roll-in .42s cubic-bezier(.34,1.45,.64,1) both; }
+.rolling-digit > .roll-out { position: absolute; inset: 0; animation: digit-roll-out .32s cubic-bezier(.4,0,.6,1) both; }
+@keyframes digit-roll-in { from { transform: translateY(100%); opacity: .2; } to { transform: translateY(0); opacity: 1; } }
+@keyframes digit-roll-out { from { transform: translateY(0); opacity: 1; } to { transform: translateY(-100%); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rolling-digit > .roll-in, .rolling-digit > .roll-out { animation: none; } .rolling-digit > .roll-out { display: none; } }
+.token-rate-tooltip small { display: flex; justify-content: space-between; gap: 14px; }
+.token-rate-tooltip small b { color: var(--text); font-weight: 550; font-variant-numeric: tabular-nums; }
+.thinking-timing-toggle { display: grid; grid-template-columns: minmax(0,1fr) 39px; align-items: center; gap: 12px; margin-top: 14px; }
+.thinking-timing-toggle strong, .thinking-timing-toggle small { display: block; }
+.thinking-timing-toggle strong { font-size: 12px; font-weight: 550; }
+.thinking-timing-toggle small { margin-top: 3px; color: var(--dim); font-size: 10.5px; line-height: 1.45; }
