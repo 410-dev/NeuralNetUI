@@ -1,9 +1,10 @@
 "use client";
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Pencil, Check, Layers, Type, RotateCw, Minimize2, Clock, Zap, ShieldCheck, ShieldQuestion, ShieldX, Grid3X3, HardDrive } from "lucide-react";
+import { X, Pencil, Check, Layers, Type, RotateCw, Minimize2, Clock, Zap, ShieldCheck, ShieldQuestion, ShieldX, Grid3X3, HardDrive, Repeat2 } from "lucide-react";
 import type { HarnessSettings, PublicConfig } from "@/lib/types";
 import { DEFAULT_HARNESS_SETTINGS } from "@/lib/harness";
+import { normalizeRepetitionSettings, REPETITION_KINDS, REPETITION_LIMITS, type RepetitionKind } from "@/lib/repetition";
 import { HOST_PERMISSION_DEFINITIONS, type HostPermissionKey, type HostTrustedPermissions } from "@/lib/host-permissions";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { SectionTitle } from "./section-title";
@@ -107,6 +108,28 @@ export function StorageSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
   </div>;
 }
 
+const REPETITION_COPY: Record<RepetitionKind, { title: [string, string]; detail: [string, string] }> = {
+  word: { title: ["Word repetition", "단어 반복"], detail: ["The same word in a row, e.g. “apple apple apple…”.", "같은 단어가 연달아 나옴. 예: “apple apple apple…”"] },
+  sentence: { title: ["Sentence repetition", "문장 반복"], detail: ["The same sentence in a row.", "같은 문장이 연달아 나옴."] },
+  paragraph: { title: ["Paragraph repetition", "문단 반복"], detail: ["The same paragraph in a row. Identical tool calls in a row count here too.", "같은 문단이 연달아 나옴. 같은 도구 호출이 연달아 나오는 것도 여기에 포함됩니다."] },
+  paragraphGroup: { title: ["Paragraph-group repetition", "문단 묶음 반복"], detail: ["Several paragraphs repeated together as one block. Repeated sequences of tool calls count here too.", "여러 문단이 한 묶음으로 반복됨. 도구 호출 묶음의 반복도 여기에 포함됩니다."] },
+};
+
+/** Per-kind switches and thresholds for the repetitive-output alert. */
+function RepetitionSettingsSection({ ko, value, onChange }: { ko: boolean; value: HarnessSettings["repetitionDetection"] | undefined; onChange: (value: HarnessSettings["repetitionDetection"]) => void }) {
+  const rules = normalizeRepetitionSettings(value);
+  const set = (kind: RepetitionKind, rule: Partial<typeof rules[RepetitionKind]>) => onChange({ ...rules, [kind]: { ...rules[kind], ...rule } });
+  return <section className="settings-section wide">
+    <SectionTitle icon={<Repeat2 size={19}/>} title={ko?"반복 출력 감지":"Repetitive output detection"} description={ko?"추론, 응답, 도구 호출에서 같은 내용이 연속으로 반복되면 사용자에게 정지·다시 시도·무시를 묻는 알림을 띄웁니다.":"When reasoning, the response or tool calls repeat the same content in a row, the user is asked whether to stop, retry or ignore it."}/>
+    <div className="repetition-rules">{REPETITION_KINDS.map(kind => { const rule = rules[kind]; const copy = REPETITION_COPY[kind]; const { min, max } = REPETITION_LIMITS[kind]; return <div key={kind} className={`general-setting-card repetition-rule ${rule.enabled ? "" : "disabled"}`}>
+      <div><strong>{copy.title[ko?1:0]}</strong><small>{copy.detail[ko?1:0]}</small></div>
+      <label className="repetition-threshold"><input type="number" min={min} max={max} step={1} inputMode="numeric" disabled={!rule.enabled} value={rule.threshold} aria-label={`${copy.title[ko?1:0]} ${ko?"감지 횟수":"threshold"}`} onChange={e=>set(kind,{ threshold: Math.min(max, Math.max(min, Math.floor(Number(e.target.value) || min))) })}/><small>{ko?"회 연속":"in a row"}</small></label>
+      <button type="button" role="switch" aria-label={copy.title[ko?1:0]} aria-checked={rule.enabled} className={`toggle ${rule.enabled?"on":""}`} onClick={()=>set(kind,{ enabled: !rule.enabled })}><i/></button>
+    </div>; })}</div>
+    <p className="settings-help">{ko?`횟수는 연속으로 나온 경우만 셉니다. 기본값은 단어 20회, 문장 5회, 문단 5회, 문단 묶음 2회입니다. 짧은 줄(예: 코드의 닫는 괄호)은 문장·문단으로 세지 않습니다.`:`Only consecutive copies count. Defaults: words 20, sentences 5, paragraphs 5, paragraph groups 2. Very short lines, such as a closing bracket in code, are not counted as sentences or paragraphs.`}</p>
+  </section>;
+}
+
 export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDraft:React.Dispatch<React.SetStateAction<PublicConfig>>}) {
   const ko=draft.preferences.language==="ko";
   const h=draft.harnessSettings || DEFAULT_HARNESS_SETTINGS;
@@ -164,6 +187,7 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
         <button type="button" className="subtle-action" onClick={()=>setPrompt("titlePrompt")}><Pencil size={16}/>{ko?"제목 생성 프롬프트 편집":"Edit title prompt"}</button>
       </div>}
     </section>
+    <RepetitionSettingsSection ko={ko} value={h.repetitionDetection} onChange={repetitionDetection=>patch({repetitionDetection})}/>
     {superadmin && <section className="settings-section wide">
       <SectionTitle icon={<ShieldCheck size={19}/>} title={ko?"호스트 컴퓨터 권한":"Host computer permissions"} description={ko?"Superadmin 전용 에이전트 작업의 확인 범위와 독립 셸 명령 분석기를 설정합니다.":"Set confirmation boundaries and the isolated shell-command assessor for the Superadmin-only agent tool."}/>
       <OptionCards label={ko?"신뢰 수준":"Trust mode"} value={h.hostTrustMode} onSelect={id=>patch({hostTrustMode:id as HarnessSettings["hostTrustMode"]})} options={[

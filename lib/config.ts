@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { AppConfig, ConnectionConfig, ConnectionDriver, ExperimentalFeatures, ModelConfig, PublicConfig, ReasoningPreset, ToolSettings } from "./types";
 import type { AuthUser } from "./auth";
 import { updateUserPreferences } from "./auth";
+import { normalizeRepetitionSettings } from "./repetition";
 import { planModelWeights } from "./plans";
 import { modelAllowedByPlan } from "./plan-usage";
 import { listMcpConnections, mcpEntitlement } from "./mcp";
@@ -55,6 +56,7 @@ const harnessSettingsValuesSchema = z.object({
   hostCommandModelId: z.string().max(500).default(DEFAULT_HARNESS_SETTINGS.hostCommandModelId),
   hostCommandEffort: z.string().max(40).default(DEFAULT_HARNESS_SETTINGS.hostCommandEffort),
   hostCommandAnalysisPrompt: z.string().trim().min(1).max(32000).default(DEFAULT_HARNESS_SETTINGS.hostCommandAnalysisPrompt),
+  repetitionDetection: z.unknown().optional().transform(normalizeRepetitionSettings),
 });
 const harnessSettingsSchema = z.preprocess((value) => {
   if (value === undefined || value === null) return DEFAULT_HARNESS_SETTINGS;

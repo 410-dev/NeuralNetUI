@@ -1,5 +1,6 @@
 import type { GreetingOverrides } from "./greetings.ts";
 import type { HostTrustedPermissions } from "./host-permissions.ts";
+import type { RepetitionSettings } from "./repetition.ts";
 
 export type ReasoningKind = "builtin" | "custom";
 export type SystemPromptMode = "replace" | "prepend" | "append";
@@ -273,6 +274,8 @@ export interface HarnessSettings {
   hostCommandModelId: string;
   hostCommandEffort: string;
   hostCommandAnalysisPrompt: string;
+  /** Per-kind switches and consecutive-copy thresholds for flagging a response that repeats itself. */
+  repetitionDetection: RepetitionSettings;
 }
 
 /** Opt-in features an administrator must switch on before anyone can use them. */

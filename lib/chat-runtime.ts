@@ -14,6 +14,7 @@ import { readSsePayload } from "./stream-protocol";
 import { canUseModel, readConfig } from "./config";
 import { aliasBaseModel, aliasWithBaseModel } from "./alias-base-model";
 import { readConversation, writeConversation, renameConversation } from "./conversations";
+import { detectTextRepetition, detectToolCallRepetition, normalizeRepetitionSettings, toolArgumentText, type RepetitionFinding, type RepetitionSettings } from "./repetition.ts";
 import { readUpload, readUploadModelContent, saveArtifactFile, saveGeneratedImage } from "./uploads";
 import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, nnuiEventsEndpoint } from "./connection-drivers";
 import { createResidencyAdapter } from "./residency-adapter";
@@ -47,6 +48,8 @@ export type ChatJobSnapshot = {
   error?: string;
   waitPhase?: ChatWaitPhase;
   waitProgress?: number;
+  /** The latest loop found in this response; the client offers to stop, retry or ignore it. */
+  repetition?: RepetitionFinding;
 };
 
 export type StartChatJobInput = {
@@ -91,6 +94,9 @@ type ChatJob = {
   expiryTimer?: ReturnType<typeof setTimeout>;
   persistTimer?: ReturnType<typeof setTimeout>;
   broadcastTimer?: ReturnType<typeof setTimeout>;
+  repetitionRules: RepetitionSettings;
+  repetition?: RepetitionFinding;
+  repetitionCheck: { size: number; at: number };
 };
 
 declare global {
@@ -171,7 +177,27 @@ function beginToolCompaction(job: ChatJob) {
 }
 
 function snapshot(job: ChatJob): ChatJobSnapshot {
-  return { conversationId: job.input.conversationId, branchId: job.input.branchId, status: job.status, message: job.message, waitPhase: job.waitPhase, waitProgress: job.waitProgress, ...(job.error ? { error: job.error } : {}) };
+  return { conversationId: job.input.conversationId, branchId: job.input.branchId, status: job.status, message: job.message, waitPhase: job.waitPhase, waitProgress: job.waitProgress, ...(job.repetition ? { repetition: job.repetition } : {}), ...(job.error ? { error: job.error } : {}) };
+}
+
+/**
+ * Looks for a loop in the reasoning, the answer, the tool calls made so far and the arguments of calls still
+ * streaming. Runs at most every 120 new characters or second; a new or grown finding is broadcast.
+ */
+function inspectRepetition(job: ChatJob, streamingCalls: ToolCall[] = [], force = false) {
+  const rules = job.repetitionRules;
+  if (job.discarded || !Object.values(rules).some(rule => rule.enabled)) return;
+  const argumentText = streamingCalls.map(call => toolArgumentText(call.function.arguments)).join("\n\n");
+  const size = job.message.content.length + (job.message.reasoning?.length || 0) + argumentText.length + (job.message.toolEvents?.length || 0) * 1000;
+  const now = Date.now();
+  if (!force && size - job.repetitionCheck.size < 120 && now - job.repetitionCheck.at < 1000) return;
+  job.repetitionCheck = { size, at: now };
+  const found = detectTextRepetition(job.message.reasoning || "", "reasoning", rules)
+    || detectTextRepetition(job.message.content, "content", rules)
+    || detectToolCallRepetition((job.message.toolEvents || []).map(event => ({ name: event.name, arguments: event.arguments })), rules)
+    || (argumentText ? detectTextRepetition(argumentText, "tool", rules) : undefined);
+  if (!found || found.id === job.repetition?.id && found.count === job.repetition.count) return;
+  job.repetition = found; broadcast(job, true);
 }
 
 function setWaitPhase(job: ChatJob, phase?: ChatWaitPhase) {
@@ -356,6 +382,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
       // One phase per delta: clearing and re-setting it would broadcast twice for every argument token.
       setWaitPhase(job, calls.get(index)?.function.name === "create_artifact" ? "creating-artifact" : undefined);
     }
+    if (contentDelta || reasoningDelta || Array.isArray(delta.tool_calls)) inspectRepetition(job, [...calls.values()]);
     const outputEstimate = estimateTokens(content) + estimateTokens(reasoning) + estimateTokens([...calls.values()]);
     const used = Math.max(inputEstimate, usage.inputTokens ?? 0) + Math.max(outputEstimate, usage.outputTokens ?? 0, usage.reasoningTokens ?? 0);
     chargedUsage = { inputTokens: usage.inputTokens ?? inputEstimate, outputTokens: usage.outputTokens ?? outputEstimate };
@@ -408,7 +435,7 @@ function addToolEvent(job: ChatJob, call: ToolCall): ToolEvent {
     arguments: parseArguments(call.function.arguments),
     startedAt: new Date().toISOString(),
   };
-  job.message = { ...job.message, toolEvents: [...(job.message.toolEvents || []), event] }; broadcast(job, true); return event;
+  job.message = { ...job.message, toolEvents: [...(job.message.toolEvents || []), event] }; broadcast(job, true); inspectRepetition(job, [], true); return event;
 }
 
 function updateToolEvent(job: ChatJob, id: string, patch: Partial<ToolEvent>) {
@@ -844,6 +871,7 @@ export async function startChatJob(input: StartChatJobInput, userId: string, use
   acquirePlanAdmission(userId,base.id,base.sourceModel);
   const job: ChatJob = {
     userId, userRole, input, conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
+    repetitionRules: normalizeRepetitionSettings(config.harnessSettings?.repetitionDetection), repetitionCheck: { size: 0, at: 0 },
     message: { id: input.assistantMessageId, revisionGroupId: input.revisionGroupId, role: "assistant", content: "", reasoning: "", toolEvents: [], createdAt: new Date().toISOString() },
   };
   if (existing) discardJob(existing);
