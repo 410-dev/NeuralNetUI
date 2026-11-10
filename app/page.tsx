@@ -371,6 +371,8 @@ export default function Home() {
   const [chatManagerOpen, setChatManagerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [renameTarget, setRenameTarget] = useState<ConversationSummary | null>(null);
+  // The history row whose actions a long-press revealed on a touch screen.
+  const [revealedHistoryId, setRevealedHistoryId] = useState("");
   const [duplicating, setDuplicating] = useState(false);
   const [temporaryMode, setTemporaryMode] = useState(false);
   const [hiddenActivityChats, setHiddenActivityChats] = useState<Record<string, boolean>>({});
@@ -1405,7 +1407,7 @@ export default function Home() {
           <button className="pill-button" title={c.storageManager} aria-label={c.storageManager} onClick={() => { setStorageOpen(true); setMobileOpen(false); }}><HardDrive size={18} /> <span>{c.storageManager}</span></button>
           <div className="history-heading"><p className="section-label">{c.histories}</p><div>{(conversation || histories.length > 0) && <button onClick={() => setExportOpen(true)} title={conversation ? c.exportChat : c.exportAllChats} aria-label={conversation ? c.exportChat : c.exportAllChats}><Download size={15} /></button>}{histories.length > 0 && <button onClick={() => void deleteAllHistories()} title={c.deleteAllChats} aria-label={c.deleteAllChats}><Trash2 size={15} /></button>}</div></div>
           <div className="history-list">
-            {visibleHistory.map((item, index) => <div className={`history-row ${item.id === conversation?.id ? "active" : ""} ${item.pinnedAt ? "pinned" : ""} ${!item.pinnedAt && index > 0 && visibleHistory[index - 1].pinnedAt ? "after-pinned" : ""}`} key={item.id}><button className="history-item" onClick={() => loadConversation(item.id)}>{item.pinnedAt && <Pin className="history-pin-mark" size={12} aria-label={c.pinnedChat} />}<span>{item.title}</span></button><div className="history-row-actions"><button className="history-pin" onClick={() => void toggleHistoryPin(item)} title={item.pinnedAt ? c.unpinChat : c.pinChat} aria-label={`${item.pinnedAt ? c.unpinChat : c.pinChat}: ${item.title}`} aria-pressed={Boolean(item.pinnedAt)}>{item.pinnedAt ? <PinOff size={13}/> : <Pin size={13}/>}</button><button className="history-rename" onClick={() => setRenameTarget(item)} title={locale === "ko" ? "제목 변경" : "Rename chat"} aria-label={`${locale === "ko" ? "제목 변경" : "Rename chat"}: ${item.title}`}><Pencil size={13}/></button><button className="history-delete" onClick={() => void deleteHistory(item.id)} title={c.deleteChat} aria-label={`${c.deleteChat}: ${item.title}`}><Trash2 size={13} /></button></div></div>)}
+            {visibleHistory.map((item, index) => <HistoryRow key={item.id} item={item} active={item.id === conversation?.id} afterPinned={!item.pinnedAt && index > 0 && Boolean(visibleHistory[index - 1].pinnedAt)} revealed={revealedHistoryId === item.id} onReveal={(value) => setRevealedHistoryId(value ? item.id : "")} c={c} locale={locale} onOpen={() => loadConversation(item.id)} onPin={() => void toggleHistoryPin(item)} onRename={() => setRenameTarget(item)} onDelete={() => void deleteHistory(item.id)} />)}
             {!visibleHistory.length && <p className="history-empty">{c.historyEmpty}</p>}
             <button className="chat-manager-launch" onClick={()=>{setChatManagerOpen(true);setMobileOpen(false);}}><span>{locale==="ko"?"채팅 관리하기":"Manage chats"}</span></button>
           </div>
@@ -1761,6 +1763,32 @@ function McpComposerConnection({connection,enabled,selectedNames,onEnabled,onSel
   useEffect(()=>{if(!open||tools.length||loading)return;setLoading(true);void fetch(`/api/mcp-connections/${connection.id}/tools`,{cache:"no-store"}).then(async response=>{const body=await response.json();if(!response.ok)throw new Error(body.error);const next:McpToolInfo[]=body.tools;setTools(next);if(selectedNames===undefined)onSelected(next.filter(tool=>tool.policy!=="blocked").map(tool=>tool.name));}).catch(caught=>setError(caught instanceof Error?caught.message:String(caught))).finally(()=>setLoading(false));},[open,tools.length,loading,connection.id,onSelected,selectedNames]);
   const selected=selectedNames||tools.filter(tool=>tool.policy!=="blocked").map(tool=>tool.name);
   return <div className={`mcp-composer-entry ${open?"open":""}`}><div className="tool-toggle-row"><Cable size={17}/><span><strong>{connection.name}</strong><small>{connection.description||connection.url}</small></span><button className="mcp-session-fold" type="button" aria-label={c===translations.ko?`${connection.name} 도구 펼치기`:`Expand ${connection.name} tools`} aria-expanded={open} onClick={()=>setOpen(value=>!value)}><ChevronDown size={15}/></button><button type="button" role="switch" aria-label={connection.name} aria-checked={enabled} className={`toggle ${enabled?"on":""}`} onClick={()=>onEnabled(!enabled)}><i/></button></div>{open&&<div className="mcp-session-tools">{loading&&<p><LoaderCircle className="spin" size={14}/>{c===translations.ko?"도구를 불러오는 중":"Loading tools"}</p>}{error&&<p className="error">{error}</p>}{tools.map(tool=>{const active=enabled&&tool.policy!=="blocked"&&selected.includes(tool.name);return <div className="mcp-session-tool" key={tool.name}><span><strong>{tool.name}</strong><small>{tool.policy==="blocked"?(c===translations.ko?"설정에서 차단됨":"Blocked in settings"):tool.description||"MCP"}</small></span><button type="button" role="switch" disabled={!enabled||tool.policy==="blocked"} aria-label={tool.name} aria-checked={active} className={`toggle ${active?"on":""}`} onClick={()=>onSelected(active?selected.filter(name=>name!==tool.name):[...selected,tool.name])}><i/></button></div>})}</div>}</div>;
+}
+
+/**
+ * One chat in the history list. Its actions float over the right end of the title on a blurred plate, so the title
+ * keeps the full row until a pointer hovers it or, on touch screens, a long-press reveals them.
+ */
+function HistoryRow({ item, active, afterPinned, revealed, onReveal, c, locale, onOpen, onPin, onRename, onDelete }: { item: ConversationSummary; active: boolean; afterPinned: boolean; revealed: boolean; onReveal: (value: boolean) => void; c: CopySet; locale: Locale; onOpen: () => void; onPin: () => void; onRename: () => void; onDelete: () => void }) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const suppressClick = useRef(false);
+  const longPress = useLongPress(() => { suppressClick.current = true; onReveal(true); });
+  useEffect(() => {
+    if (!revealed) return;
+    const dismiss = (event: PointerEvent) => { if (!rowRef.current?.contains(event.target as Node)) onReveal(false); };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [revealed]);
+  const renameLabel = locale === "ko" ? "제목 변경" : "Rename chat";
+  const act = (action: () => void) => () => { onReveal(false); action(); };
+  return <div ref={rowRef} className={`history-row long-press-target ${active ? "active" : ""} ${item.pinnedAt ? "pinned" : ""} ${afterPinned ? "after-pinned" : ""} ${revealed ? "revealed" : ""}`} {...longPress}>
+    <button className="history-item" onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } onOpen(); }}>{item.pinnedAt && <Pin className="history-pin-mark" size={12} aria-label={c.pinnedChat} />}<span>{item.title}</span></button>
+    <div className="history-row-actions">
+      <button className="history-pin" onClick={act(onPin)} title={item.pinnedAt ? c.unpinChat : c.pinChat} aria-label={`${item.pinnedAt ? c.unpinChat : c.pinChat}: ${item.title}`} aria-pressed={Boolean(item.pinnedAt)}>{item.pinnedAt ? <PinOff size={13}/> : <Pin size={13}/>}</button>
+      <button className="history-rename" onClick={act(onRename)} title={renameLabel} aria-label={`${renameLabel}: ${item.title}`}><Pencil size={13}/></button>
+      <button className="history-delete" onClick={act(onDelete)} title={c.deleteChat} aria-label={`${c.deleteChat}: ${item.title}`}><Trash2 size={13} /></button>
+    </div>
+  </div>;
 }
 
 function useLongPress(onLongPress: () => void, disabled = false) {
