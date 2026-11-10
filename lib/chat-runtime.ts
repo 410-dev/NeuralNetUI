@@ -172,7 +172,9 @@ function closeReasoningStep(job: ChatJob, seconds: number) {
   for (let index = steps.length - 1; index >= 0; index -= 1) {
     const step = steps[index];
     if (step.kind === "reasoning") {
-      if (step.seconds === undefined) { steps[index] = { ...step, seconds: Math.max(1, Math.round(seconds)) }; job.message = { ...job.message, steps }; }
+      // Measured on the same clock the live counter uses (from the step's start), so the finished time never reads lower.
+      const wall = step.startedAt !== undefined ? (Date.now() - step.startedAt) / 1000 : 0;
+      if (step.seconds === undefined) { steps[index] = { ...step, seconds: Math.max(1, Math.ceil(Math.max(seconds, wall))) }; job.message = { ...job.message, steps }; }
       return;
     }
     if (step.kind === "content" || step.kind === "tools") return;

@@ -2236,7 +2236,14 @@ function ReasoningStep({ c, locale, text, seconds, startedAt, promptSeconds, pro
   const prompt = Math.floor(promptSeconds || 0) + stageSeconds;
   const thought = live ? (seconds || 0) + Math.max(0, (now - (startedAt !== undefined ? startedAt + serverClockOffset : mountedAt.current)) / 1000) : Math.max(1, seconds || 1);
   const summed = appearance.thinkingIncludesPromptTime;
-  const shownThought = summed ? thought + prompt : thought;
+  // Shown numbers only ever go up while this block is on screen, even when a round closes or a prompt stage hands over.
+  const peak = useRef({ thought: 0, prompt: 0, summed });
+  if (peak.current.summed !== summed) peak.current = { thought: 0, prompt: 0, summed };
+  const rawThought = summed ? thought + prompt : thought;
+  const thoughtValue = live ? Math.floor(rawThought) : Math.max(1, Math.round(rawThought));
+  const shownThought = Math.max(peak.current.thought, thoughtValue);
+  const shownPrompt = Math.max(peak.current.prompt, prompt);
+  peak.current = { thought: shownThought, prompt: shownPrompt, summed };
   // The thinking number is counting whenever the model reasons, or, with prompt time added in, while a prompt stage runs.
   const thinkingLive = live || summed && stageLive;
   const [autoFollow, setAutoFollow] = useState(true);
@@ -2258,7 +2265,7 @@ function ReasoningStep({ c, locale, text, seconds, startedAt, promptSeconds, pro
   }
   const shown = live || open;
   return <div className={`thinking-block ${live ? "streaming" : ""}`}>
-    <button onClick={() => !live && setOpen((value) => !value)} aria-expanded={shown}><Lightbulb size={15} /> <ThinkingLabel locale={locale} seconds={live ? Math.floor(shownThought) : Math.max(1, Math.round(shownThought))} live={thinkingLive} promptSeconds={appearance.thinkingShowsPromptTime && (prompt >= 1 || stageLive) ? prompt : undefined} promptLive={stageLive} /> {!live && <ChevronRight size={14} className={open ? "disclosure-open" : ""} />}</button>
+    <button onClick={() => !live && setOpen((value) => !value)} aria-expanded={shown}><Lightbulb size={15} /> <ThinkingLabel locale={locale} seconds={shownThought} live={thinkingLive} promptSeconds={appearance.thinkingShowsPromptTime && (shownPrompt >= 1 || stageLive) ? shownPrompt : undefined} promptLive={stageLive} /> {!live && <ChevronRight size={14} className={open ? "disclosure-open" : ""} />}</button>
     {shown && <div className="thinking-preview-shell"><div ref={bodyRef} className={`thinking-preview ${live ? "live" : ""}`} onScroll={handleScroll}>{text}</div>{live && !autoFollow && <button type="button" className="scroll-resume reasoning-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeAutoFollow}><ArrowDown size={16} /></button>}</div>}
   </div>;
 }
