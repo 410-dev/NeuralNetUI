@@ -218,24 +218,36 @@ function attachmentAllowedForModel(model:ModelConfig|undefined,attachment:Pick<S
 }
 
 /**
- * One line of secondary text that scrolls right-to-left when it is wider than its row, holding at each end,
- * so a long description can be read in full. Short text sits still; reduced motion wraps it instead.
+ * One line of secondary text that, when wider than its row, flows right-to-left without end: a second copy follows
+ * the first after a gap of about eight spaces, so the loop never jumps back. Short text sits still; reduced motion
+ * wraps it instead.
  */
 function MarqueeText({ text }: { text: string }) {
   const outerRef = useRef<HTMLElement>(null);
   const innerRef = useRef<HTMLSpanElement>(null);
-  const [distance, setDistance] = useState(0);
+  const [loop, setLoop] = useState<{ gap: number; distance: number } | null>(null);
   useLayoutEffect(() => {
     const outer = outerRef.current, inner = innerRef.current;
     if (!outer || !inner) return;
-    const measure = () => { const overflow = inner.offsetWidth - outer.clientWidth; setDistance(overflow > 1 ? Math.ceil(overflow) + 14 : 0); };
+    const measure = () => {
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) { setLoop(null); return; }
+      const style = getComputedStyle(inner);
+      const textWidth = inner.offsetWidth - (parseFloat(style.paddingRight) || 0);
+      if (textWidth <= outer.clientWidth + 1) { setLoop(null); return; }
+      const gap = Math.round((parseFloat(getComputedStyle(outer).fontSize) || 11) * 2.5);
+      const distance = Math.ceil(textWidth) + gap;
+      setLoop(current => current?.gap === gap && current.distance === distance ? current : { gap, distance });
+    };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
     observer?.observe(outer);
     return () => observer?.disconnect();
   }, [text]);
-  const style = distance ? { "--marquee-distance": `-${distance}px`, "--marquee-duration": `${(4 + distance / 32).toFixed(2)}s` } as CSSProperties : undefined;
-  return <em ref={outerRef} className={`marquee-text ${distance ? "overflowing" : ""}`} title={distance ? text : undefined}><span ref={innerRef} style={style}>{text}</span></em>;
+  const trackStyle = loop ? { "--marquee-distance": `-${loop.distance}px`, "--marquee-duration": `${(loop.distance / 32).toFixed(2)}s` } as CSSProperties : undefined;
+  const copyStyle = loop ? { paddingRight: loop.gap } : undefined;
+  return <em ref={outerRef} className={`marquee-text ${loop ? "overflowing" : ""}`} title={loop ? text : undefined}>
+    <span className="marquee-track" style={trackStyle}><span ref={innerRef} style={copyStyle}>{text}</span>{loop && <span style={copyStyle} aria-hidden="true">{text}</span>}</span>
+  </em>;
 }
 
 function ModelImageBadge({model,c}:{model:ModelConfig;c:CopySet}){
