@@ -40,3 +40,18 @@ test("an alias whose preferred base is unavailable runs on the next available ba
   assert.equal(aliasFallbackBase(undefined, ordered, [second]), second);
   assert.equal(aliasFallbackBase(first, ordered, []), undefined);
 });
+
+test("an alias without templates of its own offers its base's templates and follows a base change", () => {
+  const withTemplates = (model: ModelConfig, ids: string[]): ModelConfig => ({ ...model, reasoningPresets: ids.map(id => ({ id, name: id, kind: "custom", effort: model.reasoningEfforts?.[0], ownerId: "admin", global: true })) });
+  const a = withTemplates(first, ["a-fast", "a-deep"]);
+  const b = withTemplates(second, ["b-only"]);
+  const bare: ModelConfig = { ...alias, reasoningPresets: [] };
+  assert.deepEqual(aliasWithBaseModel(bare, a).reasoningPresets.map(preset => preset.id), ["a-fast", "a-deep"]);
+  assert.deepEqual(aliasWithBaseModel(bare, b).reasoningPresets.map(preset => preset.id), ["b-only"]);
+  assert.deepEqual(bare.reasoningPresets, [], "the saved alias keeps no copied templates");
+  assert.deepEqual(aliasWithBaseModel(alias, a).reasoningPresets.map(preset => preset.id), ["custom"], "own templates win");
+  // A template another account owns does not count as the viewer's own, so that viewer inherits instead.
+  const privateOwn: ModelConfig = { ...alias, reasoningPresets: [{ id: "mine", name: "Mine", kind: "custom", ownerId: "owner" }] };
+  assert.deepEqual(aliasWithBaseModel(privateOwn, a, "owner").reasoningPresets.map(preset => preset.id), ["mine"]);
+  assert.deepEqual(aliasWithBaseModel(privateOwn, a, "someone-else").reasoningPresets.map(preset => preset.id), ["a-fast", "a-deep"]);
+});

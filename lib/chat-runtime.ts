@@ -77,7 +77,7 @@ function runtimeModel(config: Awaited<ReturnType<typeof readConfig>>, input: Pic
   if (!selected.isAlias) return { selected, model: selected, base: selected };
   const base = aliasBaseModel(selected, config.models, input.aliasBaseModelId);
   if (!base || input.aliasBaseModelId && base.id !== input.aliasBaseModelId || base.visible === false || !canUseModel(base, { id: userId } as never)) throw new Error("The selected alias base model is unavailable.");
-  return { selected, base, model: aliasWithBaseModel(selected, base) };
+  return { selected, base, model: aliasWithBaseModel(selected, base, userId) };
 }
 
 type ChatJob = {
