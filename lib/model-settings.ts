@@ -33,6 +33,7 @@ const modelSchema = z.object({
   rememberReasoning: z.boolean().optional(),
   systemPromptEditable: z.boolean().optional(),
   reasoningForceApi: z.boolean().optional(),
+  thinkingTags: z.array(z.object({ start: z.string().max(64), end: z.string().max(64) }).strict()).max(12).optional(),
 }).strict();
 
 const exportSchema = z.object({

@@ -32,7 +32,8 @@ import { promises as fs } from "node:fs";
 import { acquirePlanAdmission, assertPlanAccess, clearLiveTokenUsage, recordTokenUsage, releasePlanAdmission, remainingPlanOutputTokens, setLiveTokenUsage } from "./plans";
 import { executeMcpTool, mcpToolDefinitions, type McpToolBinding } from "./mcp";
 import { generateCompatibleImage } from "./image-generation";
-import { composeSystemPrompt, readSystemPromptOverrides, systemPromptEditable, systemPromptOverride } from "./system-prompt";
+import { createThinkingSplitter, effectiveThinkingTags, normalizeThinkingTags, type ThinkingTag } from "./thinking-tags";
+import { canPersonalizeSystemPrompt, readModelSystemPrompts, readSystemPromptOverrides, resolveSystemPrompt } from "./system-prompt";
 import { readUserPreferences } from "./auth";
 
 type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
@@ -65,6 +66,8 @@ export type StartChatJobInput = {
   /** Current per-chat base for an alias. Omitted models use the alias recommendation. */
   aliasBaseModelId?: string;
   reasoningPresetId?: string;
+  /** This chat's own system prompts by model id, then reasoning preset id. */
+  systemPromptOverrides?: Record<string, Record<string, string>>;
   sendReasoning?: boolean;
   tools?: EnabledWebTools;
   messages: InputMessage[];
@@ -99,6 +102,8 @@ type ChatJob = {
   persistTimer?: ReturnType<typeof setTimeout>;
   broadcastTimer?: ReturnType<typeof setTimeout>;
   repetitionRules: RepetitionSettings;
+  /** Start/end pairs that mark reasoning inside the model's text, from the served model. */
+  thinkingTags?: ThinkingTag[];
   repetition?: RepetitionFinding;
   repetitionCheck: { size: number; at: number };
   startedAt: number;
@@ -375,6 +380,21 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   let terminated = false; let sawPayload = false; let finishReason = false;
   // Servers that omit usage are charged the local estimate; a live copy feeds manual usage refreshes.
   let chargedUsage = { inputTokens: 0, outputTokens: 0 };
+  const thinking = createThinkingSplitter(job.thinkingTags ?? effectiveThinkingTags(undefined));
+  const emitText = (contentDelta: string, reasoningDelta: string) => {
+    const now = performance.now();
+    if (contentDelta || reasoningDelta) { visibleStarted ??= now; visibleEnded = now; }
+    if (reasoningDelta) { reasoningStarted ??= now; reasoningEnded = now; }
+    content += contentDelta; reasoning += reasoningDelta;
+    if (contentDelta || reasoningDelta) {
+      outputStarted = true; stopStatusPoll();
+      setWaitPhase(job, undefined);
+      job.message = { ...job.message, content: job.message.content + contentDelta, reasoning: (job.message.reasoning || "") + reasoningDelta };
+      appendStep(job, "reasoning", reasoningDelta);
+      if (contentDelta) { closeReasoningStep(job, (reasoningEnded ?? now) - (reasoningStarted ?? now) > 0 ? ((reasoningEnded ?? now) - (reasoningStarted ?? now)) / 1000 : 1); appendStep(job, "content", contentDelta); }
+      broadcast(job);
+    }
+  };
   const readPayload = (payload: Record<string, unknown>) => {
     sawPayload = true;
     const progress = allowProgress ? progressEvent(payload) : undefined;
@@ -391,21 +411,12 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }> : [];
     if (choices[0]?.finish_reason) finishReason = true;
     const delta = choices[0]?.delta || {};
-    const contentDelta = typeof delta.content === "string" ? delta.content : "";
-    const reasoningDelta = typeof (delta.reasoning_content ?? delta.reasoning) === "string" ? String(delta.reasoning_content ?? delta.reasoning) : "";
-    const now = performance.now();
-    if (contentDelta || reasoningDelta) { visibleStarted ??= now; visibleEnded = now; }
-    if (reasoningDelta) { reasoningStarted ??= now; reasoningEnded = now; }
-    content += contentDelta; reasoning += reasoningDelta;
-    if (contentDelta || reasoningDelta) {
-      outputStarted = true; stopStatusPoll();
-      setWaitPhase(job, undefined);
-      job.message = { ...job.message, content: job.message.content + contentDelta, reasoning: (job.message.reasoning || "") + reasoningDelta };
-      appendStep(job, "reasoning", reasoningDelta);
-      if (contentDelta) { closeReasoningStep(job, (reasoningEnded ?? now) - (reasoningStarted ?? now) > 0 ? ((reasoningEnded ?? now) - (reasoningStarted ?? now)) / 1000 : 1); appendStep(job, "content", contentDelta); }
-      broadcast(job);
-    }
+    const rawContent = typeof delta.content === "string" ? delta.content : "";
+    const rawReasoning = typeof (delta.reasoning_content ?? delta.reasoning) === "string" ? String(delta.reasoning_content ?? delta.reasoning) : "";
+    // Tags the server left in the text, or a reply it put wholly into reasoning, are sorted here.
+    for (const piece of [...thinking.push("reasoning", rawReasoning), ...thinking.push("content", rawContent)]) emitText(piece.kind === "content" ? piece.text : "", piece.kind === "reasoning" ? piece.text : "");
     if (Array.isArray(delta.tool_calls)) for (const part of delta.tool_calls as Array<Record<string, unknown>>) {
+
       outputStarted = true; stopStatusPoll();
       const index = typeof part.index === "number" ? part.index : calls.size;
       const fn = part.function as Record<string, unknown> | undefined;
@@ -418,7 +429,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
       // One phase per delta: clearing and re-setting it would broadcast twice for every argument token.
       setWaitPhase(job, calls.get(index)?.function.name === "create_artifact" ? "creating-artifact" : undefined);
     }
-    if (contentDelta || reasoningDelta || Array.isArray(delta.tool_calls)) inspectRepetition(job, [...calls.values()]);
+    if (rawContent || rawReasoning || Array.isArray(delta.tool_calls)) inspectRepetition(job, [...calls.values()]);
     const outputEstimate = estimateTokens(content) + estimateTokens(reasoning) + estimateTokens([...calls.values()]);
     const used = Math.max(inputEstimate, usage.inputTokens ?? 0) + Math.max(outputEstimate, usage.outputTokens ?? 0, usage.reasoningTokens ?? 0);
     chargedUsage = { inputTokens: usage.inputTokens ?? inputEstimate, outputTokens: usage.outputTokens ?? outputEstimate };
@@ -441,6 +452,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     }
     buffer += decoder.decode();
     if (!terminated && buffer.trim()) consume(buffer);
+    for (const piece of thinking.flush()) emitText(piece.kind === "content" ? piece.text : "", piece.kind === "reasoning" ? piece.text : "");
     if (!sawPayload || !terminated && !finishReason) throw new Error("The model response stream ended before completion.");
   } catch (error) {
     if (error instanceof Error && contextOverflowDetails(error) && Boolean(content || reasoning || calls.size))
@@ -613,6 +625,7 @@ async function run(job: ChatJob) {
     const config = await readConfig();
     if (job.input.messages.some((message) => (message.attachments?.length || 0) > config.toolSettings.maxAttachmentsPerMessage)) throw new Error(`A message exceeds the configured ${config.toolSettings.maxAttachmentsPerMessage}-attachment limit.`);
     const { model, selected, base } = runtimeModel(config, job.input, job.userId);
+    job.thinkingTags = effectiveThinkingTags(normalizeThinkingTags(model.thinkingTags));
     // Whether earlier reasoning goes back to the model is the administrator's per-model choice, never the request's.
     job.input = { ...job.input, sendReasoning: (selected.rememberReasoning ?? base.rememberReasoning) === true };
     const chargeModelId=model.isAlias?(config.models.find(item=>!item.isAlias&&(item.id===model.sourceModel||item.sourceModel===model.sourceModel))?.id||model.sourceModel):model.id;
@@ -622,8 +635,9 @@ async function run(job: ChatJob) {
     const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId && presetVisibleTo(item, job.userId));
     const effort = reasoningEffort(model, preset);
     // An account's own rewrite of this model and preset replaces the composed prompt, where the model allows it.
-    const promptOverride = systemPromptEditable(selected) ? systemPromptOverride(readSystemPromptOverrides(readUserPreferences(job.userId).systemPromptOverrides), selected.id, preset?.id) : undefined;
-    const systemPrompt = promptOverride !== undefined ? promptOverride.trim() : composeSystemPrompt(model, preset);
+    // This chat's prompt, then the account's prompt for the model, then the server default — where the model allows it.
+    const allowed = canPersonalizeSystemPrompt(selected, job.userRole);
+    const systemPrompt = resolveSystemPrompt({ model, selectedId: selected.id, preset, allowed, personal: readModelSystemPrompts(readUserPreferences(job.userId))[selected.id], session: readSystemPromptOverrides(job.input.systemPromptOverrides) });
     if (model.imageGeneration === true) {
       if (connection.driver !== "openai") throw new Error("Image generation currently requires an OpenAI-compatible connection.");
       const latest = job.input.messages.findLast(message => message.role === "user");
@@ -907,7 +921,7 @@ export async function startChatJob(input: StartChatJobInput, userId: string, use
   const config=await readConfig();const {base}=runtimeModel(config,input,userId);
   acquirePlanAdmission(userId,base.id,base.sourceModel);
   const job: ChatJob = {
-    userId, userRole, input, conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
+    userId, userRole, input, conversation: input.systemPromptOverrides ? { ...conversation, systemPromptOverrides: readSystemPromptOverrides(input.systemPromptOverrides) } : conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
     repetitionRules: normalizeRepetitionSettings(config.harnessSettings?.repetitionDetection), repetitionCheck: { size: 0, at: 0 },
     startedAt: Date.now(), waitPhaseStartedAt: Date.now(),
     message: { id: input.assistantMessageId, revisionGroupId: input.revisionGroupId, role: "assistant", content: "", reasoning: "", toolEvents: [], createdAt: new Date().toISOString() },

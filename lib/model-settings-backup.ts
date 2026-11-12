@@ -1,3 +1,4 @@
+import { normalizeThinkingTags } from "./thinking-tags.ts";
 import { createHash } from "node:crypto";
 import { serializeModelSettings } from "./model-settings.ts";
 import { applyPreferredOrder } from "./ordered-list.ts";
@@ -68,6 +69,7 @@ export function readModelSettingsLeniently(value: unknown): { models: Portable[]
       ...(typeof item.isPublic === "boolean" ? { isPublic: item.isPublic } : {}),
       ...(typeof item.rememberReasoning === "boolean" ? { rememberReasoning: item.rememberReasoning } : {}),
       ...(typeof item.systemPromptEditable === "boolean" ? { systemPromptEditable: item.systemPromptEditable } : {}),
+      ...(normalizeThinkingTags(item.thinkingTags) ? { thinkingTags: normalizeThinkingTags(item.thinkingTags) } : {}),
       ...(typeof item.reasoningForceApi === "boolean" ? { reasoningForceApi: item.reasoningForceApi } : {}),
     });
   }
@@ -144,6 +146,7 @@ export function applyModelSettingsImage(models: ModelConfig[], image: unknown, t
         imageGeneration: model.imageGeneration ?? current.imageGeneration, imageInput: model.imageInput ?? current.imageInput,
         rememberReasoning: model.rememberReasoning ?? current.rememberReasoning, systemPromptEditable: model.systemPromptEditable ?? current.systemPromptEditable,
         reasoningForceApi: model.reasoningForceApi ?? current.reasoningForceApi,
+        thinkingTags: model.thinkingTags ?? current.thinkingTags,
         reasoningPresets: merged.presets,
       };
       if (!current.isAlias) report.servedModels++;

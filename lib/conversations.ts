@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { MAX_SYSTEM_PROMPT_OVERRIDE_LENGTH, readSystemPromptOverrides } from "./system-prompt";
 import path from "node:path";
 import { z } from "zod";
 import { isTextAttachmentType } from "./text-attachments";
@@ -68,6 +69,8 @@ export const conversationSchema = z.object({
   title: z.string().min(1),
   modelId: z.string().min(1),
   reasoningPresetId: z.string().optional(),
+  /** This chat's own system prompts by model id, then reasoning preset id. */
+  systemPromptOverrides: z.record(z.string(), z.record(z.string(), z.string().max(MAX_SYSTEM_PROMPT_OVERRIDE_LENGTH))).optional(),
   activeBranchId: z.string().min(1),
   temporary: z.boolean().optional(),
   branches: z.array(branchSchema).min(1),
@@ -90,8 +93,8 @@ const legacyMigrationName = "legacy-conversations-v1";
 let legacyMigration: Promise<void> | undefined;
 
 const insertConversation = db.prepare(`
-  INSERT INTO conversations(id, title, model_id, reasoning_preset_id, active_branch_id, created_at, updated_at, user_id, temporary, pinned_at)
-  VALUES (@id, @title, @modelId, @reasoningPresetId, @activeBranchId, @createdAt, @updatedAt, @userId, @temporary, @pinnedAt)
+  INSERT INTO conversations(id, title, model_id, reasoning_preset_id, active_branch_id, created_at, updated_at, user_id, temporary, pinned_at, system_prompt_overrides)
+  VALUES (@id, @title, @modelId, @reasoningPresetId, @activeBranchId, @createdAt, @updatedAt, @userId, @temporary, @pinnedAt, @systemPromptOverrides)
 `);
 const insertBranch = db.prepare(`
   INSERT INTO branches(id, conversation_id, name, parent_branch_id, forked_from_message_id, position, created_at, updated_at)
@@ -111,7 +114,7 @@ const insertAttachment = db.prepare("INSERT OR IGNORE INTO message_attachments(m
 
 function storeConversation(record: Conversation, userId: string, guard?: () => boolean) {
   db.transaction(() => {
-    const owner = db.prepare("SELECT user_id, title, title_managed, temporary, deleted_at, pinned_at FROM conversations WHERE id = ?").get(record.id) as { user_id: string | null; title: string; title_managed: number; temporary: number; deleted_at:string|null; pinned_at:string|null } | undefined;
+    const owner = db.prepare("SELECT user_id, title, title_managed, temporary, deleted_at, pinned_at, system_prompt_overrides FROM conversations WHERE id = ?").get(record.id) as { user_id: string | null; title: string; title_managed: number; temporary: number; deleted_at:string|null; pinned_at:string|null; system_prompt_overrides:string|null } | undefined;
     if (guard && (!guard() || !owner)) throw new Error("Conversation was deleted or its task was replaced.");
     if (owner && owner.user_id !== userId) throw new Error("Conversation not found.");
     if (owner?.deleted_at) throw new Error("Conversation was deleted.");
@@ -119,7 +122,9 @@ function storeConversation(record: Conversation, userId: string, guard?: () => b
     if (owner?.title_managed) record.title = owner.title;
     db.prepare("DELETE FROM conversations WHERE id = ? AND user_id = ?").run(record.id, userId);
     const temporary = owner ? owner.temporary : Number(record.temporary === true);
-    insertConversation.run({ ...record, userId, reasoningPresetId: record.reasoningPresetId ?? null, temporary, pinnedAt: owner?.pinned_at ?? null });
+    // A record that does not carry the chat's prompts (an older tab, a runtime save) keeps the stored ones.
+    const prompts = record.systemPromptOverrides !== undefined ? JSON.stringify(readSystemPromptOverrides(record.systemPromptOverrides)) : owner?.system_prompt_overrides ?? null;
+    insertConversation.run({ ...record, userId, reasoningPresetId: record.reasoningPresetId ?? null, temporary, pinnedAt: owner?.pinned_at ?? null, systemPromptOverrides: prompts });
     record.temporary = temporary === 1;
     for (const [branchPosition, branch] of record.branches.entries()) {
       insertBranch.run({
@@ -302,6 +307,7 @@ type ConversationRow = {
   updated_at: string;
   temporary: number;
   deleted_at: string | null;
+  system_prompt_overrides?: string | null;
 };
 type BranchRow = {
   id: string;
@@ -417,6 +423,7 @@ async function readConversationRecord(id: string, userId: string, includeDeleted
     title: conversation.title,
     modelId: conversation.model_id,
     reasoningPresetId: conversation.reasoning_preset_id ?? undefined,
+    ...(conversation.system_prompt_overrides ? { systemPromptOverrides: storedPrompts(conversation.system_prompt_overrides) } : {}),
     activeBranchId: conversation.active_branch_id,
     temporary: conversation.temporary === 1,
     branches,
@@ -497,6 +504,17 @@ export async function deleteAllConversations(userId: string) {
 export function renameConversation(id: string, userId: string, title: string, automatic = false) {
   const clean = z.string().trim().min(1).max(200).parse(title);
   return db.prepare(`UPDATE conversations SET title = ?, title_managed = 1 WHERE id = ? AND user_id = ? AND deleted_at IS NULL ${automatic ? "AND title_managed = 0" : ""}`).run(clean, id, userId).changes > 0;
+}
+
+function storedPrompts(value: string) {
+  try { return readSystemPromptOverrides(JSON.parse(value)); } catch { return {}; }
+}
+
+/** Replaces a chat's own system prompts, edited from the reasoning menu before the next message is sent. */
+export function setConversationSystemPrompts(id: string, userId: string, overrides: unknown) {
+  const prompts = readSystemPromptOverrides(overrides);
+  if (Object.values(prompts).some(presets => Object.values(presets).some(prompt => prompt.length > MAX_SYSTEM_PROMPT_OVERRIDE_LENGTH))) return false;
+  return db.prepare("UPDATE conversations SET system_prompt_overrides = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL").run(JSON.stringify(prompts), id, userId).changes > 0;
 }
 
 /** Pins a saved chat to the top of the history list, or unpins it. */

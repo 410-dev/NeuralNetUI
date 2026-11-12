@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { publicConfig, readConfig, writeConfigForUser } from "@/lib/config";
-import { authErrorResponse, requireUser } from "@/lib/auth";
+import { authErrorResponse, readUserPreferences, requireUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,9 @@ export async function PUT(request: Request) {
     const user = requireUser(request);
     const saved = await writeConfigForUser(incoming, user);
     const admin = user.role === "admin" || user.role === "superadmin";
-    return NextResponse.json(publicConfig(saved, { ...user, displayName: admin ? incoming.profile?.name || user.displayName : user.displayName, preferences: { ...user.preferences, sendReasoningToModel: incoming.preferences?.sendReasoningToModel, exportReasoning: incoming.preferences?.exportReasoning, language: incoming.preferences?.language, showModelIdentifiers: incoming.preferences?.showModelIdentifiers, renderStrikethrough: incoming.preferences?.renderStrikethrough, defaultModelId: incoming.preferences?.defaultModelId, defaultReasoningPresetId: incoming.preferences?.defaultReasoningPresetId, aliasBaseModelIds: incoming.preferences?.aliasBaseModelIds, appearance: incoming.preferences?.appearance } }));
+    // Preferences are re-read so the answer carries what was stored, such as personal prompts the server filtered.
+    const stored = readUserPreferences(user.id);
+    return NextResponse.json(publicConfig(saved, { ...user, displayName: admin ? incoming.profile?.name || user.displayName : user.displayName, preferences: { ...user.preferences, modelSystemPrompts: stored.modelSystemPrompts, sendReasoningToModel: incoming.preferences?.sendReasoningToModel, exportReasoning: incoming.preferences?.exportReasoning, language: incoming.preferences?.language, showModelIdentifiers: incoming.preferences?.showModelIdentifiers, renderStrikethrough: incoming.preferences?.renderStrikethrough, defaultModelId: incoming.preferences?.defaultModelId, defaultReasoningPresetId: incoming.preferences?.defaultReasoningPresetId, aliasBaseModelIds: incoming.preferences?.aliasBaseModelIds, appearance: incoming.preferences?.appearance } }));
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof ZodError ? error.issues[0]?.message : error instanceof Error ? error.message : "설정을 저장하지 못했습니다." },

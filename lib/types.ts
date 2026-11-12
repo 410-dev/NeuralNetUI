@@ -88,6 +88,8 @@ export interface ModelConfig {
   rememberReasoning?: boolean;
   /** Administrator choice for a served model: accounts may replace its system prompt for themselves. Aliases always may. */
   systemPromptEditable?: boolean;
+  /** Administrator choice for a served model: start/end pairs that mark reasoning in its text. Missing means the defaults; aliases use their base's. */
+  thinkingTags?: Array<{ start: string; end: string }>;
 }
 
 export interface ConnectionConfig {
@@ -237,8 +239,10 @@ export interface AppConfig {
     appearance: AppearancePreferences;
     /** Per-account composer tool switches; absent keys use the built-in defaults. */
     enabledTools?: Partial<EnabledTools>;
-    /** Per-account system prompt replacements by model id, then reasoning preset id. */
+    /** Legacy per-account replacements by model id, then preset id; read once into `modelSystemPrompts`. */
     systemPromptOverrides?: Record<string, Record<string, string>>;
+    /** The account's own system prompt per model, replacing the model's server default. */
+    modelSystemPrompts?: Record<string, string>;
   };
   /** Workspace-wide, never overridden per account. */
   loginAppearance: LoginAppearance;
@@ -424,6 +428,8 @@ export interface Conversation {
   temporary?: boolean;
   modelId: string;
   reasoningPresetId?: string;
+  /** This chat's own system prompts by model id, then reasoning preset id. A new chat opened from it starts with a copy. */
+  systemPromptOverrides?: Record<string, Record<string, string>>;
   activeBranchId: string;
   branches: ChatBranch[];
   createdAt: string;

@@ -37,7 +37,7 @@ import {
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
   LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload, HardDrive, ShieldAlert,
   Palette, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Repeat2, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge, Cable, Code2, Unlock,
-} from "lucide-react";
+  RotateCcw } from "lucide-react";
 import { Children, cloneElement, createContext, CSSProperties, FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -65,7 +65,8 @@ import { useModalFocus, useModalTransition } from "@/lib/use-modal-focus";
 import { connectionForModel, resolveConnectionModels, reconcileConnectionEdits } from "@/lib/connection-drivers";
 import { connectedModels, modelServerState, onlineReplacement, type ServerState } from "@/lib/model-availability";
 import { aliasBaseModel, aliasFallbackBase, aliasWithBaseModel } from "@/lib/alias-base-model";
-import { composeSystemPrompt, readSystemPromptOverrides, systemPromptEditable, systemPromptOverride } from "@/lib/system-prompt";
+import { DEFAULT_THINKING_TAGS, type ThinkingTag } from "@/lib/thinking-tags";
+import { canPersonalizeSystemPrompt, resolveSystemPrompt, systemPromptEditable, withSystemPromptOverride, type SystemPromptOverrides } from "@/lib/system-prompt";
 import { SystemPromptDialog } from "@/app/system-prompt-dialog";
 import { useKeyboardReturn } from "@/lib/use-keyboard-return";
 import { describeConnectionFailure, isConnectionFailureCode } from "@/lib/connection-errors";
@@ -116,7 +117,7 @@ const translations = {
     historyEmpty: "Your conversations will appear here.", settingsConnections: "Settings & connections", selectModel: "Select a model",
     availableModels: "Available models", checkingModelServers: "Checking model servers", noOnlineModels: "No model server is online.", modelServerOffline: "The server serving this model is offline", modelServerError: "The server serving this model is answering with an error", serverOffline: "Server offline", modelWeightHint: "Uses tokens {weight}x faster", showModelWeights: "Show model weights", showModelWeightsDesc: "Show every account, including administrators, a weight badge on models whose plan weight is not 1. This is a workspace setting.", showModelConnectionNames:"Show model server names", showModelConnectionNamesDesc:"Show connection server names in the model picker for every account. This workspace setting is off by default.", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
     messagePlaceholder: "Message to send", reasoningPreset: "Reasoning preset", native: "Native", template: "Template", default: "default",
-    sendPriorReasoning: "Remember its train of thought", sendPriorReasoningDesc: "Send the earlier reasoning back with the next request", rememberReasoningModelDesc: "Earlier responses' reasoning is sent back to this model with each request. Only administrators can change this.", aliasInheritsBase: "Follows the base model until set", systemPromptEditableModel: "Allow system prompt editing", systemPromptEditableModelDesc: "Every account may rewrite this model's system prompt for itself from the reasoning menu. Custom models always allow it.", editSystemPrompt: "Edit system prompt", editSystemPromptDesc: "View and rewrite the whole prompt for yourself", systemPromptSaveFailed: "Unable to save the system prompt.",
+    sendPriorReasoning: "Remember its train of thought", sendPriorReasoningDesc: "Send the earlier reasoning back with the next request", rememberReasoningModelDesc: "Earlier responses' reasoning is sent back to this model with each request. Only administrators can change this.", aliasInheritsBase: "Follows the base model until set", systemPromptEditableModel: "Allow system prompt editing", systemPromptEditableModelDesc: "Every account may set its own system prompt for this model in Settings > Models and per chat from the reasoning menu. While off, standard accounts do not see the system prompt at all. Custom models always allow it.", editSystemPrompt: "Edit system prompt", editSystemPromptDesc: "View and rewrite the whole prompt for yourself", systemPromptSaveFailed: "Unable to save the system prompt.",
     disclaimer: "Responses may be inaccurate. Verify important information.", stop: "Stop generating", send: "Send message", addToQueue: "Add to queue", sendHeld: "Waiting for the model list to refresh before sending", modelSwitchedNotice: "{from} is unavailable, so this message will go to {to}. Press send again to continue.", queuedMessages: "Queued messages", removeQueuedMessage: "Remove queued message",
     cancel: "Cancel", close: "Close", closeMenu: "Close menu", forkSend: "Fork & send", editBranch: "Edit and branch", reasoning: "Reasoning", copy: "Copy", regenerate: "Regenerate response", regenerateRequest: "Regenerate from this message", deleteMessage: "Delete message", confirmDeleteMessage: "Delete this message and its connected model response?", previousRevision: "Previous revision", nextRevision: "Next revision",
     confirmDelete: "Delete", irreversibleAction: "This action cannot be undone.", deleteWhileGenerating: "Wait for the response to finish before deleting this message.", editPrompt: "Edit prompt", editMessage: "Edit message",
@@ -132,7 +133,7 @@ const translations = {
     discover: "Discover models & capabilities", discoverDesc: "Calls GET /models and keeps every model returned by the server.", detecting: "Detecting…", detectModels: "Detect models",
     modelsTitle: "Models & aliases", modelsDesc: "All served models stay here. Choose which ones appear in the chat interface.", newAlias: "New alias",
     customAlias: "CUSTOM ALIAS", servedModel: "SERVED MODEL", modelId: "Model ID", baseModel: "Recommended base model", servedIdentifier: "Served model identifier", aliasBaseModel: "Alias base model", aliasBaseModelDesc: "Choose the served model used by this alias for the current chat.", defaultAliasBaseActive: "Default alias base model", aliasBasedOn: "Based on {name}", useAliasBaseAsDefault: "Always use {name}", defaultMark: "Default",
-    description: "Description", systemPrompt: "System prompt", systemPromptPlaceholder: "Applied to every conversation with this model…", deleteAlias: "Delete alias",
+    description: "Description", systemPrompt: "System prompt", systemPromptPlaceholder: "Applied to every conversation with this model…", serverSystemPrompt: "Server default system prompt", serverSystemPromptDesc: "Applies to everyone who uses this model unless they set their own.", personalSystemPrompt: "My system prompt", personalSystemPromptDesc: "Applies to your account only and replaces the server default. Leave it empty to use the server default. A prompt edited from a chat's reasoning menu applies to that chat on top of this.", personalSystemPromptPlaceholder: "Empty: the server default is used", thinkingTags: "Thinking tags", thinkingTagsDesc: "Start and end tags this model writes around its reasoning. When the server does not split reasoning from the answer, or puts the whole reply in reasoning, these pairs separate them. Tags need no surrounding spaces.", thinkingTagStart: "Start tag", thinkingTagEnd: "End tag", addThinkingTag: "Add tag pair", removeThinkingTag: "Remove tag pair", resetThinkingTags: "Restore defaults", noThinkingTags: "No tags: the text is used as the server sent it.", aliasThinkingTags: "Aliases use the thinking tags of the base model they run on.", deleteAlias: "Delete alias",
     showMain: "Show in main interface", showMainDesc: "Also show this model in the Reasoning section and model picker.", noModel: "No model selected.", imageGenerationModel:"Image generation model", imageGenerationModelDesc:"Use the OpenAI-compatible Images API and save generated images to private storage.", imageInputModel:"Image input model", imageInputModelDesc:"Allow image attachments to be sent to this model.", imageGenerationBadge:"Image generation model", imageGenerationNoInputBadge:"Image generation model without image input", modelAttachmentUnsupported:"The selected model does not support one or more attached files.",
     reasoningTitle: "Reasoning effort", reasoningDesc: "Configure native effort levels and prompt templates separately for each visible model.", addTemplate: "Add template",
     nativeSupport: "Reasoning delivery", noEffortMetadata: "No native reasoning controls advertised. Custom prompt templates remain available.", reasoningApiMode: "API", reasoningPromptMode: "System prompt", reasoningApiModeDesc: "Reasoning values are sent as reasoning_effort", reasoningForcedDesc: "The server advertises no options. Each template's typed value is sent through the API anyway, and only templates are offered in chat.", reasoningPromptModeDesc: "No reasoning value is sent; templates shape reasoning through the system prompt.", builtIn: "Built-in",
@@ -164,7 +165,7 @@ const translations = {
     historyEmpty: "대화를 시작하면 여기에 표시됩니다.", settingsConnections: "설정 및 연결", selectModel: "모델 선택",
     availableModels: "사용 가능한 모델", checkingModelServers: "모델 서버 확인 중", noOnlineModels: "온라인 상태인 모델 서버가 없습니다.", modelServerOffline: "모델을 서빙하는 서버가 오프라인입니다", modelServerError: "모델을 서빙하는 서버에서 오류가 발생했습니다", serverOffline: "서버 오프라인", modelWeightHint: "토큰을 {weight}배 더 빨리 소모합니다", showModelWeights: "모델 가중치 표시", showModelWeightsDesc: "플랜 가중치가 1이 아닌 모델에 가중치 딱지를 표시합니다. 전역 설정이며 관리자를 포함한 모든 사용자에게 적용됩니다.", showModelConnectionNames:"모델 서버 이름 표시", showModelConnectionNamesDesc:"모델 선택 드롭다운에 연결 서버 이름을 표시합니다. 기본값은 꺼짐이며 모든 사용자에게 적용되는 전역 설정입니다.", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
     messagePlaceholder: "보낼 메시지", reasoningPreset: "Reasoning 프리셋", native: "내장", template: "템플릿", default: "기본값",
-    sendPriorReasoning: "생각 기록 기억하기", sendPriorReasoningDesc: "다음 요청에 이전 생각 기록을 함께 보냅니다", rememberReasoningModelDesc: "요청마다 이전 응답의 생각 기록을 이 모델에 함께 보냅니다. 관리자만 변경할 수 있습니다.", aliasInheritsBase: "설정하기 전까지 기반 모델을 따릅니다", systemPromptEditableModel: "시스템 프롬프트 편집 허용", systemPromptEditableModelDesc: "모든 사용자가 추론 메뉴에서 이 모델의 시스템 프롬프트를 자신에게만 적용되도록 편집할 수 있습니다. 커스텀 모델은 항상 허용됩니다.", editSystemPrompt: "시스템 프롬프트 편집하기", editSystemPromptDesc: "전체 프롬프트를 보고 나에게 맞게 고칩니다", systemPromptSaveFailed: "시스템 프롬프트를 저장하지 못했습니다.",
+    sendPriorReasoning: "생각 기록 기억하기", sendPriorReasoningDesc: "다음 요청에 이전 생각 기록을 함께 보냅니다", rememberReasoningModelDesc: "요청마다 이전 응답의 생각 기록을 이 모델에 함께 보냅니다. 관리자만 변경할 수 있습니다.", aliasInheritsBase: "설정하기 전까지 기반 모델을 따릅니다", systemPromptEditableModel: "시스템 프롬프트 편집 허용", systemPromptEditableModelDesc: "모든 사용자가 설정 > 모델에서 이 모델의 내 시스템 프롬프트를, 추론 메뉴에서 채팅별 시스템 프롬프트를 정할 수 있습니다. 끄면 일반 사용자에게는 시스템 프롬프트가 보이지 않습니다. 커스텀 모델은 항상 허용됩니다.", editSystemPrompt: "시스템 프롬프트 편집하기", editSystemPromptDesc: "전체 프롬프트를 보고 나에게 맞게 고칩니다", systemPromptSaveFailed: "시스템 프롬프트를 저장하지 못했습니다.",
     disclaimer: "응답이 부정확할 수 있습니다. 중요한 정보는 확인해 주세요.", stop: "생성 중단", send: "메시지 전송", addToQueue: "대기열에 추가", sendHeld: "모델 목록을 갱신한 뒤 전송합니다", modelSwitchedNotice: "{from}을(를) 사용할 수 없어 {to}(으)로 변경되었습니다. 계속하려면 전송을 다시 누르세요.", queuedMessages: "대기 중인 메시지", removeQueuedMessage: "대기열에서 제거",
     cancel: "취소", close: "닫기", closeMenu: "메뉴 닫기", forkSend: "분기 후 전송", editBranch: "편집 후 분기", reasoning: "Reasoning", copy: "복사", regenerate: "응답 재생성", regenerateRequest: "이 메시지부터 재생성", deleteMessage: "메시지 삭제", confirmDeleteMessage: "이 메시지와 연결된 모델 응답을 함께 삭제할까요?", previousRevision: "이전 수정본", nextRevision: "다음 수정본",
     confirmDelete: "삭제", irreversibleAction: "이 작업은 되돌릴 수 없습니다.", deleteWhileGenerating: "응답 생성이 끝난 뒤에 메시지를 삭제할 수 있습니다.", editPrompt: "프롬프트 편집", editMessage: "메시지 편집",
@@ -180,7 +181,7 @@ const translations = {
     discover: "모델 및 기능 감지", discoverDesc: "GET /models를 호출하고 서버가 반환한 모든 모델을 보존합니다.", detecting: "감지 중…", detectModels: "모델 감지",
     modelsTitle: "모델 및 별칭", modelsDesc: "서빙되는 모든 모델을 보존하고 채팅 화면에 표시할 모델만 선택합니다.", newAlias: "새 별칭",
     customAlias: "커스텀 별칭", servedModel: "서빙 모델", modelId: "모델 ID", baseModel: "권고 기반 모델", servedIdentifier: "서빙 모델 식별자", aliasBaseModel: "Alias 기반 모델", aliasBaseModelDesc: "현재 채팅에서 이 Alias가 사용할 서빙 모델을 선택합니다.", defaultAliasBaseActive: "기본 Alias 기반 모델", aliasBasedOn: "{name} 기반", useAliasBaseAsDefault: "{name}을(를) 기본으로 사용", defaultMark: "기본",
-    description: "설명", systemPrompt: "시스템 프롬프트", systemPromptPlaceholder: "이 모델의 모든 대화에 적용됩니다…", deleteAlias: "별칭 삭제",
+    description: "설명", systemPrompt: "시스템 프롬프트", systemPromptPlaceholder: "이 모델의 모든 대화에 적용됩니다…", serverSystemPrompt: "서버 기본 시스템 프롬프트", serverSystemPromptDesc: "직접 설정하지 않은 모든 사용자에게 적용되는 기본값입니다.", personalSystemPrompt: "내 시스템 프롬프트", personalSystemPromptDesc: "내 계정에만 적용되며 서버 기본값을 덮어씁니다. 비우면 서버 기본값을 사용합니다. 채팅의 추론 메뉴에서 편집한 프롬프트는 그 채팅에 한해 이 값보다 우선합니다.", personalSystemPromptPlaceholder: "비어 있음: 서버 기본값을 사용합니다", thinkingTags: "생각 태그", thinkingTagsDesc: "이 모델이 생각 앞뒤에 쓰는 시작·끝 태그입니다. 서버가 생각과 답변을 나누지 못하거나 답변까지 생각으로 보낼 때 이 쌍으로 나눕니다. 태그 앞뒤에 공백이 없어도 인식합니다.", thinkingTagStart: "시작 태그", thinkingTagEnd: "끝 태그", addThinkingTag: "태그 쌍 추가", removeThinkingTag: "태그 쌍 삭제", resetThinkingTags: "기본값으로", noThinkingTags: "태그 없음: 서버가 보낸 그대로 사용합니다.", aliasThinkingTags: "Alias는 실행 중인 기반 모델의 생각 태그를 사용합니다.", deleteAlias: "별칭 삭제",
     showMain: "메인 인터페이스에 표시", showMainDesc: "모델 선택기와 추론 수준 섹션에도 이 모델을 표시합니다.", noModel: "선택된 모델이 없습니다.", imageGenerationModel:"이미지 생성 모델", imageGenerationModelDesc:"OpenAI 호환 Images API를 사용하고 생성 이미지를 개인 저장소에 저장합니다.", imageInputModel:"이미지 입력 모델", imageInputModelDesc:"이 모델에 이미지 파일을 첨부해 전송할 수 있습니다.", imageGenerationBadge:"이미지 생성 모델", imageGenerationNoInputBadge:"이미지 입력을 지원하지 않는 이미지 생성 모델", modelAttachmentUnsupported:"선택한 모델이 첨부된 파일 형식 일부를 지원하지 않습니다.",
     reasoningTitle: "추론 수준", reasoningDesc: "표시된 모델별로 내장 effort와 프롬프트 템플릿을 설정하고 채팅 메뉴에 표시할 순서를 정합니다.", addTemplate: "템플릿 추가",
     nativeSupport: "추론 전달 방식", noEffortMetadata: "서버가 내장 추론 제어를 제공하지 않습니다. 커스텀 프롬프트 템플릿은 사용할 수 있습니다.", reasoningApiMode: "API", reasoningPromptMode: "시스템 프롬프트", reasoningApiModeDesc: "추론 값을 reasoning_effort로 전송합니다", reasoningForcedDesc: "서버가 옵션을 제공하지 않습니다. 각 템플릿에 입력한 값을 API로 강제로 전송하며, 채팅에서는 템플릿만 표시됩니다.", reasoningPromptModeDesc: "추론 값을 전송하지 않고, 템플릿의 시스템 프롬프트로 추론을 조절합니다.", builtIn: "내장",
@@ -402,6 +403,10 @@ export default function Home() {
     for (const [name, value] of Object.entries(accentVariables(accent))) root.style.setProperty(name, value);
   }, [accentPreview, signedIn, auth?.loginAccent, appearance.accentPalette, appearance.accentColor]);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
+  // This chat's own system prompts (model id, then preset id). A new chat keeps them; only a page load starts empty.
+  const [sessionPrompts, setSessionPrompts] = useState<SystemPromptOverrides>({});
+  const sessionPromptsRef = useRef<SystemPromptOverrides>({});
+  sessionPromptsRef.current = sessionPrompts;
   const [draftAttachments, setDraftAttachments] = useState<StoredAttachment[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
   const [internetSearchEnabled, setInternetSearchEnabled] = useState(false);
@@ -739,9 +744,9 @@ export default function Home() {
   // Both follow the model: the administrator decides whether reasoning is remembered, and an account's own prompt
   // replaces the composed one where the model allows it.
   const rememberReasoning = (selectedModel?.rememberReasoning ?? selectedAliasBase?.rememberReasoning) === true;
-  const canEditSystemPrompt = Boolean(selectedModel && systemPromptEditable(selectedModel));
-  const promptOverrides = readSystemPromptOverrides(config.preferences.systemPromptOverrides);
-  const selectedSystemPrompt = selectedModel ? (canEditSystemPrompt ? systemPromptOverride(promptOverrides, selectedModel.id, selectedPreset?.id) : undefined) ?? composeSystemPrompt(selectedModel, selectedPreset) : "";
+  const canEditSystemPrompt = Boolean(selectedModel && canPersonalizeSystemPrompt(selectedModel, config.account?.role));
+  const personalPrompt = selectedModel ? config.preferences.modelSystemPrompts?.[selectedModel.id] : undefined;
+  const selectedSystemPrompt = selectedModel ? resolveSystemPrompt({ model: selectedModel, selectedId: selectedModel.id, preset: selectedPreset, allowed: canEditSystemPrompt, personal: personalPrompt, session: sessionPrompts }) : "";
   const contextBreakdown = useMemo(() => contextUsage(messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length), [messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length]);
   const messageRevisions = useMemo(() => {
     const groups = new Map<string, Map<string, MessageRevision>>();
@@ -922,7 +927,7 @@ export default function Home() {
   function resetWorkspaceForAuthChange() {
     abandonRef.current = true; abortRef.current?.abort(); clearQueuedPrompts();
     setConfig(structuredClone(emptyConfig)); selectedModelIdRef.current = ""; setSelectedModelId(""); setSelectedPresetId("");
-    setConversation(null); setMessages([]); setHistories([]); setDraft(""); setDraftAttachments([]); setIsGenerating(false); setPendingWait(null); setError("");
+    setConversation(null); setSessionPrompts({}); setMessages([]); setHistories([]); setDraft(""); setDraftAttachments([]); setIsGenerating(false); setPendingWait(null); setError("");
     // The settings preview holds the departing account's accent; drop it so the sign-in screen shows its own.
     setSearching(false); setStorageOpen(false); setStoragePickerOpen(false); setChatManagerOpen(false); setExportOpen(false); setMobileOpen(false); setAccentPreview("");
   }
@@ -945,7 +950,7 @@ export default function Home() {
       temporaryIdRef.current = next.temporary ? next.id : ""; setTemporaryMode(next.temporary === true); setPromoting(false);
       setConversation(next); setMessages((selectedBranchId ? next.branches.find(item => item.id === selectedBranchId) : branch)?.messages || []);if(conversation?.id!==next.id)setMcpToolNames({}); selectedModelIdRef.current = next.modelId; setSelectedModelId(next.modelId);
       setRenderedMessageCount(60);
-      setSelectedPresetId(next.reasoningPresetId || ""); setMobileOpen(false); setError("");
+      setSelectedPresetId(next.reasoningPresetId || ""); setSessionPrompts(next.systemPromptOverrides || {}); setMobileOpen(false); setError("");
       pendingConversationIdRef.current = next.id; if (navigate) navigateToChat(next.id);
       if (abandoned && abandoned !== next.id) void refreshHistories();
       if (!selectedBranchId || selectedBranchId === branch?.id) void watchChatJob(next, branch?.id || next.activeBranchId, true);
@@ -1032,7 +1037,7 @@ export default function Home() {
     const stamp = now(); const branchId = uid("branch");
     return {
       id: pendingConversationIdRef.current || uid("conversation"), title: firstMessage.content.trim() ? titleFrom(firstMessage.content) : c.imageChat, modelId: model.id,
-      reasoningPresetId: preset?.id, activeBranchId: branchId, temporary: temporaryMode, createdAt: stamp, updatedAt: stamp,
+      reasoningPresetId: preset?.id, systemPromptOverrides: sessionPromptsRef.current, activeBranchId: branchId, temporary: temporaryMode, createdAt: stamp, updatedAt: stamp,
       branches: [{ id: branchId, name: "Main", messages: [firstMessage], createdAt: stamp, updatedAt: stamp }],
     };
   }
@@ -1159,7 +1164,7 @@ export default function Home() {
       }
       const response = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversationId: working.id, branchId, assistantMessageId: placeholder.id, revisionGroupId, modelId: working.modelId, aliasBaseModelId: runtimeAliasBaseModelId, reasoningPresetId: working.reasoningPresetId,
+        body: JSON.stringify({ conversationId: working.id, branchId, assistantMessageId: placeholder.id, revisionGroupId, modelId: working.modelId, aliasBaseModelId: runtimeAliasBaseModelId, reasoningPresetId: working.reasoningPresetId, systemPromptOverrides: sessionPromptsRef.current,
           tools: options?.tools || { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserToolAvailable && browserEnabled, storageAccess:storageAccessEnabled, storageRead:storageReadEnabled, storageWrite:storageWriteEnabled, storageWriteMaxFiles, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled,artifact:artifactEnabled, mcpConnectionIds,mcpToolNames },
           clientContext: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: navigator.language, language: config.preferences.language },
           messages: requestMessages.map((message) => ({ role: message.role, content: message.content, reasoning_content: message.reasoning, toolEvents: message.toolEvents, attachments: message.attachments?.map(({ id }) => ({ id })) })) }),
@@ -1319,17 +1324,16 @@ export default function Home() {
     setMessages(nextBranch?.messages || []); await persist(next);
   }
 
-  /** Saves the account's own system prompts one preset at a time; the last answer carries every change. */
+  /** Applies prompts edited from the reasoning menu to this chat only, and stores them with a chat that is already saved. */
   async function saveSystemPrompts(changes: Array<{ presetId?: string; prompt: string | null }>) {
     if (!selectedModel) return;
-    let latest: PublicConfig | undefined;
-    for (const change of changes) {
-      const response = await fetch("/api/preferences/system-prompts", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modelId: selectedModel.id, ...change }) });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || c.systemPromptSaveFailed);
-      latest = body;
-    }
-    if (latest) { const saved = latest; setConfig(current => ({ ...current, preferences: { ...current.preferences, systemPromptOverrides: saved.preferences.systemPromptOverrides } })); }
+    const next = changes.reduce((current, change) => withSystemPromptOverride(current, selectedModel.id, change.presetId, change.prompt), sessionPromptsRef.current);
+    setSessionPrompts(next); sessionPromptsRef.current = next;
+    if (!conversation) return;
+    setConversation(current => current ? { ...current, systemPromptOverrides: next } : current);
+    const response = await fetch(`/api/conversations/${encodeURIComponent(conversation.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ systemPromptOverrides: next }) });
+    // A chat the server has not stored yet picks the prompts up with its first message.
+    if (!response.ok && response.status !== 404) throw new Error((await response.json().catch(() => ({}))).error || c.systemPromptSaveFailed);
   }
 
   async function uploadImages(files: File[]) {
@@ -1495,7 +1499,7 @@ export default function Home() {
         onDeleted={()=>void managedChatsChanged()}
       />}
       {renameTarget && <TextDialog ko={locale === "ko"} title={locale === "ko" ? "채팅 제목 변경" : "Rename chat"} value={renameTarget.title} saveLabel={c.saveEdit} cancelLabel={c.cancel} secondary={{ label: c.duplicateChat, icon: <Copy size={15} />, busy: duplicating, onAction: (title) => { const target = renameTarget; void duplicateHistory(target.id, title); } }} onClose={() => setRenameTarget(null)} onSave={title => { const target = renameTarget; void (async () => { try { const response = await fetch(`/api/conversations/${target.id}`, {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({title})}); if (!response.ok) throw new Error(locale === "ko" ? "제목 변경 실패" : "Rename failed"); setConversation(current => current?.id === target.id ? {...current,title} : current); await refreshHistories(); setRenameTarget(null); } catch (caught) { setError(caught instanceof Error ? caught.message : "Rename failed"); setRenameTarget(null); } })(); }} />}
-      {systemPromptOpen && selectedModel && <SystemPromptDialog ko={locale === "ko"} model={selectedModel} initialPresetId={selectedPreset?.id} overrides={promptOverrides} onSave={saveSystemPrompts} onClose={() => setSystemPromptOpen(false)} />}
+      {systemPromptOpen && selectedModel && <SystemPromptDialog ko={locale === "ko"} model={selectedModel} personalPrompt={personalPrompt} initialPresetId={selectedPreset?.id} overrides={sessionPrompts} onSave={saveSystemPrompts} onClose={() => setSystemPromptOpen(false)} />}
       {settingsOpen && <SettingsPanel initial={config} serverStates={serverStates} onAccentPreview={setAccentPreview} onClose={() => { setSettingsOpen(false); setAccentPreview(""); }} onLogout={async () => { resetWorkspaceForAuthChange(); await fetch("/api/auth/logout", { method: "POST" }); setSettingsOpen(false); setAuth(await fetch("/api/auth/status").then((response) => response.json()).catch(() => ({ setupRequired: false, authenticated: false, user: null }))); }} onSaved={(next) => { setConfig(next); setMcpConnectionIds(current=>next.mcpEntitlement.enabled?current.filter(id=>next.mcpConnections.some(connection=>connection.id===id&&connection.enabled)):[]); const visible = next.models.filter((item) => item.visible !== false); const model = visible.find((item) => item.id === selectedModelIdRef.current) || visible.find((item) => item.id === next.preferences.defaultModelId) || visible[0]; const preset = model?.reasoningPresets.find((item) => item.id === selectedPresetId) || model?.reasoningPresets.find((item) => item.id === next.preferences.defaultReasoningPresetId) || model?.reasoningPresets[0]; selectedModelIdRef.current = model?.id || ""; setSelectedModelId(model?.id || ""); setSelectedPresetId(preset?.id || ""); }} />}
       {exportOpen && <ExportDialog c={c} conversation={conversation || undefined} initialIncludeReasoning={config.preferences.exportReasoning} onClose={() => setExportOpen(false)} onPreference={(value) => { const next = { ...config, preferences: { ...config.preferences, exportReasoning: value } }; setConfig(next); fetch("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) }); }} />}
       {messageDialog}
@@ -2402,7 +2406,7 @@ function SettingsPanel({ initial, serverStates, onClose, onSaved, onLogout, onAc
       const detected: ModelConfig[] = body!.models!.map((model: ModelConfig) => {
         const baseIdentifier = model.sourceModel.split(":")[0];
         const previous = reconcileConnectionEdits([target], draft.models)[0].models.find((item) => !item.isAlias && item.sourceModel.split(":")[0] === baseIdentifier);
-        return previous ? normalizeReasoning({ ...model, name: previous.name, visible: previous.visible, description: previous.description, systemPrompt: previous.systemPrompt, reasoningPresets: previous.reasoningPresets, reasoningForceApi: previous.reasoningForceApi, contextWindowTokens: previous.contextWindowTokens, visionImageMode: previous.visionImageMode, visionMaxEdgePixels: previous.visionMaxEdgePixels, imageGeneration: previous.imageGeneration, imageInput: previous.imageInput, rememberReasoning: previous.rememberReasoning, systemPromptEditable: previous.systemPromptEditable }) : model;
+        return previous ? normalizeReasoning({ ...model, name: previous.name, visible: previous.visible, description: previous.description, systemPrompt: previous.systemPrompt, reasoningPresets: previous.reasoningPresets, reasoningForceApi: previous.reasoningForceApi, contextWindowTokens: previous.contextWindowTokens, visionImageMode: previous.visionImageMode, visionMaxEdgePixels: previous.visionMaxEdgePixels, imageGeneration: previous.imageGeneration, imageInput: previous.imageInput, rememberReasoning: previous.rememberReasoning, systemPromptEditable: previous.systemPromptEditable, thinkingTags: previous.thinkingTags }) : model;
       });
       setDraft((current) => { const connections = current.connections.map((connection) => connection.id === connectionId ? { ...connection, models: detected } : connection); return { ...current, connections, models: resolveConnectionModels(connections as ConnectionConfig[], current.models.filter((model) => model.isAlias), current.models.map((model) => model.id)) }; });
       setActiveModelId(detected[0]?.id || aliases[0]?.id || "");
@@ -2713,10 +2717,29 @@ function ModelColumn({ c, models, connections, items, label, active, onChange, s
 
 function ModelSettings({ c, draft, availableModels, setDraft, activeModelId, setActiveModelId, activeModel, updateModel, addAlias, account }: ModelEditorProps & { c: CopySet; availableModels: ModelConfig[]; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>>; updateModel: (patch: Partial<ModelConfig>) => void; addAlias: () => void; account?: AccountInfo }) {
   const [promptOpen, setPromptOpen] = useState(false);
+  const [personalOpen, setPersonalOpen] = useState(false);
   function removeModel() { if (!activeModel) return; const next = draft.models.filter((model) => model.id !== activeModel.id); setDraft((current) => ({ ...current, models: next })); setActiveModelId(next[0]?.id || ""); }
   const editableModels = availableModels.filter((model) => model.isAlias && (!account || model.ownerId === account.id));
   const privileged = account?.role === "admin" || account?.role === "superadmin";
-  const shownModels = account ? privileged ? availableModels.filter((model) => !model.isAlias || model.ownerId === account.id || !model.ownerId) : editableModels : availableModels;
+  // Standard accounts also see the models whose system prompt they may personalize, but can change nothing else there.
+  const shownModels = account ? privileged ? availableModels.filter((model) => !model.isAlias || model.ownerId === account.id || !model.ownerId) : availableModels.filter((model) => editableModels.includes(model) || systemPromptEditable(model)) : availableModels;
+  const canEditModel = Boolean(activeModel && (!account || privileged || activeModel.isAlias && activeModel.ownerId === account.id));
+  const canSeePrompt = Boolean(activeModel && (privileged || systemPromptEditable(activeModel)));
+  const personalPrompt = activeModel ? draft.preferences.modelSystemPrompts?.[activeModel.id] || "" : "";
+  function setPersonalPrompt(value: string) {
+    if (!activeModel) return;
+    const id = activeModel.id;
+    setDraft((current) => { const prompts = { ...(current.preferences.modelSystemPrompts || {}) }; if (value.trim()) prompts[id] = value; else delete prompts[id]; return { ...current, preferences: { ...current.preferences, modelSystemPrompts: prompts } }; });
+  }
+  const thinkingTags: ThinkingTag[] = activeModel?.thinkingTags ?? DEFAULT_THINKING_TAGS;
+  const defaultTags = JSON.stringify(thinkingTags) === JSON.stringify(DEFAULT_THINKING_TAGS);
+  const setThinkingTags = (tags: ThinkingTag[]) => updateModel({ thinkingTags: tags });
+  const promptFields = activeModel && canSeePrompt ? <>
+    <div className="field locked-field"><span id="model-system-prompt-label">{activeModel.isAlias ? c.systemPrompt : c.serverSystemPrompt}</span><textarea rows={5} readOnly aria-labelledby="model-system-prompt-label" value={activeModel.systemPrompt || ""} placeholder={c.systemPromptPlaceholder} />{!activeModel.isAlias && <small className="locked-field-help">{c.serverSystemPromptDesc}</small>}{canEditModel && <button type="button" className="subtle-action" onClick={() => setPromptOpen(true)}><Pencil size={15} />{c.editPrompt}</button>}</div>
+    <div className="field locked-field"><span id="personal-system-prompt-label">{c.personalSystemPrompt}</span><textarea rows={4} readOnly aria-labelledby="personal-system-prompt-label" value={personalPrompt} placeholder={c.personalSystemPromptPlaceholder} /><small className="locked-field-help">{c.personalSystemPromptDesc}</small><button type="button" className="subtle-action" onClick={() => setPersonalOpen(true)}><Pencil size={15} />{c.editPrompt}</button></div>
+    {promptOpen && canEditModel && <TextDialog ko={draft.preferences.language === "ko"} title={activeModel.isAlias ? c.systemPrompt : c.serverSystemPrompt} value={activeModel.systemPrompt || ""} multiline allowEmpty placeholder={c.systemPromptPlaceholder} saveLabel={c.saveEdit} cancelLabel={c.cancel} onClose={() => setPromptOpen(false)} onSave={(value) => { updateModel({ systemPrompt: value }); setPromptOpen(false); }} />}
+    {personalOpen && <TextDialog ko={draft.preferences.language === "ko"} title={c.personalSystemPrompt} value={personalPrompt} multiline allowEmpty placeholder={c.personalSystemPromptPlaceholder} saveLabel={c.saveEdit} cancelLabel={c.cancel} onClose={() => setPersonalOpen(false)} onSave={(value) => { setPersonalPrompt(value); setPersonalOpen(false); }} />}
+  </> : null;
   const effectiveContext = effectiveContextWindowTokens(activeModel, draft.models);
   const advertisedContext = advertisedContextWindowTokens(activeModel, draft.models);
   const inheritedContext = activeModel?.isAlias && activeModel.contextWindowTokens === undefined ? effectiveContext : undefined;
@@ -2735,7 +2758,11 @@ function ModelSettings({ c, draft, availableModels, setDraft, activeModelId, set
     <SectionTitle icon={<NeuralMark size={21} />} title={c.modelsTitle} description={c.modelsDesc} />
     <div className="split-model-editor">
       <ModelColumn c={c} models={shownModels} connections={draft.connections} active={activeModelId} onChange={setActiveModelId} showIdentifiers={draft.preferences.showModelIdentifiers !== false} onMove={moveModel} action={<OrderActions c={c} onAdd={addAlias} addLabel={c.newAlias} onUp={() => nudgeModel(-1)} onDown={() => nudgeModel(1)} disableUp={activeShownIndex <= 0} disableDown={activeShownIndex < 0 || activeShownIndex === shownModels.length - 1} />} />
-      <div className="model-editor-pane">{activeModel && shownModels.some((model) => model.id === activeModel.id) ? <div className="editor-card">
+      <div className="model-editor-pane">{activeModel && shownModels.some((model) => model.id === activeModel.id) && !canEditModel ? <div className="editor-card">
+        <div className="type-badge">{activeModel.isAlias ? c.customAlias : c.servedModel}</div>
+        <div className="form-grid"><label className="field"><span>{c.displayName}</span><input value={activeModel.name} disabled /></label><label className="field"><span>{c.modelId}</span><input value={activeModel.id} disabled /></label></div>
+        {promptFields}
+      </div> : activeModel && shownModels.some((model) => model.id === activeModel.id) ? <div className="editor-card">
         {activeModel.isAlias && <div className="model-visibility-row"><div><strong>{c.publicModel}</strong><small>{c.publicModelDesc}</small></div><button role="switch" aria-label={c.publicModel} aria-checked={activeModel.isPublic === true} className={`toggle ${activeModel.isPublic ? "on" : ""}`} onClick={() => updateModel({ isPublic: !activeModel.isPublic })}><i /></button></div>}
         <div className="model-visibility-row"><div><strong>{c.showMain}</strong><small>{c.showMainDesc}</small></div><button role="switch" aria-label={c.showMain} aria-checked={activeModel.visible !== false} className={`toggle ${activeModel.visible !== false ? "on" : ""}`} onClick={() => updateModel({ visible: activeModel.visible === false })}><i /></button></div>
         <div className="type-badge">{activeModel.isAlias ? c.customAlias : c.servedModel}</div>
@@ -2748,8 +2775,12 @@ function ModelSettings({ c, draft, availableModels, setDraft, activeModelId, set
         <div className="model-visibility-row"><div><strong>{c.imageGenerationModel}</strong><small>{c.imageGenerationModelDesc}</small></div><button role="switch" aria-label={c.imageGenerationModel} aria-checked={activeModel.imageGeneration===true} className={`toggle ${activeModel.imageGeneration===true?"on":""}`} onClick={()=>updateModel({imageGeneration:activeModel.imageGeneration!==true})}><i/></button></div>
         <div className="model-visibility-row"><div><strong>{c.imageInputModel}</strong><small>{c.imageInputModelDesc}</small></div><button role="switch" aria-label={c.imageInputModel} aria-checked={activeModel.imageInput!==false} className={`toggle ${activeModel.imageInput!==false?"on":""}`} onClick={()=>updateModel({imageInput:activeModel.imageInput===false})}><i/></button></div>
         <div className="model-image-input-row"><div><strong>{c.visionSettings}</strong><small>{c.visionSettingsDesc}</small></div><label><span>{c.visionMaxResolution}</span><input type="number" min={128} max={8192} step={1} inputMode="numeric" disabled={activeModel.visionImageMode !== "max-resolution"} value={activeModel.visionMaxEdgePixels ?? 1024} onChange={(event) => setVisionMaxEdge(event.target.value)} title={c.visionMaxResolutionHelp}/></label><button role="switch" aria-label={c.visionUseOriginal} aria-checked={activeModel.visionImageMode === "max-resolution"} className={`toggle ${activeModel.visionImageMode === "max-resolution" ? "on" : ""}`} onClick={() => updateModel({ visionImageMode: activeModel.visionImageMode === "max-resolution" ? "original" : "max-resolution" })} title={c.visionUseOriginalDesc}><i /></button></div>
-        <div className="field locked-field"><span id="model-system-prompt-label">{c.systemPrompt}</span><textarea rows={5} readOnly aria-labelledby="model-system-prompt-label" value={activeModel.systemPrompt || ""} placeholder={c.systemPromptPlaceholder} /><button type="button" className="subtle-action" onClick={() => setPromptOpen(true)}><Pencil size={15} />{c.editPrompt}</button></div>
-        {promptOpen && <TextDialog ko={draft.preferences.language === "ko"} title={c.systemPrompt} value={activeModel.systemPrompt || ""} multiline allowEmpty placeholder={c.systemPromptPlaceholder} saveLabel={c.saveEdit} cancelLabel={c.cancel} onClose={() => setPromptOpen(false)} onSave={(value) => { updateModel({ systemPrompt: value }); setPromptOpen(false); }} />}
+        {privileged && !activeModel.isAlias && <div className="thinking-tags-field"><div className="thinking-tags-head"><div><strong>{c.thinkingTags}</strong><small>{c.thinkingTagsDesc}</small></div><button type="button" className="subtle-action" disabled={defaultTags} onClick={() => setThinkingTags(DEFAULT_THINKING_TAGS.map(tag => ({ ...tag })))}><RotateCcw size={14} />{c.resetThinkingTags}</button></div>
+          {thinkingTags.map((tag, index) => <div className="thinking-tag-row" key={index}><input aria-label={`${c.thinkingTagStart} ${index + 1}`} placeholder={c.thinkingTagStart} value={tag.start} maxLength={64} spellCheck={false} onChange={(event) => setThinkingTags(thinkingTags.map((item, at) => at === index ? { ...item, start: event.target.value } : item))} /><span aria-hidden="true">…</span><input aria-label={`${c.thinkingTagEnd} ${index + 1}`} placeholder={c.thinkingTagEnd} value={tag.end} maxLength={64} spellCheck={false} onChange={(event) => setThinkingTags(thinkingTags.map((item, at) => at === index ? { ...item, end: event.target.value } : item))} /><button type="button" className="thinking-tag-remove" aria-label={`${c.removeThinkingTag} ${index + 1}`} title={c.removeThinkingTag} onClick={() => setThinkingTags(thinkingTags.filter((_, at) => at !== index))}><Trash2 size={14} /></button></div>)}
+          {!thinkingTags.length && <small className="thinking-tags-empty">{c.noThinkingTags}</small>}
+          <button type="button" className="subtle-action" disabled={thinkingTags.length >= 12} onClick={() => setThinkingTags([...thinkingTags, { start: "", end: "" }])}><Plus size={14} />{c.addThinkingTag}</button></div>}
+        {privileged && activeModel.isAlias && <p className="settings-help">{c.aliasThinkingTags}</p>}
+        {promptFields}
         {activeModel.isAlias && <button className="danger-action" onClick={removeModel}><Trash2 size={15} /> {c.deleteAlias}</button>}
       </div> : <EmptyState text={c.noModel} />}</div>
     </div>

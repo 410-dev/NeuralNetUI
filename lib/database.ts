@@ -518,6 +518,13 @@ function openDatabase() {
     if (!columns.some(column => column.name === "total_duration_seconds")) connection.exec("ALTER TABLE messages ADD COLUMN total_duration_seconds REAL;");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(25, new Date().toISOString());
   })();
+  const sessionPromptVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (sessionPromptVersion.version < 26) connection.transaction(() => {
+    // A chat's own system prompts (JSON: model id, then reasoning preset id), edited from the reasoning menu.
+    const columns = connection.prepare("PRAGMA table_info(conversations)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "system_prompt_overrides")) connection.exec("ALTER TABLE conversations ADD COLUMN system_prompt_overrides TEXT;");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(26, new Date().toISOString());
+  })();
   return connection;
 }
 

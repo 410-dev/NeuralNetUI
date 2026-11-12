@@ -34,6 +34,7 @@ export function aliasWithBaseModel(alias: ModelConfig, base: ModelConfig, viewer
     connectionId: base.connectionId,
     apiContextWindowTokens: undefined,
     reasoningPresets: ownPresets.length ? alias.reasoningPresets : visible(base.reasoningPresets),
+    thinkingTags: base.thinkingTags,
   }, base);
 }
 
