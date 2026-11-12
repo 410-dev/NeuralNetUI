@@ -44,16 +44,17 @@ type Channel = { mode: "reasoning" | "content"; buffer: string; closer?: string;
  * A streaming splitter. Text from the content stream starts as answer and text from the reasoning stream starts
  * as reasoning; a start tag switches a stream to reasoning and its end tag (or, for a stream that began in
  * reasoning, any end tag) switches it back. Stray tags are dropped. A tail that could still become a tag is held
- * until the next chunk or `flush`.
+ * until the next chunk or `flush`. With `cross`, a block opened by any start tag is closed by any end tag, for
+ * models that open with one format and close with another.
  */
-export function createThinkingSplitter(tags: ThinkingTag[]) {
+export function createThinkingSplitter(tags: ThinkingTag[], options: { cross?: boolean } = {}) {
   const channels: Record<"reasoning" | "content", Channel> = {
     reasoning: { mode: "reasoning", buffer: "", trimLeading: false },
     content: { mode: "content", buffer: "", trimLeading: false },
   };
   const markersFor = (channel: Channel): Marker[] => channel.mode === "content"
     ? [...tags.map(tag => ({ text: tag.start, action: "open" as const, closer: tag.end })), ...tags.map(tag => ({ text: tag.end, action: "drop" as const }))]
-    : [...(channel.closer ? [{ text: channel.closer, action: "close" as const }] : tags.map(tag => ({ text: tag.end, action: "close" as const }))), ...tags.map(tag => ({ text: tag.start, action: "drop" as const }))];
+    : [...(channel.closer && !options.cross ? [{ text: channel.closer, action: "close" as const }] : tags.map(tag => ({ text: tag.end, action: "close" as const }))), ...tags.map(tag => ({ text: tag.start, action: "drop" as const }))];
 
   function emit(out: ThinkingPiece[], channel: Channel, text: string) {
     if (channel.trimLeading) { text = text.replace(/^\s+/, ""); if (text) channel.trimLeading = false; }
@@ -104,8 +105,8 @@ export function createThinkingSplitter(tags: ThinkingTag[]) {
 }
 
 /** Splits a complete reply in one go. */
-export function splitThinking(content: string, reasoning: string, tags: ThinkingTag[]) {
-  const splitter = createThinkingSplitter(tags);
+export function splitThinking(content: string, reasoning: string, tags: ThinkingTag[], options: { cross?: boolean } = {}) {
+  const splitter = createThinkingSplitter(tags, options);
   const pieces = [...splitter.push("reasoning", reasoning), ...splitter.push("content", content), ...splitter.flush()];
   return {
     reasoning: pieces.filter(piece => piece.kind === "reasoning").map(piece => piece.text).join(""),

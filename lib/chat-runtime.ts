@@ -104,6 +104,7 @@ type ChatJob = {
   repetitionRules: RepetitionSettings;
   /** Start/end pairs that mark reasoning inside the model's text, from the served model. */
   thinkingTags?: ThinkingTag[];
+  thinkingTagsCross?: boolean;
   repetition?: RepetitionFinding;
   repetitionCheck: { size: number; at: number };
   startedAt: number;
@@ -380,7 +381,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   let terminated = false; let sawPayload = false; let finishReason = false;
   // Servers that omit usage are charged the local estimate; a live copy feeds manual usage refreshes.
   let chargedUsage = { inputTokens: 0, outputTokens: 0 };
-  const thinking = createThinkingSplitter(job.thinkingTags ?? effectiveThinkingTags(undefined));
+  const thinking = createThinkingSplitter(job.thinkingTags ?? effectiveThinkingTags(undefined), { cross: job.thinkingTagsCross });
   const emitText = (contentDelta: string, reasoningDelta: string) => {
     const now = performance.now();
     if (contentDelta || reasoningDelta) { visibleStarted ??= now; visibleEnded = now; }
@@ -625,7 +626,7 @@ async function run(job: ChatJob) {
     const config = await readConfig();
     if (job.input.messages.some((message) => (message.attachments?.length || 0) > config.toolSettings.maxAttachmentsPerMessage)) throw new Error(`A message exceeds the configured ${config.toolSettings.maxAttachmentsPerMessage}-attachment limit.`);
     const { model, selected, base } = runtimeModel(config, job.input, job.userId);
-    job.thinkingTags = effectiveThinkingTags(normalizeThinkingTags(model.thinkingTags));
+    job.thinkingTags = effectiveThinkingTags(normalizeThinkingTags(model.thinkingTags)); job.thinkingTagsCross = model.thinkingTagsCross === true;
     // Whether earlier reasoning goes back to the model is the administrator's per-model choice, never the request's.
     job.input = { ...job.input, sendReasoning: (selected.rememberReasoning ?? base.rememberReasoning) === true };
     const chargeModelId=model.isAlias?(config.models.find(item=>!item.isAlias&&(item.id===model.sourceModel||item.sourceModel===model.sourceModel))?.id||model.sourceModel):model.id;

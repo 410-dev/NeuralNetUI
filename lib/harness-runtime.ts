@@ -24,7 +24,7 @@ function taskModel(ctx: Context, id: string) {
 
 export type HarnessResult = { text: string; reasoning: string; inputTokens?:number; outputTokens?:number };
 
-async function readHarnessStream(response: Response, onUpdate: (result: HarnessResult) => void, onFirstOutput?: () => void, tags: ThinkingTag[] = effectiveThinkingTags(undefined)): Promise<HarnessResult> {
+async function readHarnessStream(response: Response, onUpdate: (result: HarnessResult) => void, onFirstOutput?: () => void, tags: ThinkingTag[] = effectiveThinkingTags(undefined), cross = false): Promise<HarnessResult> {
   if (!response.body) throw new Error("Harness generation returned no response stream.");
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
   let text = ""; let reasoning = ""; let finished = false; let finishReason = "";let inputTokens:number|undefined;let outputTokens:number|undefined;
@@ -40,7 +40,7 @@ async function readHarnessStream(response: Response, onUpdate: (result: HarnessR
     const textDelta = typeof delta.content === "string" ? delta.content : "";
     const reasoningDelta = typeof (delta.reasoning_content ?? delta.reasoning) === "string" ? String(delta.reasoning_content ?? delta.reasoning) : "";
     if (choices[0]?.finish_reason) finishReason = String(choices[0].finish_reason);
-    if (textDelta || reasoningDelta) { onFirstOutput?.(); onFirstOutput = undefined; text += textDelta; reasoning += reasoningDelta; const split = splitThinking(text, reasoning, tags); onUpdate({ text: split.content, reasoning: split.reasoning }); }
+    if (textDelta || reasoningDelta) { onFirstOutput?.(); onFirstOutput = undefined; text += textDelta; reasoning += reasoningDelta; const split = splitThinking(text, reasoning, tags, { cross }); onUpdate({ text: split.content, reasoning: split.reasoning }); }
   };
   try {
     while (!finished) {
@@ -50,7 +50,7 @@ async function readHarnessStream(response: Response, onUpdate: (result: HarnessR
     }
     buffer += decoder.decode(); if (!finished && buffer.trim()) consume(buffer);
   } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
-  ({ content: text, reasoning } = splitThinking(text, reasoning, tags));
+  ({ content: text, reasoning } = splitThinking(text, reasoning, tags, { cross }));
   if (!text.trim() || finishReason === "length") throw new Error("Harness returned an empty or truncated result.");
   return { text: text.trim(), reasoning: reasoning.trim(),...(inputTokens===undefined?{}:{inputTokens}),...(outputTokens===undefined?{}:{outputTokens}) };
 }
@@ -88,11 +88,11 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
     const response = await fetch(chatEndpoint(connection.driver, connection.baseUrl), { method: "POST", headers, signal,
       body: JSON.stringify({ model: model.sourceModel, stream: Boolean(onUpdate), ...(onUpdate ? { stream_options: { include_usage: true } } : {}), messages: [{role:"system", content:prompt}, {role:"user", content}], max_tokens:maxTokens, ...(effort ? {reasoning_effort:effort} : {}) }) });
     if (!response.ok) throw new Error(`Harness generation failed (${response.status}).`);
-    if (onUpdate){const streamed=await readHarnessStream(response,onUpdate,() => { stopPoll(); startTimeout(); ctx.onPhase(isCompaction ? "compacting-context" : "preparing-response"); }, effectiveThinkingTags(normalizeThinkingTags(model.thinkingTags)));recordTokenUsage(ctx.userId,chargeModelId,streamed.inputTokens||0,streamed.outputTokens||0);return streamed;}
+    if (onUpdate){const streamed=await readHarnessStream(response,onUpdate,() => { stopPoll(); startTimeout(); ctx.onPhase(isCompaction ? "compacting-context" : "preparing-response"); }, effectiveThinkingTags(normalizeThinkingTags(model.thinkingTags)), model.thinkingTagsCross === true);recordTokenUsage(ctx.userId,chargeModelId,streamed.inputTokens||0,streamed.outputTokens||0);return streamed;}
     const result = await response.json();
     const choice = result.choices?.[0];
     const rawThought = choice?.message?.reasoning_content ?? choice?.message?.reasoning;
-    const split = splitThinking(typeof choice?.message?.content === "string" ? choice.message.content : "", typeof rawThought === "string" ? rawThought : "", effectiveThinkingTags(normalizeThinkingTags(model.thinkingTags)));
+    const split = splitThinking(typeof choice?.message?.content === "string" ? choice.message.content : "", typeof rawThought === "string" ? rawThought : "", effectiveThinkingTags(normalizeThinkingTags(model.thinkingTags)), { cross: model.thinkingTagsCross === true });
     const text = split.content; const thought = split.reasoning;
     if (!text.trim() || choice?.finish_reason === "length") throw new Error("Harness returned an empty or truncated result.");
     const usage=result.usage||{},inputTokens=Number(usage.prompt_tokens??usage.input_tokens),outputTokens=Number(usage.completion_tokens??usage.output_tokens);recordTokenUsage(ctx.userId,chargeModelId,Number.isFinite(inputTokens)?inputTokens:0,Number.isFinite(outputTokens)?outputTokens:0);

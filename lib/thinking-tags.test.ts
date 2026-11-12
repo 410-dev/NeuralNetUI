@@ -46,3 +46,9 @@ test("stored tag lists keep complete distinct pairs", () => {
   assert.deepEqual(normalizeThinkingTags([]), []);
   assert.deepEqual(normalizeThinkingTags([{ start: " <a> ", end: "</a>" }, { start: "<a>", end: "</a>" }, { start: "x", end: "" }, { start: "y", end: "y" }]), [{ start: "<a>", end: "</a>" }]);
 });
+
+test("cross matching lets any end tag close a block opened by any start tag", () => {
+  assert.deepEqual(splitThinking("<think>a<channel|>b", "", DEFAULT_THINKING_TAGS), { reasoning: "a<channel|>b", content: "" });
+  assert.deepEqual(splitThinking("<think>a<channel|>b", "", DEFAULT_THINKING_TAGS, { cross: true }), { reasoning: "a", content: "b" });
+  assert.deepEqual(splitThinking("<|channel>thought\nplan</think>answer", "", DEFAULT_THINKING_TAGS, { cross: true }), { reasoning: "plan", content: "answer" });
+});

@@ -90,6 +90,8 @@ export interface ModelConfig {
   systemPromptEditable?: boolean;
   /** Administrator choice for a served model: start/end pairs that mark reasoning in its text. Missing means the defaults; aliases use their base's. */
   thinkingTags?: Array<{ start: string; end: string }>;
+  /** Administrator choice: any end tag closes a block opened by any start tag, not only its own pair. */
+  thinkingTagsCross?: boolean;
 }
 
 export interface ConnectionConfig {
