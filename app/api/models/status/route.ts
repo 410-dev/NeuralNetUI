@@ -34,7 +34,8 @@ export async function POST(request: Request) {
       const saved = config.connections.find(connection => connection.id === id);
       const clearApiKey = draft.clearApiKey === true;
       const driver = draft.driver === "lmstudio" || draft.driver === "nnui" ? draft.driver : "openai";
-      return [{ id, driver: driver as ConnectionDriver, baseUrl, apiKey: clearApiKey ? "" : String(draft.apiKey || saved?.apiKey || ""), clearApiKey, disabled: draft.disabled === true, invalid: false }];
+      const backupUrls = (Array.isArray(draft.backupUrls) ? draft.backupUrls : []).slice(0, 16).map(url => String(url || "").trim()).filter(url => { try { new URL(url); return true; } catch { return false; } });
+      return [{ id, driver: driver as ConnectionDriver, baseUrl, backupUrls, apiKey: clearApiKey ? "" : String(draft.apiKey || saved?.apiKey || ""), clearApiKey, disabled: draft.disabled === true, invalid: false }];
     });
     const statuses = await connectionStates(drafts.filter(item => !item.invalid), process.env.OPENAI_API_KEY || "");
     for (const item of drafts) if (item.invalid) statuses[item.id] = "offline";

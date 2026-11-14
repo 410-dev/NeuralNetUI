@@ -99,6 +99,8 @@ export interface ConnectionConfig {
   name: string;
   driver: ConnectionDriver;
   baseUrl: string;
+  /** Extra addresses of the same serving, tried after the base URL. When all are online the least busy one is used. */
+  backupUrls?: string[];
   apiKey: string;
   /** Explicitly disable saved and environment credentials until a replacement is entered. */
   clearApiKey?: boolean;

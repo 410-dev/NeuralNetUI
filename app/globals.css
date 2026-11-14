@@ -537,6 +537,12 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .field input:focus, .field textarea:focus, .field select:focus, .preset-editor input:focus, .preset-editor textarea:focus { border-color: rgb(var(--accent-bright-rgb) / .55); }
 .field input:disabled { color: var(--dim); }
 .field small { display: block; margin: 6px 0 0 2px; color: var(--dim); font-size: 10px; }
+.backup-urls .backup-url-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.backup-urls .backup-url-remove { display: grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px; color: var(--dim); border-radius: var(--radius-xs); }
+.backup-urls .backup-url-remove:hover { color: var(--danger-text); background: var(--danger-soft); }
+.backup-urls .backup-url-add { height: 32px; padding: 0 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-pill); color: var(--muted); font-size: 11.5px; }
+.backup-urls .backup-url-add:hover:not(:disabled) { color: var(--text); border-color: rgb(var(--accent-bright-rgb) / .55); }
+.backup-urls .backup-url-add:disabled { opacity: .4; }
 .context-window-field small + small { color: #9a9da4; }
 .field-with-icon { position: relative; }.field-with-icon svg { position: absolute; left: 15px; top: 12px; color: var(--muted); }.field-with-icon input { padding-left: 41px; }
 .field.compact { max-width: 330px; }

@@ -59,15 +59,29 @@ export function connectionProbe(key: string, probe: Probe, maxAgeMs = 5_000, fet
 }
 
 export type ConnectionState = ProbeResult | "disabled";
-type StatusTarget = Pick<ConnectionConfig, "id" | "driver" | "baseUrl" | "apiKey" | "clearApiKey" | "disabled">;
+type StatusTarget = Pick<ConnectionConfig, "id" | "driver" | "baseUrl" | "backupUrls" | "apiKey" | "clearApiKey" | "disabled">;
 
-/** Disabled servers are reported without a probe; every other server is checked through the shared cache. */
+/**
+ * Disabled servers are reported without a probe; every other server is checked through the shared cache. A server
+ * with backup addresses is online as soon as any address is; otherwise an error wins over offline.
+ */
 export async function connectionStates(connections: StatusTarget[], envKey = "", fetcher: typeof fetch = fetch, retryDelaysMs: readonly number[] = TRANSPORT_RETRY_DELAYS_MS): Promise<Record<string, ConnectionState>> {
   const entries = await Promise.all(connections.map(async (connection): Promise<[string, ConnectionState]> => {
     if (connection.disabled) return [connection.id, "disabled"];
     const headers = connectionHeaders(connection, connection.driver === "openai" ? envKey : "");
-    const key = `${connection.id}\0${connection.driver}\0${connection.baseUrl}\0${headers.Authorization || ""}`;
-    return [connection.id, await connectionProbe(key, { driver: connection.driver, baseUrl: connection.baseUrl, headers }, 5_000, fetcher, retryDelaysMs)];
+    const urls = [connection.baseUrl, ...(connection.backupUrls || []).map(url => url.trim()).filter(Boolean)];
+    const checks = [...new Set(urls)].map(baseUrl => connectionProbe(`${connection.id}\0${connection.driver}\0${baseUrl}\0${headers.Authorization || ""}`, { driver: connection.driver, baseUrl, headers }, 5_000, fetcher, retryDelaysMs));
+    if (checks.length === 1) return [connection.id, await checks[0]];
+    // A backup that answers should not wait for a primary still working through its retry schedule.
+    const state = await new Promise<ProbeResult>(resolve => {
+      let left = checks.length; let sawError = false;
+      for (const check of checks) void check.then(result => {
+        if (result === "online") resolve("online");
+        if (result === "error") sawError = true;
+        if (--left === 0) resolve(sawError ? "error" : "offline");
+      });
+    });
+    return [connection.id, state];
   }));
   return Object.fromEntries(entries);
 }

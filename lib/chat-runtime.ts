@@ -17,6 +17,7 @@ import { readConversation, writeConversation, renameConversation } from "./conve
 import { detectTextRepetition, detectToolCallRepetition, normalizeRepetitionSettings, toolArgumentText, type RepetitionFinding, type RepetitionSettings } from "./repetition.ts";
 import { readUpload, readUploadModelContent, saveArtifactFile, saveGeneratedImage } from "./uploads";
 import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, nnuiEventsEndpoint } from "./connection-drivers";
+import { connectionEndpoints, routeConnection } from "./connection-routing";
 import { createResidencyAdapter } from "./residency-adapter";
 import { nnuiEventProgress, startNnuiEventObserver } from "./nnui-driver";
 import { modelResidency } from "./residency-runtime";
@@ -622,6 +623,7 @@ async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTool
 async function run(job: ChatJob) {
   const requestStartedAt = performance.now(); let reasoningSeconds = 0;
   let releaseModel: (() => void) | undefined;
+  let releaseRoute: (() => void) | undefined;
   try {
     const config = await readConfig();
     if (job.input.messages.some((message) => (message.attachments?.length || 0) > config.toolSettings.maxAttachmentsPerMessage)) throw new Error(`A message exceeds the configured ${config.toolSettings.maxAttachmentsPerMessage}-attachment limit.`);
@@ -630,9 +632,13 @@ async function run(job: ChatJob) {
     // Whether earlier reasoning goes back to the model is the administrator's per-model choice, never the request's.
     job.input = { ...job.input, sendReasoning: (selected.rememberReasoning ?? base.rememberReasoning) === true };
     const chargeModelId=model.isAlias?(config.models.find(item=>!item.isAlias&&(item.id===model.sourceModel||item.sourceModel===model.sourceModel))?.id||model.sourceModel):model.id;
-    const connection = connectionForModel(config.connections, model);
-    if (!connection) throw new Error("The selected model's connection is unavailable.");
-    if (connection.disabled) throw new Error("The selected model's server is disabled.");
+    const configured = connectionForModel(config.connections, model);
+    if (!configured) throw new Error("The selected model's connection is unavailable.");
+    if (configured.disabled) throw new Error("The selected model's server is disabled.");
+    // Backup addresses serve the same models; the request stays on the address chosen here for every round.
+    const route = await routeConnection(configured, process.env.OPENAI_API_KEY || "");
+    releaseRoute = route.release;
+    const connection = route.connection;
     const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId && presetVisibleTo(item, job.userId));
     const effort = reasoningEffort(model, preset);
     // An account's own rewrite of this model and preset replaces the composed prompt, where the model allows it.
@@ -670,6 +676,7 @@ async function run(job: ChatJob) {
         completionDurationSeconds: elapsedSeconds,
       };
       recordTokenUsage(job.userId, chargeModelId, generated.usage.inputTokens, generated.usage.outputTokens);
+      route.record(generated.usage.inputTokens, generated.usage.outputTokens);
       trackPhase(job); stampTotalDuration(job); job.waitPhase = undefined; job.waitProgress = undefined; job.status = "completed";
       await persist(job); broadcast(job, true); finishSubscribers(job); return;
     }
@@ -745,7 +752,7 @@ async function run(job: ChatJob) {
       } catch { job.controller.signal.throwIfAborted(); }
     }
     const serverKey = connectionRoot(connection.baseUrl);
-    const sameServer = config.connections.filter(item => connectionRoot(item.baseUrl) === serverKey);
+    const sameServer = config.connections.filter(item => connectionEndpoints(item).some(url => connectionRoot(url) === serverKey));
     const limits = sameServer.map(item => item.maxResidentModels || 0).filter(limit => limit > 0);
     const limit = limits.length ? Math.min(...limits) : 0;
     const policy = sameServer.some(item => item.modelWaitPolicy === "serial") ? "serial" : "capacity";
@@ -837,6 +844,7 @@ async function run(job: ChatJob) {
       }
       reasoningSeconds += result.reasoningDurationSeconds;
       recordTokenUsage(job.userId,chargeModelId,result.chargedUsage.inputTokens,result.chargedUsage.outputTokens);
+      route.record(result.chargedUsage.inputTokens,result.chargedUsage.outputTokens);
       const serverMeasuredInput = result.usage.inputTokens ? result.usage.inputTokens + (result.usage.outputTokens || 0) : undefined;
       if (result.compact) {
         job.controller.signal.throwIfAborted();
@@ -899,6 +907,7 @@ async function run(job: ChatJob) {
   } finally {
     releasePlanAdmission(job.userId);
     releaseModel?.();
+    releaseRoute?.();
     job.waiting.clear();
     job.input = { ...job.input, messages: [] };
     job.conversation = { ...job.conversation, branches: [] };

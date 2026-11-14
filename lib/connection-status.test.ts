@@ -54,3 +54,9 @@ test("a refused listing is retried up to seven attempts before the server counts
   assert.equal(await probeWithRetry(probe, timesOut, [0, 0, 0, 0, 0, 0]), "offline");
   assert.equal(attempts, 1);
 });
+
+test("a server with backups is online when any address answers", async () => {
+  const fetcher = (async (url: string) => { if (String(url).includes("primary-down")) throw new TypeError("fetch failed"); return new Response('{"data":[]}'); }) as unknown as typeof fetch;
+  const states = await connectionStates([{ id: "backed", driver: "openai", baseUrl: "http://primary-down.test/v1", backupUrls: ["http://backup-up.test/v1"], apiKey: "" }], "", fetcher, [50, 50, 50]);
+  assert.equal(states.backed, "online");
+});
