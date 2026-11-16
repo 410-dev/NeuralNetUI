@@ -1,3 +1,4 @@
+import type { PersonalSampling, SamplingParams } from "./sampling-params.ts";
 import type { GreetingOverrides } from "./greetings.ts";
 import type { HostTrustedPermissions } from "./host-permissions.ts";
 import type { RepetitionSettings } from "./repetition.ts";
@@ -53,6 +54,8 @@ export interface ReasoningPreset {
   ownerId?: string;
   /** Set by an administrator: every account that can use the model sees the template. */
   global?: boolean;
+  /** Administrator values for requests made with this template; they override the model's, field by field. */
+  samplingParams?: SamplingParams;
 }
 
 export interface ModelConfig {
@@ -92,6 +95,10 @@ export interface ModelConfig {
   thinkingTags?: Array<{ start: string; end: string }>;
   /** Administrator choice: any end tag closes a block opened by any start tag, not only its own pair. */
   thinkingTagsCross?: boolean;
+  /** Administrator values sent with every request; a missing field leaves the server default. */
+  samplingParams?: SamplingParams;
+  /** What the server reported as its defaults at the last model refresh, if it could be read. */
+  samplingDefaults?: SamplingParams;
 }
 
 export interface ConnectionConfig {
@@ -247,6 +254,8 @@ export interface AppConfig {
     systemPromptOverrides?: Record<string, Record<string, string>>;
     /** The account's own system prompt per model, replacing the model's server default. */
     modelSystemPrompts?: Record<string, string>;
+    /** The account's own inference parameters per model and template; used only while accounts may change them. */
+    modelSamplingParams?: PersonalSampling;
   };
   /** Workspace-wide, never overridden per account. */
   loginAppearance: LoginAppearance;
@@ -254,6 +263,8 @@ export interface AppConfig {
   showModelWeights: boolean;
   /** Workspace-wide: show connection/server names below models in the chat picker. */
   showModelConnectionNames: boolean;
+  /** Workspace-wide: standard accounts may set their own inference parameters per model and template. */
+  samplingUserEditable?: boolean;
   userStorageSettings: UserStorageSettings;
   harnessSettings?: HarnessSettings;
   toolSettings: ToolSettings;

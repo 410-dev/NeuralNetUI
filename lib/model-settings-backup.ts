@@ -1,3 +1,4 @@
+import { normalizeSamplingParams } from "./sampling-params.ts";
 import { normalizeThinkingTags } from "./thinking-tags.ts";
 import { createHash } from "node:crypto";
 import { serializeModelSettings } from "./model-settings.ts";
@@ -36,7 +37,7 @@ function readPreset(value: unknown): ReasoningPreset | undefined {
   const id = text(raw.id, 500), kind = raw.kind === "builtin" || raw.kind === "custom" ? raw.kind : undefined;
   if (!id || !kind) return;
   const mode = raw.systemPromptMode === "replace" || raw.systemPromptMode === "prepend" || raw.systemPromptMode === "append" ? raw.systemPromptMode : "append";
-  return { id, name: text(raw.name, 500)?.trim() || id, kind, ...(text(raw.effort, 100) !== undefined ? { effort: text(raw.effort, 100) } : {}), ...(text(raw.systemPrompt) !== undefined ? { systemPrompt: text(raw.systemPrompt) } : {}), systemPromptMode: mode };
+  return { id, name: text(raw.name, 500)?.trim() || id, kind, ...(text(raw.effort, 100) !== undefined ? { effort: text(raw.effort, 100) } : {}), ...(text(raw.systemPrompt) !== undefined ? { systemPrompt: text(raw.systemPrompt) } : {}), systemPromptMode: mode , ...(normalizeSamplingParams(raw.samplingParams) ? { samplingParams: normalizeSamplingParams(raw.samplingParams) } : {}) };
 }
 
 /** Reads each model on its own and keeps only fields this version understands, so older or newer images still restore what they can. */
@@ -71,6 +72,7 @@ export function readModelSettingsLeniently(value: unknown): { models: Portable[]
       ...(typeof item.systemPromptEditable === "boolean" ? { systemPromptEditable: item.systemPromptEditable } : {}),
       ...(typeof item.thinkingTagsCross === "boolean" ? { thinkingTagsCross: item.thinkingTagsCross } : {}),
       ...(normalizeThinkingTags(item.thinkingTags) ? { thinkingTags: normalizeThinkingTags(item.thinkingTags) } : {}),
+      ...(normalizeSamplingParams(item.samplingParams) ? { samplingParams: normalizeSamplingParams(item.samplingParams) } : {}),
       ...(typeof item.reasoningForceApi === "boolean" ? { reasoningForceApi: item.reasoningForceApi } : {}),
     });
   }
@@ -149,6 +151,7 @@ export function applyModelSettingsImage(models: ModelConfig[], image: unknown, t
         reasoningForceApi: model.reasoningForceApi ?? current.reasoningForceApi,
         thinkingTags: model.thinkingTags ?? current.thinkingTags,
         thinkingTagsCross: model.thinkingTagsCross ?? current.thinkingTagsCross,
+        samplingParams: model.samplingParams ?? current.samplingParams,
         reasoningPresets: merged.presets,
       };
       if (!current.isAlias) report.servedModels++;

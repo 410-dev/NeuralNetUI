@@ -18,6 +18,7 @@ import { detectTextRepetition, detectToolCallRepetition, normalizeRepetitionSett
 import { readUpload, readUploadModelContent, saveArtifactFile, saveGeneratedImage } from "./uploads";
 import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, nnuiEventsEndpoint } from "./connection-drivers";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
+import { readPersonalSampling, resolveSampling, samplingRequestFields, type SamplingParams } from "./sampling-params";
 import { createResidencyAdapter } from "./residency-adapter";
 import { nnuiEventProgress, startNnuiEventObserver } from "./nnui-driver";
 import { modelResidency } from "./residency-runtime";
@@ -333,7 +334,7 @@ async function materializeImageFiles(body: Record<string, unknown>) {
   return { ...body, messages:converted };
 }
 
-async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string }, allowProgress = false, threshold?: number, baseInput?: number, chargeModelId?: string, nnui?: { eventsUrl: string; sessionId: string; model: string }, pollLmStudioStatus = false) {
+async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string; sampling?: SamplingParams }, allowProgress = false, threshold?: number, baseInput?: number, chargeModelId?: string, nnui?: { eventsUrl: string; sessionId: string; model: string }, pollLmStudioStatus = false) {
   const turnController = new AbortController();
   const signal = AbortSignal.any([job.controller.signal, turnController.signal]);
   const eventController = new AbortController();
@@ -364,7 +365,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   };
   let response: Response;
   try {
-    const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal, onInferenceStart: startStatusPoll }) : undefined;
+    const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, sampling: native.sampling, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal, onInferenceStart: startStatusPoll }) : undefined;
     const httpBody = nativeResponse ? body : await materializeImageFiles(body);
     if (!nativeResponse) startStatusPoll();
     response = nativeResponse || await progressFetch(String(body._endpoint), {
@@ -641,6 +642,8 @@ async function run(job: ChatJob) {
     const connection = route.connection;
     const preset = model.reasoningPresets.find((item) => item.id === job.input.reasoningPresetId && presetVisibleTo(item, job.userId));
     const effort = reasoningEffort(model, preset);
+    // Inference parameters: the served model, an alias, the template, then the account's own values where allowed.
+    const sampling = resolveSampling({ served: base, alias: selected.isAlias ? selected : undefined, preset, modelId: selected.id, personal: readPersonalSampling(readUserPreferences(job.userId).modelSamplingParams), userEditable: config.samplingUserEditable === true });
     // An account's own rewrite of this model and preset replaces the composed prompt, where the model allows it.
     // This chat's prompt, then the account's prompt for the model, then the server default — where the model allows it.
     const allowed = canPersonalizeSystemPrompt(selected, job.userRole);
@@ -803,12 +806,12 @@ async function run(job: ChatJob) {
       // 0 from the configured side means "no cap"; only an exhausted plan allowance stops the request.
       if(planOutputLimit!==undefined&&planOutputLimit<=0)throw new Error("토큰 출력 한도에 도달했습니다.");
       if (!releaseModel) releaseModel = await acquireModel();
-      const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(outputLimit ? { max_tokens: outputLimit } : {}), stream: true, stream_options: { include_usage: true }, ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
+      const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(outputLimit ? { max_tokens: outputLimit } : {}), stream: true, stream_options: { include_usage: true }, ...samplingRequestFields(sampling), ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
       let result: Awaited<ReturnType<typeof streamTurn>>;
       try {
         const configuredThreshold = contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined;
         const streamThreshold = configuredThreshold && projectedInput >= configuredThreshold && contextWindow ? Math.floor(contextWindow * .95) : configuredThreshold;
-        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: presetEffortValue(model, preset) } : undefined, progressEnabled, harness.contextMode === "compacting" ? streamThreshold : undefined, projectedInput, chargeModelId, connection.driver === "nnui" ? { eventsUrl: nnuiEventsEndpoint(connection.baseUrl), sessionId, model: model.sourceModel } : undefined, connection.driver === "lmstudio");
+        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: presetEffortValue(model, preset), sampling } : undefined, progressEnabled, harness.contextMode === "compacting" ? streamThreshold : undefined, projectedInput, chargeModelId, connection.driver === "nnui" ? { eventsUrl: nnuiEventsEndpoint(connection.baseUrl), sessionId, model: model.sourceModel } : undefined, connection.driver === "lmstudio");
       } catch (error) {
         const overflow = contextOverflowDetails(error);
         if (!overflow) throw error;

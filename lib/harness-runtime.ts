@@ -4,6 +4,8 @@ import { DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rolling
 import { canUseModel } from "./config";
 import { connectionForModel, chatHeaders, connectionRoot, chatEndpoint } from "./connection-drivers";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
+import { readPersonalSampling, resolveSampling, samplingRequestFields } from "./sampling-params";
+import { readUserPreferences } from "./auth";
 import { effectiveContextWindowTokens } from "./model-context";
 import { reasoningEffort } from "./model-edits";
 import { modelResidency } from "./residency-runtime";
@@ -87,9 +89,11 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
       ctx.onPhase("processing-prompt");
       stopPoll();
     }, headers.Authorization).catch(() => undefined);
+    const served = model.isAlias ? ctx.config.models.find(item => !item.isAlias && (item.id === model.sourceModel || item.sourceModel === model.sourceModel)) : model;
+    const sampling = resolveSampling({ served, alias: model.isAlias ? model : undefined, modelId: model.id, personal: readPersonalSampling(readUserPreferences(ctx.userId).modelSamplingParams), userEditable: ctx.config.samplingUserEditable === true });
     const effort = reasoningEffort(model, { id: "harness", name: "Harness", kind: "builtin", effort: effortValue === "off" && model.reasoningEfforts?.includes("none") ? "none" : effortValue });
     const response = await fetch(chatEndpoint(connection.driver, connection.baseUrl), { method: "POST", headers, signal,
-      body: JSON.stringify({ model: model.sourceModel, stream: Boolean(onUpdate), ...(onUpdate ? { stream_options: { include_usage: true } } : {}), messages: [{role:"system", content:prompt}, {role:"user", content}], max_tokens:maxTokens, ...(effort ? {reasoning_effort:effort} : {}) }) });
+      body: JSON.stringify({ model: model.sourceModel, stream: Boolean(onUpdate), ...(onUpdate ? { stream_options: { include_usage: true } } : {}), messages: [{role:"system", content:prompt}, {role:"user", content}], max_tokens:maxTokens, ...samplingRequestFields(sampling), ...(effort ? {reasoning_effort:effort} : {}) }) });
     if (!response.ok) throw new Error(`Harness generation failed (${response.status}).`);
     if (onUpdate){const streamed=await readHarnessStream(response,onUpdate,() => { stopPoll(); startTimeout(); ctx.onPhase(isCompaction ? "compacting-context" : "preparing-response"); }, effectiveThinkingTags(normalizeThinkingTags(model.thinkingTags)), model.thinkingTagsCross === true);recordTokenUsage(ctx.userId,chargeModelId,streamed.inputTokens||0,streamed.outputTokens||0);route.record(streamed.inputTokens,streamed.outputTokens);return streamed;}
     const result = await response.json();

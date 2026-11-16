@@ -1,6 +1,7 @@
 import { connectionRoot, modelsEndpoint } from "./connection-drivers.ts";
 import { ConnectionError, httpFailure, invalidShapeFailure, listingModels, readListingJson, transportFailure } from "./connection-errors.ts";
 import type { ConnectionDriver } from "./types.ts";
+import { samplingFromServer, type SamplingParams } from "./sampling-params.ts";
 
 /** Enrich compatible endpoints with native LM Studio metadata when available. Failures throw a classified `ConnectionError`. */
 export async function discoverModelRecords(driver: ConnectionDriver, baseUrl: string, apiKey: string, fetcher: typeof fetch = fetch): Promise<Array<Record<string, unknown>>> {
@@ -23,4 +24,25 @@ export async function discoverModelRecords(driver: ConnectionDriver, baseUrl: st
       return match ? { ...record, ...match, key: record.id, id: record.id } : record;
     });
   } catch { return records; }
+}
+
+/**
+ * Asks a llama.cpp-style server for each model's default sampling settings (`/props?model=`). A server without
+ * that endpoint, or one that does not answer within a few seconds, simply reports nothing.
+ */
+export async function discoverPropsSamplingDefaults(baseUrl: string, apiKey: string, modelIds: string[], fetcher: typeof fetch = fetch): Promise<Map<string, SamplingParams>> {
+  const defaults = new Map<string, SamplingParams>();
+  const headers: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+  let root: string; try { root = connectionRoot(baseUrl); } catch { return defaults; }
+  await Promise.all(modelIds.slice(0, 64).map(async id => {
+    try {
+      const response = await fetcher(`${root}/props?model=${encodeURIComponent(id)}`, { headers, signal: AbortSignal.timeout(3_000), cache: "no-store" });
+      if (!response.ok) { await response.body?.cancel().catch(() => undefined); return; }
+      const body = await response.json() as { default_generation_settings?: { params?: unknown } & Record<string, unknown> };
+      const settings = body?.default_generation_settings;
+      const params = samplingFromServer(settings?.params ?? settings);
+      if (params) defaults.set(id, params);
+    } catch { /* no defaults for this model */ }
+  }));
+  return defaults;
 }

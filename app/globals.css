@@ -2007,3 +2007,51 @@ select:focus-visible {
 .thinking-timing-toggle strong, .thinking-timing-toggle small { display: block; }
 .thinking-timing-toggle strong { font-size: 12px; font-weight: 550; }
 .thinking-timing-toggle small { margin-top: 3px; color: var(--dim); font-size: 10.5px; line-height: 1.45; }
+
+/* Inference parameters: a dialog on wide screens, a full screen of its own on phones. */
+.inference-params-entry .subtle-action { flex: none; height: 32px; padding: 0 12px; }
+.inference-params-dialog { width: min(720px, 100%); overflow: hidden; }
+.inference-params-dialog > header, .inference-params-dialog > footer { flex: none; }
+.inference-params-dialog header > div { min-width: 0; }
+.inference-params-dialog header small { display: block; margin-top: 4px; color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inference-params-body { display: grid; gap: 14px; min-height: 0; flex: 1 1 auto; overflow-y: auto; align-content: start; margin: 0 -6px; padding: 0 6px 2px; overscroll-behavior: contain; }
+.inference-params-dialog > footer { position: static; padding-top: 4px; border-top: 1px solid var(--border); padding-top: 14px; }
+.inference-params-body .harness-dialog-help { margin: 0; }
+.inference-params-switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(255,255,255,.02); }
+.inference-params-switch strong, .inference-params-switch small { display: block; }
+.inference-params-switch strong { font-size: 12.5px; }
+.inference-params-switch small { margin-top: 4px; color: var(--dim); font-size: 10.5px; line-height: 1.45; }
+.inference-params-switch .toggle { flex: none; }
+.inference-params-scope { justify-self: start; }
+.inference-params-target { display: grid; gap: 7px; }
+.inference-params-target > span { margin-left: 2px; color: #c1c3c9; font-size: 11.5px; }
+.inference-params-target > small { margin-left: 2px; color: var(--dim); font-size: 10.5px; }
+.inference-params-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.inference-params-head strong { font-size: 12.5px; }
+.inference-params-head .subtle-action { height: 30px; padding: 0 12px; }
+.inference-params-grid { display: grid; gap: 8px; }
+.inference-param { display: grid; grid-template-columns: minmax(0, 1fr) 190px; align-items: center; gap: 14px; padding: 11px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: rgba(255,255,255,.02); }
+.inference-param > span:first-child strong, .inference-param > span:first-child small { display: block; }
+.inference-param > span:first-child strong { font-size: 12.5px; font-weight: 550; }
+.inference-param > span:first-child small { margin-top: 3px; color: var(--dim); font-size: 10.5px; line-height: 1.4; }
+.inference-param-input { display: grid; gap: 4px; }
+.harness-dialog .inference-param-input input { height: 36px; padding: 0 12px; font-variant-numeric: tabular-nums; }
+.inference-param-input small { color: var(--dim); font-size: 10px; text-align: right; }
+.inference-param.invalid input { border-color: var(--danger-text, #ff8a8a); }
+.inference-param.invalid .inference-param-input small, .inference-params-error { color: #ff8a8a; }
+.inference-thinking-tags { margin-bottom: 0; }
+.inference-params-dialog .text-dialog-actions { align-items: center; }
+.inference-params-dialog .text-dialog-actions > small { flex: 1 1 auto; color: var(--dim); font-size: 10.5px; }
+@media (max-width: 800px) {
+  .harness-modal-layer.inference-params-layer { padding: 0; place-items: stretch; }
+  .harness-dialog.inference-params-dialog { width: 100%; max-height: none; height: 100dvh; border-radius: 0; border: 0; padding: calc(14px + env(safe-area-inset-top)) 16px calc(14px + env(safe-area-inset-bottom)); }
+  .inference-params-scope { justify-self: stretch; }
+  .inference-params-scope > button { flex: 1 1 0; }
+  .inference-param { grid-template-columns: 1fr; gap: 8px; }
+  .harness-dialog .inference-param-input input { height: 42px; font-size: 16px; }
+  .inference-param-input small { text-align: left; }
+  .inference-params-dialog .text-dialog-actions { flex-wrap: wrap; }
+  .inference-params-dialog .text-dialog-actions > small { flex-basis: 100%; }
+  .inference-params-dialog .text-dialog-actions > button { flex: 1 1 0; justify-content: center; height: 44px; }
+}
+.harness-dialog .thinking-tag-row input { height: 34px; padding: 0 11px; border-color: var(--border-strong); border-radius: var(--radius-sm); background: var(--field); }

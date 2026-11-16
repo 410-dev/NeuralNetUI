@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { ModelConfig } from "./types";
 
+const samplingSchema = z.object({ topK: z.number().optional(), repeatPenalty: z.number().optional(), presencePenalty: z.number().optional(), topP: z.number().optional(), minP: z.number().optional() }).strict();
+
 const presetSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -10,6 +12,7 @@ const presetSchema = z.object({
   systemPrompt: z.string().optional(),
   systemPromptMode: z.enum(["replace", "prepend", "append"]).optional(),
   global: z.boolean().optional(),
+  samplingParams: samplingSchema.optional(),
 }).strict();
 
 const modelSchema = z.object({
@@ -35,6 +38,8 @@ const modelSchema = z.object({
   reasoningForceApi: z.boolean().optional(),
   thinkingTagsCross: z.boolean().optional(),
   thinkingTags: z.array(z.object({ start: z.string().max(64), end: z.string().max(64) }).strict()).max(12).optional(),
+  samplingParams: samplingSchema.optional(),
+  samplingDefaults: samplingSchema.optional(),
 }).strict();
 
 const exportSchema = z.object({

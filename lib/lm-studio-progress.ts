@@ -1,5 +1,6 @@
 import { LMStudioClient, type LLMTool } from "@lmstudio/sdk";
 import { connectionRoot } from "./connection-drivers.ts";
+import { samplingFromServer, samplingSdkConfig, type SamplingParams } from "./sampling-params.ts";
 import { abortable } from "./chat-progress.ts";
 import { nativeEligibility, nativeHistory, pollPromptProcessing, sdkCredentials, type InferenceMessage } from "./inference-progress.ts";
 
@@ -67,7 +68,7 @@ export async function observeLmStudioPrefill(baseUrl: string, identifier: string
  */
 export async function nativeChatResponse(options: {
   baseUrl: string; authorization?: string; model: string; messages: InferenceMessage[];
-  effort?: string; maxTokens?: number; tools?: LLMTool[]; signal: AbortSignal; onInferenceStart?: () => void;
+  effort?: string; maxTokens?: number; sampling?: SamplingParams; tools?: LLMTool[]; signal: AbortSignal; onInferenceStart?: () => void;
 }): Promise<Response | undefined> {
   if (!nativeEligibility(options.messages, options.effort)) return;
   const client = sdkClient(options.baseUrl, options.authorization);
@@ -102,7 +103,7 @@ export async function nativeChatResponse(options: {
         try {
           options.onInferenceStart?.();
           const result = await model.respond({ messages: history }, {
-            signal, ...(options.maxTokens ? { maxTokens: options.maxTokens } : {}),
+            signal, ...(options.maxTokens ? { maxTokens: options.maxTokens } : {}), ...samplingSdkConfig(options.sampling || {}),
             contextOverflowPolicy: "stopAtLimit", toolNaming: "passThrough",
             ...(options.effort ? { raw: { fields: [{ key: "llm.prediction.reasoning.enableThinking", value: options.effort === "on" }] } } : {}),
             ...(options.tools?.length ? { rawTools: { type: "toolArray", tools: options.tools } } : {}),
@@ -137,4 +138,28 @@ export async function nativeChatResponse(options: {
   } finally {
     if (!transferred) { signal.removeEventListener("abort", dispose); await client[Symbol.asyncDispose]().catch(() => undefined); }
   }
+}
+
+/**
+ * LM Studio reports a model's default prediction settings only while it is loaded, so only loaded models get
+ * defaults here; the rest are left without values and the server keeps choosing.
+ */
+export async function lmStudioSamplingDefaults(baseUrl: string, authorization?: string, timeoutMs = 8_000): Promise<Map<string, SamplingParams>> {
+  const defaults = new Map<string, SamplingParams>();
+  let client: ReturnType<typeof sdkClient>;
+  try { client = sdkClient(baseUrl, authorization); } catch { return defaults; }
+  if (!client) return defaults;
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    const loaded = await abortable(client.llm.listLoaded(), signal);
+    for (const model of loaded) {
+      try {
+        const params = samplingFromServer(await abortable(model.getBasePredictionConfig(), signal));
+        if (!params) continue;
+        for (const key of [model.modelKey, model.identifier, model.path]) if (key && !defaults.has(key)) defaults.set(key, params);
+      } catch { if (signal.aborted) break; }
+    }
+  } catch { /* unreachable or unauthorised: no defaults */ }
+  finally { void client[Symbol.asyncDispose]().catch(() => undefined); }
+  return defaults;
 }

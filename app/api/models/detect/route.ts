@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { inferModel, readConfig } from "@/lib/config";
 import { authErrorResponse, requireAdmin } from "@/lib/auth";
-import { discoverModelRecords } from "@/lib/model-discovery";
+import { discoverModelRecords, discoverPropsSamplingDefaults } from "@/lib/model-discovery";
+import { lmStudioSamplingDefaults } from "@/lib/lm-studio-progress";
 import { ConnectionError } from "@/lib/connection-errors";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,10 @@ export async function POST(request: Request) {
     const baseUrl = String(body.baseUrl || saved?.baseUrl || "");
     const apiKey = (body.clearApiKey ?? saved?.clearApiKey) ? "" : String(body.apiKey || saved?.apiKey || (driver === "openai" ? process.env.OPENAI_API_KEY : "") || "");
     const items = await discoverModelRecords(driver, baseUrl, apiKey);
+    // Server defaults for the inference parameters; a model whose defaults cannot be read gets none.
+    const ids = items.map(item => String(item.key || item.id || "")).filter(Boolean);
+    const defaults = driver === "lmstudio" ? await lmStudioSamplingDefaults(baseUrl, apiKey ? `Bearer ${apiKey}` : undefined) : await discoverPropsSamplingDefaults(baseUrl, apiKey, ids);
+    for (const item of items) { const found = defaults.get(String(item.key || item.id || "")); if (found) item._samplingDefaults = found; }
     return NextResponse.json({ models: items.map((item: Record<string, unknown>) => inferModel(item, driver, String(body.id || saved?.id || ""))) });
   } catch (error) {
     if (error && typeof error === "object" && "status" in error && !(error instanceof ConnectionError)) return authErrorResponse(error);
