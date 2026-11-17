@@ -169,7 +169,7 @@ const translations = {
     returnToRegularChat: "Return to regular chat", temporaryGreeting: "Hello, traveler", temporaryChatHint: "Chats are not saved",
     reasoningNotesTitle: "Reasoning descriptions", reasoningNotesHelp: "Show a short line under each reasoning choice in the chat picker, and word it however you like.", reasoningNotesReset: "Leave a field empty to use the built-in wording.",
     experimental: "Experimental", experimentalTitle: "Experimental features", experimentalDesc: "Unfinished capabilities. Switch one on to offer it in the chat tool menu.", experimentalHost: "Host computer tool", experimentalHostDesc: "Superadmin-only control of files, PowerShell/Bash, background programs, temporary uploads, and the current screen. Available only when NeuralNetUI is not running in a container.", experimentalHelp: "While a feature is off, the tool is hidden from the chat menu and refused by the server even if a client asks for it.",
-    outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token", promptProcessingTime: "Prompt processing", reasoningTime: "Thinking", toolTime: "Tool use", totalResponseTime: "Whole response", thinkingTimingTitle: "Thinking time", thinkingTimingHelp: "Choose how prompt processing shows up next to the time a model spent thinking.", thinkingIncludesPrompt: "Count prompt processing as thinking time", thinkingIncludesPromptDesc: "While a later prompt stage runs, the thinking time above it keeps rising too, and the finished time includes prompt processing.", thinkingShowsPrompt: "Show prompt processing time alongside", thinkingShowsPromptDesc: "Shows e.g. “Thought for 12 sec (prompt processed for 3 sec)”.",
+    outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token", promptProcessingTime: "Prompt processing", reasoningTime: "Thinking", toolTime: "Tool use", totalResponseTime: "Whole response", chatBackgroundGlow: "Show background color in chats", chatBackgroundGlowHelp: "Carries the accent glow from the new chat screen into open chats as a dim wash along the bottom.", thinkingTimingTitle: "Thinking time", thinkingTimingHelp: "Choose how prompt processing shows up next to the time a model spent thinking.", thinkingIncludesPrompt: "Count prompt processing as thinking time", thinkingIncludesPromptDesc: "While a later prompt stage runs, the thinking time above it keeps rising too, and the finished time includes prompt processing.", thinkingShowsPrompt: "Show prompt processing time alongside", thinkingShowsPromptDesc: "Shows e.g. “Thought for 12 sec (prompt processed for 3 sec)”.",
   },
   ko: {
     newChat: "새 채팅", search: "검색", storageManager: "저장소 관리", searchChats: "채팅 검색…", histories: "채팅 기록", pinChat: "상단 고정", unpinChat: "고정 해제", pinnedChat: "고정됨", exportChat: "채팅 내보내기", deleteChat: "대화 삭제", deleteAllChats: "전체 대화 삭제", confirmDeleteChat: "이 대화를 삭제할까요?", confirmDeleteAllChats: "모든 대화 기록을 삭제할까요?",
@@ -217,7 +217,7 @@ const translations = {
     returnToRegularChat: "일반 채팅으로 돌아가기", temporaryGreeting: "안녕하세요, 여행자", temporaryChatHint: "채팅이 저장되지 않습니다",
     reasoningNotesTitle: "추론 강도 설명", reasoningNotesHelp: "채팅의 추론 선택 창에서 각 항목 아래에 짧은 설명을 표시하고, 문구를 직접 바꿉니다.", reasoningNotesReset: "비워 두면 기본 문구를 사용합니다.",
     experimental: "실험적 기능", experimentalTitle: "실험적 기능", experimentalDesc: "아직 완성되지 않은 기능입니다. 켜면 채팅의 도구 메뉴에 나타납니다.", experimentalHost: "호스트 컴퓨터 도구", experimentalHostDesc: "Superadmin만 파일, PowerShell/Bash, 백그라운드 프로그램, 임시 업로드 및 현재 화면을 제어할 수 있습니다. NeuralNetUI가 컨테이너 밖에서 실행될 때만 제공됩니다.", experimentalHelp: "기능이 꺼져 있으면 채팅 메뉴에서 도구가 숨겨지고, 클라이언트가 요청해도 서버가 거부합니다.",
-    outputTokens: "출력 토큰", reasoningTokens: "reasoning", tokensPerSecond: "토큰/초", timeToFirstToken: "첫 토큰 도착 시간", promptProcessingTime: "프롬프트 처리", reasoningTime: "생각", toolTime: "도구 사용", totalResponseTime: "최종 응답까지", thinkingTimingTitle: "생각 시간 표시", thinkingTimingHelp: "모델이 생각한 시간 옆에 프롬프트 처리 시간을 어떻게 보여 줄지 정합니다.", thinkingIncludesPrompt: "생각 시간에 프롬프트 처리 시간 합산해서 보이기", thinkingIncludesPromptDesc: "다음 프롬프트를 처리하는 동안 위의 생각 시간도 함께 늘어나고, 끝난 뒤에도 프롬프트 처리 시간을 더한 값으로 표시합니다.", thinkingShowsPrompt: "프롬프트 처리 시간 같이 보이기", thinkingShowsPromptDesc: "“12초 동안 생각함 (3초 동안 프롬프트 처리함)”처럼 함께 표시하며, 프롬프트를 처리하는 동안 괄호 안의 시간이 늘어납니다.",
+    outputTokens: "출력 토큰", reasoningTokens: "reasoning", tokensPerSecond: "토큰/초", timeToFirstToken: "첫 토큰 도착 시간", promptProcessingTime: "프롬프트 처리", reasoningTime: "생각", toolTime: "도구 사용", totalResponseTime: "최종 응답까지", chatBackgroundGlow: "채팅에 배경 색 표시", chatBackgroundGlowHelp: "새 채팅 화면의 액센트 글로우를 채팅 중에도 화면 아래쪽에 어둡게 깔아 둡니다.", thinkingTimingTitle: "생각 시간 표시", thinkingTimingHelp: "모델이 생각한 시간 옆에 프롬프트 처리 시간을 어떻게 보여 줄지 정합니다.", thinkingIncludesPrompt: "생각 시간에 프롬프트 처리 시간 합산해서 보이기", thinkingIncludesPromptDesc: "다음 프롬프트를 처리하는 동안 위의 생각 시간도 함께 늘어나고, 끝난 뒤에도 프롬프트 처리 시간을 더한 값으로 표시합니다.", thinkingShowsPrompt: "프롬프트 처리 시간 같이 보이기", thinkingShowsPromptDesc: "“12초 동안 생각함 (3초 동안 프롬프트 처리함)”처럼 함께 표시하며, 프롬프트를 처리하는 동안 괄호 안의 시간이 늘어납니다.",
   },
 } as const;
 type CopySet = typeof translations.en | typeof translations.ko;
@@ -386,6 +386,23 @@ export default function Home() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [contextViewOpen, setContextViewOpen] = useState(false);
+  /** Where the new-chat composer sat when the first message was sent, so the docked one can glide down from it. */
+  const composerFlipRef = useRef<{ rect: DOMRect; at: number } | null>(null);
+  const chatStarted = messages.length > 0;
+  useLayoutEffect(() => {
+    const from = composerFlipRef.current;
+    if (!chatStarted || !from) return;
+    composerFlipRef.current = null;
+    // Only the send that just left the new-chat screen glides; opening a chat from history docks at once.
+    if (performance.now() - from.at > 4000 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const docked = document.querySelector<HTMLElement>(".conversation-stage > .composer-wrap form.composer");
+    if (!docked) return;
+    const to = docked.getBoundingClientRect();
+    const dx = from.rect.left + from.rect.width / 2 - (to.left + to.width / 2);
+    const dy = from.rect.top - to.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    docked.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: 640, easing: "cubic-bezier(.22,.8,.28,1)" });
+  }, [chatStarted]);
   // A /compact in progress (or finished without a reply to keep it on), shown below the thread.
   const [manualCompaction, setManualCompaction] = useState<{ key: string; live: boolean; step: Extract<MessageStep, { kind: "compaction" }> }>();
   const [contextSummaryEditing, setContextSummaryEditing] = useState(false);
@@ -1279,6 +1296,10 @@ export default function Home() {
     if (compactCommand) { await runCompactCommand(compactCommand); return; }
     if (text || draftAttachments.length) setContextViewOpen(false);
     const hasMessage = Boolean(text || draftAttachments.length);
+    if (hasMessage && !messages.length) {
+      const idleComposer = document.querySelector<HTMLElement>(".idle-center form.composer");
+      composerFlipRef.current = idleComposer ? { rect: idleComposer.getBoundingClientRect(), at: performance.now() } : null;
+    }
     if(requestModel&&draftAttachments.some(attachment=>!attachmentAllowedForModel(requestModel,attachment))){setError(c.modelAttachmentUnsupported);return;}
     if (hasMessage && !pendingChoice) {
       // A model list refresh still in flight may be retrying a server; the send waits for its answer.
@@ -1559,7 +1580,7 @@ export default function Home() {
   }
   return (
     <ToolMenuContext.Provider value={toolMenu}>
-    <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""} ${contextViewOpen && messages.length ? "context-view-active" : ""}`}>
+    <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""} ${contextViewOpen && messages.length ? "context-view-active" : ""} ${appearance.chatBackgroundGlow !== false ? "chat-glow" : ""}`}>
       <button className="mobile-menu" aria-label={locale === "ko" ? "메뉴 열기" : "Open menu"} onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
       <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-visible" : ""}`}>
         <section className="side-panel">
@@ -2727,6 +2748,7 @@ function AppearanceSettings({ c, draft, setDraft, admin }: { c: CopySet; draft: 
     {admin && <div className="general-setting-card general-toggle-card"><div><strong>{c.showModelWeights}</strong><small>{c.showModelWeightsDesc}</small></div><button role="switch" aria-checked={draft.showModelWeights === true} aria-label={c.showModelWeights} className={`toggle ${draft.showModelWeights ? "on" : ""}`} onClick={() => setDraft((current) => ({ ...current, showModelWeights: !current.showModelWeights }))}><i /></button></div>}
     {admin && <div className="general-setting-card general-toggle-card"><div><strong>{c.showModelConnectionNames}</strong><small>{c.showModelConnectionNamesDesc}</small></div><button role="switch" aria-checked={draft.showModelConnectionNames === true} aria-label={c.showModelConnectionNames} className={`toggle ${draft.showModelConnectionNames ? "on" : ""}`} onClick={() => setDraft((current) => ({ ...current, showModelConnectionNames: !current.showModelConnectionNames }))}><i /></button></div>}
     <AccentPicker c={c} label={c.accentTitle} help={c.accentHelp} palette={appearance.accentPalette} color={appearance.accentColor} onChange={patch} />
+    <div className="general-setting-card general-toggle-card"><div><strong>{c.chatBackgroundGlow}</strong><small>{c.chatBackgroundGlowHelp}</small></div><button type="button" role="switch" aria-checked={appearance.chatBackgroundGlow !== false} aria-label={c.chatBackgroundGlow} className={`toggle ${appearance.chatBackgroundGlow !== false ? "on" : ""}`} onClick={() => patch({ chatBackgroundGlow: appearance.chatBackgroundGlow === false })}><i /></button></div>
     {admin && <AccentPicker c={c} label={c.loginAccentTitle} help={c.loginAccentHelp} palette={loginAppearance.accentPalette} color={loginAppearance.accentColor} onChange={patchLogin} />}
     <div className="general-setting-card greeting-settings">
       <div><strong>{locale === "ko" ? "환영 메시지" : "Greetings"}</strong><small>{locale === "ko" ? "메인 화면을 열 때마다 시간대에 맞는 문구를 무작위로 표시합니다." : "Show a random greeting for the time of day whenever the home screen opens."}</small></div>

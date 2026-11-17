@@ -140,9 +140,16 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .usage-credit-list button small { color:var(--dim);font-size:10px;margin-top:2px; }
 
 .chat-surface { flex: 1; min-width: 0; position: relative; overflow: hidden; display: flex; flex-direction: column; border-radius: var(--radius-xl); }
-.ambient-glow { pointer-events: none; position: absolute; width: min(960px, 90%); height: min(650px, 82%); left: 50%; top: 52%; transform: translate(-50%, -50%); background: radial-gradient(ellipse, rgb(var(--background-accent-rgb, var(--accent-rgb)) / .38) 0%, rgb(var(--background-accent-rgb, var(--accent-rgb)) / .2) 29%, transparent 69%); filter: blur(4px); transition: opacity .5s; }
+.ambient-glow { pointer-events: none; position: absolute; width: min(960px, 90%); height: min(650px, 82%); left: 50%; top: 52%; transform: translate(-50%, -50%); background: radial-gradient(ellipse, rgb(var(--background-accent-rgb, var(--accent-rgb)) / .38) 0%, rgb(var(--background-accent-rgb, var(--accent-rgb)) / .2) 29%, transparent 69%); filter: blur(4px); --glow-ease: cubic-bezier(.22,.8,.28,1); transition: opacity .6s ease, top .64s var(--glow-ease), width .64s var(--glow-ease), height .64s var(--glow-ease); }
+.chat-surface { transition: background-color .5s ease; }
 .app-shell.chat-active .chat-surface { background: #08080a; }
-.chat-active .ambient-glow { display: none; opacity: 0; }
+/* In an open chat the glow sinks to the bottom edge and spreads wide, dimmer and shallower than the
+   model-context wash (70% tall, red, .55) so the two never read alike even with a red accent.
+   It stays mounted so leaving for the new-chat screen rolls it back up instead of popping. */
+.chat-active .ambient-glow { opacity: 0; }
+.app-shell.chat-glow.chat-active .ambient-glow { top: 100%; width: 150%; height: 52%; opacity: .5; }
+.app-shell.chat-glow.context-view-active .ambient-glow { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .ambient-glow, .chat-surface { transition: none; } }
 .model-switcher { position: relative; z-index: 20; align-self: flex-start; margin: 6px 0 0 12px; }
 .model-trigger { background: transparent; display: flex; align-items: center; gap: 8px; border-radius: var(--radius-pill); padding: 7px 14px 7px 15px; font-size: 19px; color: #ffffff; transition: background .18s; }
 .model-trigger:hover { background: rgba(255,255,255,.05); }
@@ -2038,7 +2045,7 @@ select:focus-visible {
 .context-badge { display: inline-flex; align-items: center; gap: 4px; margin-right: auto; padding: 2px 8px; border-radius: var(--radius-pill); background: #ffffff0d; color: var(--muted); font-size: 10px; }
 .context-badge.edited { background: rgb(190 60 70 / .22); color: #f1c9cd; }
 .context-badge + .context-badge { margin-right: 0; }
-.context-reasoning { margin-bottom: 8px; padding: 7px 10px; border-left: 2px solid var(--border-strong); background: #ffffff05; border-radius: var(--radius-sm); }
+.context-reasoning { margin-bottom: 8px; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #ffffff05; }
 .context-reasoning summary { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--muted); font-size: 11px; }
 .context-reasoning .context-text { color: var(--muted); font-size: 12px; }
 .context-tool { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; margin-top: 8px; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #ffffff05; color: var(--muted); }

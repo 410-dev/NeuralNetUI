@@ -1,6 +1,6 @@
 {
   "name": "neural-chat-ui",
-  "version": "3.0.0-rc12-b32",
+  "version": "3.0.0-rc13-b33",
   "type": "module",
   "private": true,
   "engines": {

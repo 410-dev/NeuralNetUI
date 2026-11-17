@@ -20,6 +20,7 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   showReasoningNotes: true,
   thinkingIncludesPromptTime: true,
   thinkingShowsPromptTime: true,
+  chatBackgroundGlow: true,
   reasoningNotes: {},
   greetings: {},
 };
@@ -145,6 +146,7 @@ export function normalizeAppearance(input: Partial<AppearancePreferences> | unde
     showReasoningNotes: input?.showReasoningNotes !== false,
     thinkingIncludesPromptTime: input?.thinkingIncludesPromptTime !== false,
     thinkingShowsPromptTime: input?.thinkingShowsPromptTime !== false,
+    chatBackgroundGlow: input?.chatBackgroundGlow !== false,
     reasoningNotes: normalizeReasoningNotes(input?.reasoningNotes),
     greetings: normalizeGreetings(input?.greetings),
   };

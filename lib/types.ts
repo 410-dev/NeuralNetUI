@@ -31,6 +31,8 @@ export interface AppearancePreferences {
   thinkingIncludesPromptTime: boolean;
   /** Show the prompt-processing time next to the thinking time, e.g. "12초 동안 생각함 (3초 프롬프트 처리함)". */
   thinkingShowsPromptTime: boolean;
+  /** Carry the accent glow into an open chat as a dim wash along the bottom of the thread. */
+  chatBackgroundGlow: boolean;
   /** Per-effort description overrides. An absent key falls back to the built-in wording. */
   reasoningNotes: Record<string, string>;
   greetings: GreetingOverrides;
