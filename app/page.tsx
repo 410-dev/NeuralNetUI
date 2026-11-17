@@ -387,23 +387,22 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [contextViewOpen, setContextViewOpen] = useState(false);
   /**
-   * Where the composer sat just before the screen switched between the new-chat layout and an open chat,
-   * so the composer in the new layout can glide from there: down on the first send or when a chat is opened
-   * from the new-chat screen, back up on "new chat".
+   * Where the new-chat composer sat when the user left that screen (first send, or opening a chat), so the
+   * docked composer can glide down from it. Returning to a new chat docks at once; only the glow rolls up.
    */
-  const composerFlipRef = useRef<{ rect: DOMRect; at: number; toChat: boolean } | null>(null);
-  const captureComposer = (toChat: boolean) => {
-    const current = document.querySelector<HTMLElement>(toChat ? ".idle-center form.composer" : ".conversation-stage > .composer-wrap form.composer");
-    composerFlipRef.current = current ? { rect: current.getBoundingClientRect(), at: performance.now(), toChat } : null;
+  const composerFlipRef = useRef<{ rect: DOMRect; at: number } | null>(null);
+  const captureComposer = () => {
+    const current = document.querySelector<HTMLElement>(".idle-center form.composer");
+    composerFlipRef.current = current ? { rect: current.getBoundingClientRect(), at: performance.now() } : null;
   };
   const chatStarted = messages.length > 0;
   useLayoutEffect(() => {
     const from = composerFlipRef.current;
-    if (!from || from.toChat !== chatStarted) return;
+    if (!chatStarted || !from) return;
     composerFlipRef.current = null;
     // Only a switch the user just made glides; a stale capture (slow load, failed send) is dropped.
     if (performance.now() - from.at > 4000 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const target = document.querySelector<HTMLElement>(chatStarted ? ".conversation-stage > .composer-wrap form.composer" : ".idle-center form.composer");
+    const target = document.querySelector<HTMLElement>(".conversation-stage > .composer-wrap form.composer");
     if (!target) return;
     const to = target.getBoundingClientRect();
     const dx = from.rect.left + from.rect.width / 2 - (to.left + to.width / 2);
@@ -943,7 +942,6 @@ export default function Home() {
   }
 
   function newChat(replaceUrl = false, temporary = false) {
-    if (messages.length) captureComposer(false);
     setMainVisit(value => value + 1);
     abandonRef.current = true; abortRef.current?.abort();
     clearQueuedPrompts();
@@ -970,7 +968,7 @@ export default function Home() {
   async function loadConversation(id: string, navigate = true, allowNew = false, selectedBranchId?: string) {
     const abandoned = temporaryIdRef.current;
     // Opening a chat from the new-chat screen glides the composer down like a first send; URL loads dock at once.
-    if (navigate && !messages.length) captureComposer(true);
+    if (navigate && !messages.length) captureComposer();
     try {
       abandonRef.current = true; abortRef.current?.abort(); clearQueuedPrompts();
       const response = await fetch(`/api/conversations/${id}`); const body = await response.json();
@@ -1307,7 +1305,7 @@ export default function Home() {
     if (compactCommand) { await runCompactCommand(compactCommand); return; }
     if (text || draftAttachments.length) setContextViewOpen(false);
     const hasMessage = Boolean(text || draftAttachments.length);
-    if (hasMessage && !messages.length) captureComposer(true);
+    if (hasMessage && !messages.length) captureComposer();
     if(requestModel&&draftAttachments.some(attachment=>!attachmentAllowedForModel(requestModel,attachment))){setError(c.modelAttachmentUnsupported);return;}
     if (hasMessage && !pendingChoice) {
       // A model list refresh still in flight may be retrying a server; the send waits for its answer.
