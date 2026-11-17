@@ -29,7 +29,7 @@ const messageSchema = z.object({
     z.object({ kind: z.literal("reasoning"), text: z.string(), seconds: z.number().nonnegative().optional(), startedAt: z.number().nonnegative().optional(), promptSeconds: z.number().nonnegative().optional() }),
     z.object({ kind: z.literal("content"), text: z.string() }),
     z.object({ kind: z.literal("tools"), ids: z.array(z.string().min(1)) }),
-    z.object({ kind: z.literal("compaction"), seconds: z.number().nonnegative().optional(), summary: z.string().optional(), reasoning: z.string().optional(), retainedToolIds: z.array(z.string().min(1)).optional() }),
+    z.object({ kind: z.literal("compaction"), seconds: z.number().nonnegative().optional(), summary: z.string().optional(), reasoning: z.string().optional(), retainedToolIds: z.array(z.string().min(1)).optional(), method: z.literal("drop").optional(), savedTokens: z.number().int().nonnegative().optional() }),
   ])).optional(),
   toolEvents: z.array(z.object({
     id: z.string().min(1),

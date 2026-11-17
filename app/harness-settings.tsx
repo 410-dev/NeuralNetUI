@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Pencil, Check, Layers, Type, RotateCw, Minimize2, Clock, Zap, ShieldCheck, ShieldQuestion, ShieldX, Grid3X3, HardDrive, Repeat2 } from "lucide-react";
+import { X, Pencil, Check, Layers, Type, RotateCw, Minimize2, Eraser, Clock, Zap, ShieldCheck, ShieldQuestion, ShieldX, Grid3X3, HardDrive, Repeat2 } from "lucide-react";
 import type { HarnessSettings, PublicConfig } from "@/lib/types";
 import { DEFAULT_HARNESS_SETTINGS } from "@/lib/harness";
 import { normalizeRepetitionSettings, REPETITION_KINDS, REPETITION_LIMITS, type RepetitionKind } from "@/lib/repetition";
@@ -18,7 +18,7 @@ const EFFORT_LABELS: Record<string, [string, string]> = {
 
 // Radio cards keep the harness modes and title timings comparable at a glance.
 function OptionCards({ label, options, value, onSelect }: { label:string; options:Array<{ id:string; icon:React.ReactNode; title:string; description:string }>; value:string; onSelect:(id:string)=>void }) {
-  return <div className="option-cards" role="radiogroup" aria-label={label}>{options.map(option => <button key={option.id} type="button" role="radio" aria-checked={value===option.id} className={value===option.id ? "active" : ""} onClick={()=>onSelect(option.id)}><span className="option-card-icon">{option.icon}</span><div><strong>{option.title}</strong><small>{option.description}</small></div>{value===option.id && <Check size={16}/>}</button>)}</div>;
+  return <div className={`option-cards ${options.length === 3 ? "three" : ""}`} role="radiogroup" aria-label={label}>{options.map(option => <button key={option.id} type="button" role="radio" aria-checked={value===option.id} className={value===option.id ? "active" : ""} onClick={()=>onSelect(option.id)}><span className="option-card-icon">{option.icon}</span><div><strong>{option.title}</strong><small>{option.description}</small></div>{value===option.id && <Check size={16}/>}</button>)}</div>;
 }
 
 function PermissionMatrixDialog({ ko, initial, onSave, onClose }: { ko:boolean; initial:HostTrustedPermissions; onSave:(value:HostTrustedPermissions)=>void; onClose:()=>void }) {
@@ -156,7 +156,12 @@ export function HarnessSettingsPanel({draft,setDraft}: {draft:PublicConfig;setDr
       <OptionCards label={ko?"처리 방식":"Mode"} value={h.contextMode} onSelect={id=>patch({contextMode:id as HarnessSettings["contextMode"]})} options={[
         { id:"rolling", icon:<RotateCw size={17}/>, title:ko?"롤링":"Rolling", description:ko?"가장 오래된 메시지부터 전달 대상에서 제외합니다.":"Drop the oldest messages from the model input." },
         { id:"compacting", icon:<Minimize2 size={17}/>, title:ko?"압축":"Compacting", description:ko?"이전 대화를 요약해 맥락으로 계속 유지합니다.":"Summarize earlier turns and keep the summary in context." },
+        { id:"dropping", icon:<Eraser size={17}/>, title:ko?"세부 내용 버리기":"Drop Details", description:ko?"이전 턴의 도구 호출·결과와 추론을 모두 버리고 대화 내용만 남깁니다.":"Discard every earlier tool call, tool result and reasoning, keeping only the conversation." },
       ]}/>
+      {h.contextMode==="dropping" && <div className="harness-advanced">
+        <h4>{ko?"세부 내용 버리기 옵션":"Drop Details options"}</h4>
+        <div className="field"><span id="drop-threshold-label">{ko?"버리기 시작 임계값":"Start dropping at"}</span><div className="harness-slider"><input type="range" min={10} max={95} step={1} value={h.compactThreshold} aria-labelledby="drop-threshold-label" onChange={e=>patch({compactThreshold:Number(e.target.value)})}/><b>{h.compactThreshold}%</b></div><small>{ko?"컨텍스트 사용량이 이 비율에 도달하면 모델 호출 없이 이전 턴의 도구 내용과 추론을 버립니다. 응답 중에는 가장 최근 도구 호출과 결과를 남겨 작업을 이어 갑니다. 그래도 넘치면 가장 오래된 턴부터 뺍니다.":"Once context usage reaches this share, earlier tool content and reasoning are dropped without a model call. During a reply the newest tool call and its results stay so the work can continue. If it still does not fit, the oldest turns are removed."}</small></div>
+      </div>}
       {h.contextMode==="compacting" && <div className="harness-advanced">
         <h4>{ko?"압축 옵션":"Compaction options"}</h4>
         <div className="field"><span id="compact-threshold-label">{ko?"압축 시작 임계값":"Start compacting at"}</span><div className="harness-slider"><input type="range" min={10} max={95} step={1} value={h.compactThreshold} aria-labelledby="compact-threshold-label" onChange={e=>patch({compactThreshold:Number(e.target.value)})}/><b>{h.compactThreshold}%</b></div><small>{ko?"컨텍스트 사용량이 이 비율에 도달하면 요약을 시작합니다.":"Summarization starts once context usage reaches this share of the window."}</small></div>

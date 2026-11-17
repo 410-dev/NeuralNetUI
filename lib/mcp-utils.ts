@@ -16,3 +16,35 @@ export function mcpToolAlias(connectionId: string, toolName: string) {
   const safe = toolName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 45) || "tool";
   return `mcp_${connectionId.replace(/-/g, "").slice(0, 8)}_${safe}`.slice(0, 64);
 }
+
+/**
+ * A readable message for a failure while talking to an MCP server. The upstream HTTP status is reported in the text
+ * only: NeuralNetUI answers its own client with 400, because answering 502/504 would make a proxy in front of
+ * NeuralNetUI (such as Cloudflare Tunnel) replace the JSON body with its own error page.
+ */
+export function describeMcpFailure(error: unknown, endpoint: string): string {
+  const source = error && typeof error === "object" ? error as { name?: unknown; message?: unknown; status?: unknown; data?: { text?: unknown }; cause?: unknown } : {};
+  // The SDK reports a rejected token as UnauthorizedError without an HTTP status.
+  const unauthorized = source.name === "UnauthorizedError" || typeof source.message === "string" && /^unauthori[sz]ed\.?$/i.test(source.message.trim());
+  const status = Number(source.status) || (unauthorized ? 401 : NaN);
+  const raw = typeof source.data?.text === "string" ? source.data.text : typeof source.message === "string" ? source.message : String(error);
+  let detail = raw.replace(/^Error POSTing to endpoint(?: \(HTTP \d+\))?:\s*/, "").trim();
+  try {
+    const parsed = JSON.parse(detail) as Record<string, unknown>;
+    const summary = [parsed.title, parsed.detail ?? (parsed.error as { message?: unknown } | undefined)?.message ?? parsed.error].filter(item => typeof item === "string" && item).join(" — ");
+    if (summary) detail = summary;
+  } catch { /* plain-text bodies are used as they are */ }
+  if (/^\s*</.test(detail)) detail = "";
+  detail = detail.replace(/\s+/g, " ").slice(0, 300);
+  const cause = source.cause && typeof source.cause === "object" && typeof (source.cause as { code?: unknown }).code === "string" ? (source.cause as { code: string }).code : "";
+  const hints: string[] = [];
+  let path = "/";
+  try { path = new URL(endpoint).pathname; } catch { /* the schema already validated the URL */ }
+  if ((status === 404 || status === 405) && (path === "/" || path === "")) hints.push("엔드포인트 경로를 확인하세요. 많은 MCP 서버는 /mcp 경로를 씁니다.");
+  if (status === 401 || status === 403) hints.push("인증 방식과 토큰 또는 API 키를 확인하세요.");
+  if (status === 502 || status === 503 || status === 504 || status === 520 || status === 521 || status === 522 || status === 523 || status === 524) hints.push("서버 앞단의 프록시나 터널이 MCP 서버에 닿지 못했습니다. 프록시가 가리키는 주소와 http/https 설정, MCP 서버 실행 상태를 확인하세요.");
+  const head = Number.isInteger(status) && status >= 400 && status < 600
+    ? `MCP 서버가 HTTP ${status}로 응답했습니다`
+    : `MCP 서버에 연결하지 못했습니다${cause ? ` (${cause})` : ""}`;
+  return [`${head}${detail ? `: ${detail}` : "."}`, ...hints].join(" ");
+}

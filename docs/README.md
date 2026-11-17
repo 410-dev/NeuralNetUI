@@ -29,6 +29,7 @@ NeuralNetUI의 설치, 설정, 기능, 운영 문서를 모아둔 곳입니다. 
 
 | 문서 | 내용 |
 | --- | --- |
+| [MCP 확장](../mcp-extensions/README.md) | Docker로 실행해 MCP 연결로 추가하는 확장 서버(유튜브 자막 등) |
 | [설정 레퍼런스](settings-reference.md) | 설정 화면의 모든 항목, 허용 범위, 기본값, 필요한 권한 |
 | [변경 이력](../Changelogs.md) | 릴리스별 변경 요약 |
 | [릴리스 감사 기록](audits/) | 릴리스별 검증 기록과 MSI 해시 |

@@ -44,6 +44,66 @@ export function rollingMessages<T extends { role: string; content: unknown; tool
   return result;
 }
 
+/** Marks the user message that carries images a tool returned, so it can be recognized as tool content later. */
+export const VISUAL_TOOL_CONTENT_PREFIX = "Visual content returned by the ";
+
+/** Context modes that act once usage reaches the compaction threshold, rather than only at the model's limit. */
+export function usesCompactionThreshold(mode: HarnessSettings["contextMode"] | undefined) {
+  return mode === "compacting" || mode === "dropping";
+}
+
+type DetailedMessage = { role: string; content: unknown; tool_calls?: unknown; reasoning_content?: unknown };
+
+function isVisualToolContent(content: unknown) {
+  if (!Array.isArray(content)) return false;
+  const first = content[0] as { type?: unknown; text?: unknown } | undefined;
+  return first?.type === "text" && typeof first.text === "string" && first.text.startsWith(VISUAL_TOOL_CONTENT_PREFIX);
+}
+
+/**
+ * "Drop Details": removes every tool call, tool observation and reasoning text before `keepFrom`, keeping the
+ * conversation's own text. Messages from `keepFrom` on are left as they are. Assistant texts that end up next to
+ * each other are joined so roles still alternate, which some chat templates require.
+ */
+export function dropDetails<T extends DetailedMessage>(messages: T[], keepFrom = messages.length): T[] {
+  const head: T[] = [];
+  const appendAssistant = (message: T) => {
+    const previous = head.at(-1);
+    if (previous?.role === "assistant" && typeof previous.content === "string" && typeof message.content === "string") head[head.length - 1] = { ...previous, content: `${previous.content}\n\n${message.content}` };
+    else head.push(message);
+  };
+  for (const message of messages.slice(0, keepFrom)) {
+    if (message.role === "tool") continue;
+    if (message.role === "user" && isVisualToolContent(message.content)) continue;
+    if (message.role !== "assistant") { head.push(message); continue; }
+    const { tool_calls: _calls, reasoning_content: _reasoning, ...rest } = message;
+    const empty = typeof message.content === "string" ? !message.content.trim() : message.content === undefined || message.content === null || Array.isArray(message.content) && message.content.length === 0;
+    if (!empty) appendAssistant(rest as T);
+  }
+  const tail = messages.slice(keepFrom);
+  const last = head.at(-1);
+  if (last?.role === "assistant" && tail[0]?.role === "assistant" && typeof last.content === "string") {
+    head.pop();
+    const next = tail[0];
+    tail[0] = { ...next, content: typeof next.content === "string" && next.content.trim() ? `${last.content}\n\n${next.content}` : last.content };
+  }
+  return [...head, ...tail];
+}
+
+/** Drop Details inside a reply: keeps the newest tool request and its observations so the model can continue. */
+export function dropDetailsBeforeLatestTools<T extends DetailedMessage>(messages: T[]): T[] {
+  const latest = messages.findLastIndex(message => message.role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length > 0);
+  return dropDetails(messages, latest < 0 ? messages.length : latest);
+}
+
+/** "50k", "1.2k", "1.4M": a short token count for transcript labels. */
+export function formatTokenCount(tokens: number) {
+  const value = Math.max(0, Math.round(tokens));
+  if (value < 1000) return String(value);
+  if (value < 1_000_000) return value < 10_000 ? `${(value / 1000).toFixed(1).replace(/\.0$/, "")}k` : `${Math.round(value / 1000)}k`;
+  return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+}
+
 export function resumePrompt(template: string, summary: string, userPrompt: string): string {
   return template.replace(/%COMPRESSED%|%USER_PROMPT%/g, key => key === "%COMPRESSED%" ? summary : userPrompt);
 }

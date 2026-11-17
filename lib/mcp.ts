@@ -6,7 +6,7 @@ import { AuthError } from "./auth";
 import { db } from "./database";
 import type { McpAuthType, McpConnection, McpEntitlement, McpToolInfo, McpToolPolicy } from "./types";
 import type { ModelContentPart } from "./document-processing";
-import { classifyMcpAddress, mcpToolAlias } from "./mcp-utils";
+import { classifyMcpAddress, describeMcpFailure, mcpToolAlias } from "./mcp-utils";
 
 const MAX_RESULT_CHARS = 100_000;
 const CONNECTION_TIMEOUT_MS = 20_000;
@@ -117,6 +117,15 @@ async function connectedClient(row: McpRow, signal?: AbortSignal) {
   return client;
 }
 
+/** Runs one exchange with an MCP server; its failures become a 400 with a readable message. Our own checks pass through. */
+async function talkToServer<T>(endpoint: string, signal: AbortSignal | undefined, exchange: () => Promise<T>): Promise<T> {
+  try { return await exchange(); }
+  catch (error) {
+    if (error instanceof AuthError || signal?.aborted || (error as { name?: unknown })?.name === "AbortError") throw error;
+    throw new AuthError(describeMcpFailure(error, endpoint), 400);
+  }
+}
+
 function toolPolicies(connectionId: string) {
   return new Map((db.prepare("SELECT tool_name,policy FROM mcp_tool_policies WHERE connection_id=?").all(connectionId) as Array<{tool_name:string;policy:McpToolPolicy}>).map(item=>[item.tool_name,item.policy]));
 }
@@ -125,11 +134,14 @@ export async function listMcpTools(userId: string, connectionId: string, signal?
   assertEntitled(userId);
   const row=ownedRow(userId,connectionId);
   if(!row.enabled)throw new AuthError("이 MCP 연결은 비활성화되어 있습니다.",403);
-  const policies=toolPolicies(connectionId),client=await connectedClient(row,signal);
-  try {
-    const result=await client.listTools(undefined,{signal:requestSignal(signal),cacheMode:"bypass"});
-    return result.tools.map(tool=>({name:tool.name,description:tool.description,inputSchema:tool.inputSchema,policy:policies.get(tool.name)||DEFAULT_TOOL_POLICY}));
-  } finally { await client.close().catch(()=>undefined); }
+  const policies=toolPolicies(connectionId);
+  return talkToServer(row.url,signal,async()=>{
+    const client=await connectedClient(row,signal);
+    try {
+      const result=await client.listTools(undefined,{signal:requestSignal(signal),cacheMode:"bypass"});
+      return result.tools.map(tool=>({name:tool.name,description:tool.description,inputSchema:tool.inputSchema,policy:policies.get(tool.name)||DEFAULT_TOOL_POLICY}));
+    } finally { await client.close().catch(()=>undefined); }
+  });
 }
 
 export function saveMcpToolPolicies(userId:string,connectionId:string,input:unknown){
@@ -150,9 +162,11 @@ export async function testMcpConnection(userId: string, input: unknown & { id?: 
   const credential = value.authType === "none" ? "" : value.credential.trim() || (previous?.auth_type === value.authType ? previous.credential : "");
   if (value.authType !== "none" && !credential) throw new AuthError("연결 테스트에 사용할 토큰 또는 API 키를 입력해 주세요.", 400);
   const row: McpRow = { id: previous?.id || "test", user_id: userId, name: value.name, description: value.description, url: value.url, auth_type: value.authType, credential, enabled: 1, tool_timeout_seconds: value.toolTimeoutSeconds, created_at: "", updated_at: "" };
-  const client = await connectedClient(row, signal);
-  try { const result = await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" }); return { toolCount: result.tools.length, tools: result.tools.slice(0, 20).map(tool => tool.name) }; }
-  finally { await client.close().catch(() => undefined); }
+  return talkToServer(row.url, signal, async () => {
+    const client = await connectedClient(row, signal);
+    try { const result = await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" }); return { toolCount: result.tools.length, tools: result.tools.slice(0, 20).map(tool => tool.name) }; }
+    finally { await client.close().catch(() => undefined); }
+  });
 }
 
 export type McpToolBinding = { advertisedName: string; connectionId: string; connectionName: string; toolName: string; tool: Tool; policy: McpToolPolicy };
@@ -165,10 +179,11 @@ export async function mcpConnectionBindings(userId: string, connectionId: string
   assertEntitled(userId);
   const row = ownedRow(userId, connectionId);
   if (row.enabled !== 1) return [];
-  const client = await connectedClient(row, signal);
-  let tools: Tool[];
-  try { tools = (await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" })).tools; }
-  finally { await client.close().catch(() => undefined); }
+  const tools = await talkToServer(row.url, signal, async () => {
+    const client = await connectedClient(row, signal);
+    try { return (await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" })).tools; }
+    finally { await client.close().catch(() => undefined); }
+  });
   const policies = toolPolicies(row.id);
   const bindings = new Map<string, McpToolBinding>();
   for (const tool of tools) {
@@ -187,24 +202,26 @@ export async function executeMcpTool(userId: string, binding: McpToolBinding, ar
   assertEntitled(userId);
   const row = ownedRow(userId, binding.connectionId);
   if (!row.enabled) throw new AuthError("이 MCP 연결은 비활성화되어 있습니다.", 403);
-  const client = await connectedClient(row, signal);
-  try {
-    // Tool execution gets the connection's own budget; the SDK timeout is raised to match so its 60s default cannot cut it short.
-    const timeoutMs = (row.tool_timeout_seconds || DEFAULT_MCP_TOOL_TIMEOUT_SECONDS) * 1000;
-    const response = await client.callTool({ name: binding.toolName, arguments: args && typeof args === "object" ? args as Record<string, unknown> : {} }, { signal: requestSignal(signal, timeoutMs), timeout: timeoutMs, toolDefinition: binding.tool });
-    const content: ModelContentPart[] = [];
-    const summaries: unknown[] = [];
-    for (const part of response.content || []) {
-      if (part.type === "text") { const text = bounded(part.text); content.push({ type: "text", text }); summaries.push({ type: "text", text }); }
-      else if (part.type === "image") { content.push({ type: "image_url", image_url: { url: `data:${part.mimeType};base64,${part.data}` } }); summaries.push({ type: "image", mimeType: part.mimeType, bytes: Math.ceil(part.data.length * .75) }); }
-      else if (part.type === "resource" && "text" in part.resource) { const text = bounded(part.resource.text); content.push({ type: "text", text }); summaries.push({ type: "resource", uri: part.resource.uri, text }); }
-      else summaries.push({ type: part.type });
-    }
-    if (response.structuredContent !== undefined) {
-      const text = bounded(JSON.stringify(response.structuredContent));
-      content.push({ type: "text", text });
-      summaries.push({ type: "structured", text });
-    }
-    return { result: { connection: row.name, tool: binding.toolName, isError: response.isError === true, content: summaries }, ...(content.length ? { content } : {}) };
-  } finally { await client.close().catch(() => undefined); }
+  return talkToServer(row.url, signal, async () => {
+    const client = await connectedClient(row, signal);
+    try {
+      // Tool execution gets the connection's own budget; the SDK timeout is raised to match so its 60s default cannot cut it short.
+      const timeoutMs = (row.tool_timeout_seconds || DEFAULT_MCP_TOOL_TIMEOUT_SECONDS) * 1000;
+      const response = await client.callTool({ name: binding.toolName, arguments: args && typeof args === "object" ? args as Record<string, unknown> : {} }, { signal: requestSignal(signal, timeoutMs), timeout: timeoutMs, toolDefinition: binding.tool });
+      const content: ModelContentPart[] = [];
+      const summaries: unknown[] = [];
+      for (const part of response.content || []) {
+        if (part.type === "text") { const text = bounded(part.text); content.push({ type: "text", text }); summaries.push({ type: "text", text }); }
+        else if (part.type === "image") { content.push({ type: "image_url", image_url: { url: `data:${part.mimeType};base64,${part.data}` } }); summaries.push({ type: "image", mimeType: part.mimeType, bytes: Math.ceil(part.data.length * .75) }); }
+        else if (part.type === "resource" && "text" in part.resource) { const text = bounded(part.resource.text); content.push({ type: "text", text }); summaries.push({ type: "resource", uri: part.resource.uri, text }); }
+        else summaries.push({ type: part.type });
+      }
+      if (response.structuredContent !== undefined) {
+        const text = bounded(JSON.stringify(response.structuredContent));
+        content.push({ type: "text", text });
+        summaries.push({ type: "structured", text });
+      }
+      return { result: { connection: row.name, tool: binding.toolName, isError: response.isError === true, content: summaries }, ...(content.length ? { content } : {}) };
+    } finally { await client.close().catch(() => undefined); }
+  });
 }

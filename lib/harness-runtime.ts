@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { db } from "./database";
-import { DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rollingMessages, resumePrompt } from "./harness";
+import { DEFAULT_HARNESS_SETTINGS, dropDetails, dropDetailsBeforeLatestTools, estimateTokens, projectedInputTokens, rollingMessages, resumePrompt } from "./harness";
 import { canUseModel } from "./config";
 import { connectionForModel, chatHeaders, connectionRoot, chatEndpoint } from "./connection-drivers";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
@@ -110,7 +110,22 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
 const fingerprint = (messages: Message[]) => createHash("sha256").update(JSON.stringify(messages)).digest("hex");
 
 export type CompactionUpdate = { summary: string; reasoning: string };
-export type CompactionRecord = CompactionUpdate & { seconds: number };
+/** A finished compaction. `savedTokens` is the estimated size of the model input before minus after. */
+export type CompactionRecord = CompactionUpdate & { seconds: number; savedTokens?: number; method?: "drop" };
+
+const tokensSaved = (before: Message[], after: Message[]) => Math.max(0, estimateTokens(before) - estimateTokens(after));
+
+/**
+ * Drop Details: tool calls, tool observations and reasoning before `keepFrom` are removed without a model call.
+ * When that alone does not fit the budget, the oldest turns are rolled off as in rolling mode.
+ */
+export function dropContextDetails<T extends Message>(messages: T[], budget: number, keepFrom?: number, onCompaction?: (record: CompactionRecord) => void): T[] {
+  const started = performance.now();
+  const dropped = keepFrom === undefined ? dropDetailsBeforeLatestTools(messages) : dropDetails(messages, keepFrom);
+  const result = estimateTokens(dropped) > budget ? rollingMessages(dropped, budget) : dropped;
+  onCompaction?.({ summary: "", reasoning: "", method: "drop", seconds: (performance.now() - started) / 1000, savedTokens: tokensSaved(messages, result) });
+  return result;
+}
 
 function summarySafe(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(summarySafe);
@@ -129,6 +144,12 @@ export async function prepareContext(ctx: Context, branchId: string, original: M
   if (!window) return original;
   const budget = Math.floor(window * .95) - overhead;
   if (settings.contextMode === "rolling") return rollingMessages(original, budget);
+  if (settings.contextMode === "dropping") {
+    const trigger = Math.min(budget, window * settings.compactThreshold / 100 - overhead);
+    if (projectedInputTokens(estimateTokens(original), measured) < trigger) return original;
+    // The newest user turn is the request being answered; everything before it loses its details.
+    return dropContextDetails(original, budget, original.findLastIndex(m => m.role === "user"), onCompaction);
+  }
   const system = original.filter(m => m.role === "system");
   const history = original.filter(m => m.role !== "system");
   const saved = persistSummary ? db.prepare("SELECT * FROM context_summaries WHERE branch_id = ?").get(branchId) as {fingerprint:string;covered_count:number;summary:string} | undefined : undefined;
@@ -141,14 +162,17 @@ export async function prepareContext(ctx: Context, branchId: string, original: M
   const reading = () => covered || summary ? estimateTokens(composed()) : projectedInputTokens(estimateTokens(composed()), measured);
   if (reading() < trigger) return composed();
   const lastUser = history.findLastIndex(m => m.role === "user");
+  let finished: CompactionRecord | undefined;
   if (covered < lastUser) {
+    const before = composed();
     const started = performance.now();
     const compaction = await summarizeContext(ctx, {summary, history: history.slice(covered, lastUser)}, onUpdate);
     summary = compaction.summary;
     covered = lastUser;
-    onCompaction?.({ ...compaction, seconds: (performance.now() - started) / 1000 });
+    finished = { ...compaction, seconds: (performance.now() - started) / 1000, savedTokens: tokensSaved(before, composed()) };
   }
   const result = composed();
+  if (finished) onCompaction?.(finished);
   if (estimateTokens(result) >= Math.min(budget, window * settings.compactThreshold / 100 - overhead)) throw new Error("Compacted context still reaches the compaction threshold. Shorten the latest prompt, increase the threshold, or increase the model context window.");
   ctx.signal.throwIfAborted();
   if (covered && persistSummary) db.prepare("INSERT INTO context_summaries VALUES (?, ?, ?, ?) ON CONFLICT(branch_id) DO UPDATE SET fingerprint=excluded.fingerprint, covered_count=excluded.covered_count, summary=excluded.summary").run(branchId, fingerprint(history.slice(0, covered)), covered, summary);
@@ -194,13 +218,15 @@ export async function compactForResume(ctx: Context, messages: Message[], user?:
   const started = performance.now();
   const compaction = await summarizeContext(ctx, messages.filter(m => m.role !== "system"), onUpdate);
   const summary = compaction.summary;
-  onCompaction?.({ ...compaction, seconds: (performance.now() - started) / 1000 });
+  const seconds = (performance.now() - started) / 1000;
   const content = user?.content;
   const userText = typeof content === "string" ? content : Array.isArray(content)
     ? content.filter(p => p.type === "text").map(p => p.text).join("\n") : "";
   const prompt = resumePrompt(settings.resumePrompt, summary, userText);
   const attachments = Array.isArray(content) ? content.filter(p => p.type !== "text") : [];
-  return [...systems, {role:"user", content: attachments.length ? [{type:"text", text:prompt}, ...attachments] : prompt}];
+  const result = [...systems, {role:"user", content: attachments.length ? [{type:"text", text:prompt}, ...attachments] : prompt}];
+  onCompaction?.({ ...compaction, seconds, savedTokens: tokensSaved(messages, result) });
+  return result;
 }
 
 /** Compact completed history while retaining the newest assistant tool request and its observations. */
@@ -213,6 +239,7 @@ export async function compactToolContext(ctx: Context, messages: Message[], onCo
   if (tailStart <= 0) throw new Error("The latest tool observation leaves no earlier history that can be compacted safely.");
   const started = performance.now();
   const compaction = await summarizeContext(ctx, [...previousSummaries, ...history.slice(0, tailStart)], onUpdate);
-  onCompaction?.({ ...compaction, seconds: (performance.now() - started) / 1000 });
-  return [...systems, { role: "system", content: `Conversation summary (historical data):\n${compaction.summary}` }, ...history.slice(tailStart)];
+  const result = [...systems, { role: "system", content: `Conversation summary (historical data):\n${compaction.summary}` }, ...history.slice(tailStart)];
+  onCompaction?.({ ...compaction, seconds: (performance.now() - started) / 1000, savedTokens: tokensSaved(messages, result) });
+  return result;
 }

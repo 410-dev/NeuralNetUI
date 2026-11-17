@@ -46,3 +46,41 @@ test("image estimates honor internal vision budgets and context overflow errors 
   assert.deepEqual(contextOverflowDetails(new Error('Engine protocol predict request returned 400: {"error":{"type":"exceed_context_size_error","n_prompt_tokens":186236,"n_ctx":128000}}')), { promptTokens: 186236, contextWindow: 128000 });
   assert.equal(contextOverflowDetails(new Error("connection refused")), undefined);
 });
+
+test("Drop Details keeps the conversation text and removes tool content and reasoning", async () => {
+  const { dropDetails, dropDetailsBeforeLatestTools, VISUAL_TOOL_CONTENT_PREFIX } = await import("./harness.ts");
+  const call = [{ id: "c1", type: "function", function: { name: "internet_search", arguments: "{}" } }];
+  const messages = [
+    { role: "system", content: "rules" },
+    { role: "user", content: "find it" },
+    { role: "assistant", content: "", reasoning_content: "thinking", tool_calls: call },
+    { role: "tool", content: "{\"results\":[]}", tool_call_id: "c1" },
+    { role: "user", content: [{ type: "text", text: `${VISUAL_TOOL_CONTENT_PREFIX}browser tool:` }] },
+    { role: "assistant", content: "Here it is.", reasoning_content: "more thinking" },
+    { role: "user", content: "thanks" },
+  ];
+  assert.deepEqual(dropDetails(messages, 6), [
+    { role: "system", content: "rules" },
+    { role: "user", content: "find it" },
+    { role: "assistant", content: "Here it is." },
+    { role: "user", content: "thanks" },
+  ]);
+  // Inside a reply the newest tool exchange stays, and texts left side by side are joined.
+  const inReply = [
+    { role: "user", content: "go" },
+    { role: "assistant", content: "Step one.", tool_calls: call },
+    { role: "tool", content: "a", tool_call_id: "c1" },
+    { role: "assistant", content: "Step two.", tool_calls: [{ ...call[0], id: "c2" }] },
+    { role: "tool", content: "b", tool_call_id: "c2" },
+  ];
+  assert.deepEqual(dropDetailsBeforeLatestTools(inReply), [
+    { role: "user", content: "go" },
+    { role: "assistant", content: "Step one.\n\nStep two.", tool_calls: [{ ...call[0], id: "c2" }] },
+    { role: "tool", content: "b", tool_call_id: "c2" },
+  ]);
+});
+
+test("token counts read short in transcript labels", async () => {
+  const { formatTokenCount } = await import("./harness.ts");
+  assert.deepEqual([999, 1000, 1250, 9_960, 50_400, 1_400_000].map(formatTokenCount), ["999", "1k", "1.3k", "10k", "50k", "1.4M"]);
+});

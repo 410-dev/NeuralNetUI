@@ -8,6 +8,7 @@ import { useModalFocus } from "@/lib/use-modal-focus";
 import { SectionTitle } from "./section-title";
 import { SelectMenu } from "./select-menu";
 import { useMessageDialog } from "./message-dialog";
+import { readApiResponse } from "@/lib/client-response";
 
 type McpDraft = { id?: string; name: string; description: string; url: string; authType: McpAuthType; credential: string; enabled: boolean; toolTimeoutSeconds: string; hasCredential?: boolean };
 const MIN_TOOL_TIMEOUT = 5, MAX_TOOL_TIMEOUT = 600, DEFAULT_TOOL_TIMEOUT = 20;
@@ -18,8 +19,8 @@ function policyLabel(policy:McpToolPolicy,ko:boolean){return ({blocked:ko?"차�
 
 function McpToolPolicyDialog({ko,connection,onClose}:{ko:boolean;connection:McpConnection;onClose:()=>void}){
   const ref=useModalFocus(onClose),[tools,setTools]=useState<McpToolInfo[]>([]),[busy,setBusy]=useState(true),[saving,setSaving]=useState(false),[notice,setNotice]=useState(""),[details,setDetails]=useState<string>();
-  useEffect(()=>{let live=true;void fetch(`/api/mcp-connections/${connection.id}/tools`,{cache:"no-store"}).then(async response=>{const body=await response.json();if(!response.ok)throw new Error(body.error);if(live)setTools(body.tools);}).catch(error=>live&&setNotice(error instanceof Error?error.message:String(error))).finally(()=>live&&setBusy(false));return()=>{live=false};},[connection.id]);
-  async function save(){setSaving(true);setNotice("");try{const response=await fetch(`/api/mcp-connections/${connection.id}/tools`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({tools:tools.map(({name,policy})=>({name,policy}))})});const body=await response.json();if(!response.ok)throw new Error(body.error);onClose();}catch(error){setNotice(error instanceof Error?error.message:String(error));}finally{setSaving(false);}}
+  useEffect(()=>{let live=true;void fetch(`/api/mcp-connections/${connection.id}/tools`,{cache:"no-store"}).then(async response=>{const body=await readApiResponse<{tools:McpToolInfo[]}>(response,ko?"ko":"en");if(live)setTools(body.tools);}).catch(error=>live&&setNotice(error instanceof Error?error.message:String(error))).finally(()=>live&&setBusy(false));return()=>{live=false};},[connection.id]);
+  async function save(){setSaving(true);setNotice("");try{const response=await fetch(`/api/mcp-connections/${connection.id}/tools`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({tools:tools.map(({name,policy})=>({name,policy}))})});await readApiResponse(response,ko?"ko":"en");onClose();}catch(error){setNotice(error instanceof Error?error.message:String(error));}finally{setSaving(false);}}
   return createPortal(<div ref={ref} tabIndex={-1} className="harness-modal-layer mcp-modal-layer" role="dialog" aria-modal="true" aria-label={ko?`${connection.name} 도구 권한`:`${connection.name} tool permissions`}><button className="settings-backdrop" tabIndex={-1} onClick={onClose}/><section className="harness-dialog mcp-tool-policy-dialog"><header><div><h2>{ko?"MCP 도구 권한":"MCP tool permissions"}</h2><p>{connection.name} · {ko?"각 도구가 모델에 노출되고 실행되는 방식을 정합니다.":"Choose how each tool is exposed and authorized."}</p></div><button onClick={onClose} aria-label={ko?"닫기":"Close"}><X size={20}/></button></header><div className="mcp-tool-policy-list">{busy?<div className="mcp-tool-loading"><LoaderCircle className="spin" size={20}/>{ko?"도구 목록을 불러오는 중":"Loading tools"}</div>:tools.map(tool=><article key={tool.name}><div className="mcp-tool-policy-heading"><div><strong>{tool.name}</strong><small>{tool.description||(ko?"설명이 제공되지 않았습니다.":"No description provided.")}</small></div><button className="mcp-tool-info" aria-label={ko?`${tool.name} 정보`:`About ${tool.name}`} aria-expanded={details===tool.name} onClick={()=>setDetails(current=>current===tool.name?undefined:tool.name)}><Info size={16}/></button></div>{details===tool.name&&<div className="mcp-tool-detail"><p>{tool.description||(ko?"이 MCP 서버가 상세 설명을 제공하지 않았습니다.":"This MCP server did not provide a detailed description.")}</p><pre>{JSON.stringify(tool.inputSchema||{},null,2)}</pre></div>}<div className="mcp-policy-segments" role="radiogroup" aria-label={ko?`${tool.name} 권한`:`${tool.name} permission`}>{policies.map(policy=><button key={policy} role="radio" aria-checked={tool.policy===policy} className={tool.policy===policy?"active":""} onClick={()=>setTools(current=>current.map(item=>item.name===tool.name?{...item,policy}:item))}>{policyLabel(policy,ko)}</button>)}</div></article>)}</div>{notice&&<p className="settings-notice" role="alert">{notice}</p>}<footer className="mcp-dialog-actions"><button className="secondary-button" onClick={onClose}>{ko?"취소":"Cancel"}</button><button className="save-button" disabled={busy||saving} onClick={()=>void save()}>{saving?<LoaderCircle className="spin" size={15}/>:<ShieldCheck size={15}/>} {ko?"권한 저장":"Save permissions"}</button></footer></section></div>,document.body);
 }
 
@@ -37,7 +38,7 @@ function McpConnectionDialog({ ko, initial, onClose, onSaved }: { ko: boolean; i
     setTesting(true); setNotice("");
     try {
       const response = await fetch("/api/mcp-connections/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const body = await response.json(); if (!response.ok) throw new Error(body.error);
+      const body = await readApiResponse<{ toolCount: number }>(response, ko ? "ko" : "en");
       setNotice(ko ? `연결됨: 도구 ${body.toolCount}개를 확인했습니다.` : `Connected: found ${body.toolCount} tools.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : (ko ? "연결 테스트에 실패했습니다." : "Connection test failed.")); }
     finally { setTesting(false); }
@@ -47,7 +48,7 @@ function McpConnectionDialog({ ko, initial, onClose, onSaved }: { ko: boolean; i
     setBusy(true); setNotice("");
     try {
       const response = await fetch(initial ? `/api/mcp-connections/${initial.id}` : "/api/mcp-connections", { method: initial ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const body = await response.json(); if (!response.ok) throw new Error(body.error);
+      await readApiResponse(response, ko ? "ko" : "en");
       onSaved(); onClose();
     } catch (error) { setNotice(error instanceof Error ? error.message : (ko ? "MCP 연결을 저장하지 못했습니다." : "Unable to save the MCP connection.")); }
     finally { setBusy(false); }
@@ -72,7 +73,7 @@ function McpConnectionDialog({ ko, initial, onClose, onSaved }: { ko: boolean; i
 export function McpSettings({ ko, connections: initialConnections, entitlement: initialEntitlement, onChanged }: { ko: boolean; connections: McpConnection[]; entitlement: McpEntitlement; onChanged: (connections: McpConnection[], entitlement: McpEntitlement) => void }) {
   const [connections,setConnections]=useState(initialConnections),[entitlement,setEntitlement]=useState(initialEntitlement),[editing,setEditing]=useState<McpConnection|"new">(),[permissions,setPermissions]=useState<McpConnection>(),[notice,setNotice]=useState("");
   const {dialog,confirm}=useMessageDialog(ko);
-  async function refresh(){const response=await fetch("/api/mcp-connections",{cache:"no-store"}),body=await response.json();if(!response.ok)throw new Error(body.error);setConnections(body.connections);setEntitlement(body.entitlement);onChanged(body.connections,body.entitlement);}
+  async function refresh(){const response=await fetch("/api/mcp-connections",{cache:"no-store"}),body=await readApiResponse<{connections:McpConnection[];entitlement:McpEntitlement}>(response,ko?"ko":"en");setConnections(body.connections);setEntitlement(body.entitlement);onChanged(body.connections,body.entitlement);}
   async function remove(connection:McpConnection){if(!await confirm({tone:"danger",title:ko?"MCP 연결 삭제":"Delete MCP connection",message:ko?`${connection.name} 연결을 삭제할까요?`:`Delete ${connection.name}?`,detail:ko?"저장된 인증 정보도 함께 삭제되며 되돌릴 수 없습니다.":"Its saved credential will also be deleted. This cannot be undone.",confirmLabel:ko?"삭제":"Delete"}))return;const response=await fetch(`/api/mcp-connections/${connection.id}`,{method:"DELETE"});if(!response.ok){const body=await response.json().catch(()=>({}));setNotice(body.error||"Delete failed.");return;}await refresh();}
   const canAdd=entitlement.enabled&&entitlement.usedConnections<entitlement.maxConnections;
   return <div className="settings-section mcp-settings"><SectionTitle icon={<Cable size={19}/>} title={ko?"MCP 연결":"MCP connections"} description={ko?"계정에 연결할 원격 MCP 서버를 등록하고 채팅에서 사용할 도구를 관리합니다.":"Register remote MCP servers for your account and control the tools available in chat."} action={<button className="subtle-action" disabled={!canAdd} onClick={()=>setEditing("new")}><CirclePlus size={15}/>{ko?"MCP 추가":"Add MCP"}</button>}/>

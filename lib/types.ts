@@ -274,7 +274,8 @@ export interface AppConfig {
 }
 
 export interface HarnessSettings {
-  contextMode: "rolling" | "compacting";
+  /** rolling drops the oldest turns at the limit; compacting summarizes at the threshold; dropping removes tool content and reasoning at the threshold. */
+  contextMode: "rolling" | "compacting" | "dropping";
   /** Cap on tokens the model may generate per response. Zero leaves it to the context window. */
   maxOutputTokens: number;
   compactThreshold: number;
@@ -336,7 +337,7 @@ export type MessageStep =
   | { kind: "reasoning"; text: string; seconds?: number; startedAt?: number; promptSeconds?: number }
   | { kind: "content"; text: string }
   | { kind: "tools"; ids: string[] }
-  | { kind: "compaction"; seconds?: number; summary?: string; reasoning?: string; retainedToolIds?: string[] };
+  | { kind: "compaction"; seconds?: number; summary?: string; reasoning?: string; retainedToolIds?: string[]; method?: "drop"; savedTokens?: number };
 
 export interface StoredMessage {
   id: string;
