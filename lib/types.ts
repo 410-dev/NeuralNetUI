@@ -349,7 +349,7 @@ export type MessageStep =
   | { kind: "reasoning"; text: string; seconds?: number; startedAt?: number; promptSeconds?: number }
   | { kind: "content"; text: string }
   | { kind: "tools"; ids: string[] }
-  | { kind: "compaction"; seconds?: number; summary?: string; reasoning?: string; retainedToolIds?: string[]; method?: "drop" | "roll"; savedTokens?: number };
+  | { kind: "compaction"; seconds?: number; summary?: string; reasoning?: string; retainedToolIds?: string[]; method?: "drop" | "roll"; savedTokens?: number; /** Epoch ms (server clock) when the stage started, for the live timer. */ startedAt?: number };
 
 export interface StoredMessage {
   id: string;

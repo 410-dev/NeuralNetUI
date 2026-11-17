@@ -2006,8 +2006,11 @@ select:focus-visible {
 .harness-dialog .thinking-tag-row input { height: 34px; padding: 0 11px; border-color: var(--border-strong); border-radius: var(--radius-sm); background: var(--field); }
 
 /* Model context view: the branch's actual model input, editable without touching the transcript. */
-.app-shell.context-view-active .conversation-stage { position: relative; isolation: isolate; }
-.app-shell.context-view-active .conversation-stage::before { content: ""; position: absolute; inset: auto 0 0 0; height: 70%; z-index: -1; pointer-events: none; background: linear-gradient(to top, rgb(112 18 30 / .55), rgb(70 10 20 / .22) 45%, transparent); }
+/* The red wash is always present and fades with the view, so entering and leaving are equally soft. */
+.conversation-stage::before { content: ""; position: absolute; inset: auto 0 0 0; height: 70%; z-index: -1; pointer-events: none; opacity: 0; transition: opacity .45s ease; background: linear-gradient(to top, rgb(112 18 30 / .55), rgb(70 10 20 / .22) 45%, transparent); }
+.app-shell.context-view-active .conversation-stage::before { opacity: 1; }
+.context-view-banner, .context-view > .context-card, .context-view > div { animation: message-enter .28s cubic-bezier(.22,.8,.28,1) both; }
+@media (prefers-reduced-motion: reduce) { .conversation-stage::before { transition: none; } .context-view-banner, .context-view > .context-card, .context-view > div { animation: none; } }
 .context-view { width: min(760px, 100%); margin: 0 auto; padding: 4px 0 24px; display: flex; flex-direction: column; gap: 12px; }
 .context-view-banner { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: 18px minmax(0, 1fr) 32px; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid rgb(190 60 70 / .35); border-radius: var(--radius-md); background: rgb(40 10 14 / .92); backdrop-filter: blur(10px); color: #f3d9dc; }
 .context-view-banner strong { display: block; font-size: 12.5px; font-weight: 600; }
@@ -2042,12 +2045,20 @@ select:focus-visible {
 .context-note { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; color: var(--dim); font-size: 10.5px; }
 .context-divider { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; padding: 6px 10px; border-top: 1px dashed rgb(190 60 70 / .4); color: #d6aeb3; font-size: 10.5px; }
 .context-divider span { margin-right: auto; }
-.context-tool-dialog { width: min(720px, 100%); max-height: calc(100dvh - 36px); overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-xl); background: var(--surface, #151515); box-shadow: 0 30px 90px rgba(0,0,0,.6); }
-.context-tool-dialog > header { display: flex; align-items: center; justify-content: space-between; }
-.context-tool-dialog > header button { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--muted); }
-.context-tool-dialog textarea { width: 100%; min-height: 90px; resize: vertical; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #0e0e10; color: var(--text); font: 12px/1.5 var(--font-mono, monospace); }
-.context-tool-dialog > footer { display: flex; justify-content: flex-end; gap: 8px; }
-.context-tool-dialog .primary-action { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px; border: 0; border-radius: var(--radius-pill); background: rgb(var(--accent-rgb) / .8); color: #fff; }
+.context-tool-dialog { width: min(720px, calc(100vw - 32px)); }
+.context-tool-dialog .field { display: flex; flex-direction: column; gap: 6px; }
+.context-tool-dialog textarea { width: 100%; min-height: 90px; resize: vertical; font: 12px/1.5 var(--font-mono, monospace); }
 .context-tool-error { margin: 0; color: var(--danger-text); font-size: 11px; }
 @media (max-width: 620px) { .context-message { max-width: 100%; } .context-tool { grid-template-columns: 16px minmax(0, 1fr); } .context-tool button { grid-column: 2; justify-self: start; } }
-.context-tool-layer { background: rgb(0 0 0 / .55); backdrop-filter: blur(2px); }
+
+/* Slash command autocomplete: a small list right above the message field. */
+.composer-field { position: relative; }
+.slash-suggestions { position: absolute; left: -6px; bottom: calc(100% + 12px); z-index: 14; min-width: 240px; max-width: min(440px, calc(100vw - 48px)); display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: rgb(28 28 33 / .97); backdrop-filter: blur(12px); box-shadow: 0 14px 36px rgba(0,0,0,.45); animation: popover-in-up .16s ease-out both; }
+.slash-suggestions button { display: flex; align-items: baseline; gap: 10px; min-height: 30px; padding: 5px 9px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); text-align: left; }
+.slash-suggestions button.active { background: rgb(var(--accent-rgb) / .2); color: var(--text); }
+.slash-suggestions code { flex: 0 0 auto; color: #9fcbff; font: 500 11.5px/1.3 var(--font-mono, monospace); }
+.slash-suggestions small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: 10.5px; }
+.composer textarea.command-text { color: #9fcbff; }
+
+.compaction-block .compaction-thought { color: var(--dim); }
+.compaction-block .compaction-summary { color: var(--muted); }

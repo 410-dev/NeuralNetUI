@@ -24,7 +24,7 @@ import { runInBrowserSandbox } from "@/lib/code-runner-client";
 import { readApiResponse } from "@/lib/client-response";
 import { formatTokenCount } from "@/lib/harness";
 import { applyContextState, isSummarized, normalizeContextState, withoutContentOverride, type ContextState } from "@/lib/context-state";
-import { parseCompactCommand, type CompactCommand } from "@/lib/compact-command";
+import { parseCompactCommand, slashSuggestions, type CompactCommand } from "@/lib/compact-command";
 import { ContextView } from "./context-view";
 import { clearFunctionSelections, DEFAULT_TOOL_STATE, enabledProviderCount, normalizeToolState, resolveProviderState, setProviderEnabled, setProviderFunctions, setProviderOption, type ToolState } from "@/lib/tools/state";
 import { SectionTitle } from "./section-title";
@@ -386,6 +386,8 @@ export default function Home() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [contextViewOpen, setContextViewOpen] = useState(false);
+  // A /compact in progress (or finished without a reply to keep it on), shown below the thread.
+  const [manualCompaction, setManualCompaction] = useState<{ key: string; live: boolean; step: Extract<MessageStep, { kind: "compaction" }> }>();
   const [contextSummaryEditing, setContextSummaryEditing] = useState(false);
   const [searching, setSearching] = useState(false);
   const [storageOpen, setStorageOpen] = useState(false);
@@ -633,7 +635,7 @@ export default function Home() {
       if (element && autoFollowThreadRef.current) element.scrollTo({ top: element.scrollHeight });
     });
     return () => cancelAnimationFrame(frame);
-  }, [messages]);
+  }, [messages, manualCompaction]);
   const locale = config.preferences.language || "en";
   const c = copyFor(locale);
   // The document was served as Korean whatever the person had chosen, so an English interface was
@@ -1220,22 +1222,52 @@ export default function Home() {
     return latest;
   }
 
-  /** /compact and /compact summarize: compact this branch's context now instead of sending a message. */
+  /**
+   * /compact and /compact summarize: compact this branch's context now instead of sending a message. The work streams
+   * into a compaction block at the end of the thread (thinking and summary as they are written, then the time and
+   * the tokens saved), and the finished block is kept on the last reply.
+   */
   async function runCompactCommand(mode: CompactCommand) {
     const ko = locale === "ko";
-    if (isGenerating) { setError(ko ? "응답을 생성하는 동안에는 컨텍스트를 압축할 수 없습니다." : "The context cannot be compacted while a reply is being generated."); return; }
+    if (isGenerating || manualCompaction?.live) { setError(ko ? "응답을 생성하거나 압축하는 동안에는 컨텍스트를 압축할 수 없습니다." : "The context cannot be compacted while a reply or another compaction is running."); return; }
     if (!conversation || !activeBranch || !messages.length) { setError(ko ? "압축할 대화가 없습니다." : "There is no conversation to compact."); return; }
-    setDraft(""); setError("");
-    setNotice(mode === "summarize" ? (ko ? "요약으로 컨텍스트를 압축하는 중… (토큰을 사용합니다)" : "Summarizing the context… (uses tokens)") : (ko ? "컨텍스트를 압축하는 중…" : "Compacting the context…"));
+    const key = `${conversation.id}:${activeBranch.id}`;
+    setDraft(""); setError(""); setNotice("");
+    autoFollowThreadRef.current = true; setThreadAutoFollow(true);
+    setManualCompaction({ key, live: true, step: { kind: "compaction", startedAt: Date.now() - serverClockOffset } });
     try {
       const response = await fetch(`/api/conversations/${encodeURIComponent(conversation.id)}/compact`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ branchId: activeBranch.id, mode, modelId: selectedModel?.id, aliasBaseModelId: selectedModel?.isAlias ? selectedAliasBase?.id : undefined }) });
-      const result = await readApiResponse<{ state: unknown; method: "drop" | "summary" | "none"; savedTokens: number }>(response, locale);
-      setContextState({ key: `${conversation.id}:${activeBranch.id}`, state: normalizeContextState(result.state) });
-      const saved = ko ? `${formatTokenCount(result.savedTokens)} 토큰 절약됨` : `${formatTokenCount(result.savedTokens)} tokens saved`;
-      setNotice(result.method === "summary" ? (ko ? `이전 대화를 요약으로 압축했습니다 · ${saved} · 요약에 토큰을 사용했습니다.` : `Earlier turns were summarized · ${saved} · the summary used tokens.`)
-        : result.method === "drop" ? (ko ? `이전 도구 세부 내용과 추론을 버렸습니다 · ${saved}` : `Earlier tool details and reasoning were dropped · ${saved}`)
-        : (ko ? "더 줄일 내용이 없습니다." : "There was nothing left to reduce."));
-    } catch (caught) { setNotice(""); setError(caught instanceof Error ? caught.message : String(caught)); }
+      if (!response.ok || !response.body) await readApiResponse(response, locale);
+      type Done = { state: unknown; method: "drop" | "summary" | "none"; savedTokens: number; seconds: number; startedAt: number; summary?: string; reasoning?: string };
+      let done: Done | undefined;
+      const reader = response.body!.getReader(); const decoder = new TextDecoder(); let buffer = "";
+      for (;;) {
+        const { value, done: ended } = await reader.read(); if (ended) break;
+        buffer += decoder.decode(value, { stream: true });
+        const records = buffer.split(/\r?\n\r?\n/); buffer = records.pop() || "";
+        for (const record of records) {
+          const event = /^event: (\w+)/m.exec(record)?.[1]; const data = /^data: (.*)$/m.exec(record)?.[1];
+          if (!event || !data) continue;
+          const payload = JSON.parse(data);
+          if (event === "update") setManualCompaction(current => current?.key === key ? { ...current, step: { ...current.step, ...(payload.summary ? { summary: payload.summary } : {}), ...(payload.reasoning ? { reasoning: payload.reasoning } : {}) } } : current);
+          else if (event === "error") throw new Error(payload.error || (ko ? "컨텍스트를 압축하지 못했습니다." : "The context could not be compacted."));
+          else if (event === "done") done = payload as Done;
+        }
+      }
+      if (!done) throw new Error(ko ? "압축 결과를 받지 못했습니다." : "The compaction result did not arrive.");
+      setContextState({ key, state: normalizeContextState(done.state) });
+      if (done.method === "none") { setManualCompaction(undefined); setNotice(ko ? "더 줄일 내용이 없습니다." : "There was nothing left to reduce."); return; }
+      const step: Extract<MessageStep, { kind: "compaction" }> = { kind: "compaction", seconds: done.seconds, startedAt: done.startedAt, savedTokens: done.savedTokens,
+        ...(done.method === "drop" ? { method: "drop" as const } : {}), ...(done.summary ? { summary: done.summary } : {}), ...(done.reasoning ? { reasoning: done.reasoning } : {}) };
+      // Keep the finished block on the last reply so it stays in the transcript; without a reply it stays below the thread.
+      const lastAssistant = activeBranch.messages.findLast(message => message.role === "assistant");
+      if (lastAssistant && conversation) {
+        const withStep = (message: StoredMessage) => message.id === lastAssistant.id ? { ...message, steps: [...(message.steps || []), step] } : message;
+        const stamp = now();
+        const next: Conversation = { ...conversation, updatedAt: stamp, branches: conversation.branches.map(branch => branch.messages.some(message => message.id === lastAssistant.id) ? { ...branch, messages: branch.messages.map(withStep), updatedAt: stamp } : branch) };
+        setMessages(activeBranch.messages.map(withStep)); setManualCompaction(undefined); await persist(next);
+      } else setManualCompaction({ key, live: false, step });
+    } catch (caught) { setManualCompaction(undefined); setError(caught instanceof Error ? caught.message : String(caught)); }
   }
 
   async function sendMessage(event?: FormEvent) {
@@ -1574,6 +1606,7 @@ export default function Home() {
                 {contextViewOpen ? <ContextView ko={locale === "ko"} messages={messages} state={branchContext} includeReasoning={rememberReasoning} systemPrompt={selectedSystemPrompt} summaryEditing={contextSummaryEditing} setSummaryEditing={setContextSummaryEditing} onSave={saveContextState} confirm={askConfirm} onClose={() => setContextViewOpen(false)} /> : <>
                 {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
                 {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} waitStartedAt={pendingWait?.messageId === message.id ? pendingWait.startedAt : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={editUserRequest} onEditAssistant={editAssistantResponse} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
+                {manualCompaction && manualCompaction.key === `${conversation?.id}:${activeBranch?.id}` && <div className="message-row assistant-message manual-compaction"><CompactionStep c={c} locale={locale} step={manualCompaction.step} live={manualCompaction.live} /></div>}
                 </>}
               </div>
               {!threadAutoFollow && <button type="button" className="scroll-resume thread-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeThreadAutoFollow}><ArrowDown size={18} /></button>}
@@ -1661,6 +1694,25 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
     return () => document.removeEventListener("pointerdown", closeOnOutsidePress);
   }, [addMenuOpen]);
   const hasDraftMessage = Boolean(draft.trim() || attachments.length);
+  // Slash commands: suggestions as soon as the draft starts with "/", narrowing as it is typed. A draft that is
+  // exactly a command shows in the command color; anything more is an ordinary message.
+  const isCommand = !attachments.length && parseCompactCommand(draft) !== undefined;
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const [dismissedSuggestionsFor, setDismissedSuggestionsFor] = useState<string>();
+  const suggestions = attachments.length || pendingChoice || pendingHostApproval || dismissedSuggestionsFor === draft ? [] : slashSuggestions(draft);
+  useEffect(() => { setSuggestionIndex(0); }, [suggestions.length, draft.length === 0]);
+  const acceptSuggestion = (command: string) => { setDraft(command); setDismissedSuggestionsFor(undefined); window.requestAnimationFrame(() => { const field = textRef.current; if (field) { field.focus(); field.setSelectionRange(command.length, command.length); } }); };
+  const composerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (suggestions.length && !event.nativeEvent.isComposing) {
+      const exact = suggestions.some(item => item.command === draft.trim().replace(/\s+/g, " ").toLowerCase());
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setSuggestionIndex(index => (index + (event.key === "ArrowDown" ? 1 : suggestions.length - 1)) % suggestions.length); return; }
+      if (event.key === "Tab" && !event.shiftKey) { event.preventDefault(); acceptSuggestion(suggestions[suggestionIndex]?.command || suggestions[0].command); return; }
+      if (event.key === "Escape") { event.preventDefault(); setDismissedSuggestionsFor(draft); return; }
+      // Enter completes a partial command; on an exact command it sends (runs) as usual.
+      if (event.key === "Enter" && !event.shiftKey && !exact) { event.preventDefault(); acceptSuggestion(suggestions[suggestionIndex]?.command || suggestions[0].command); return; }
+    }
+    keyDown(event);
+  };
   const pendingInput = pendingChoice || pendingHostApproval;
   const showStop = isGenerating && (!hasDraftMessage || Boolean(pendingInput));
   const attachmentControlsDisabled = selectedModel?.imageGeneration === true && selectedModel.imageInput === false;
@@ -1739,8 +1791,11 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
         {activeToolCount > 0 && <small className="enabled-tools"><Wrench size={11} />{activeToolCount}</small>}
       </div>
       <div className="composer-field">
+        {suggestions.length > 0 && <div className="slash-suggestions" role="listbox" aria-label={locale === "ko" ? "명령어" : "Commands"}>
+          {suggestions.map((item, index) => <button key={item.command} type="button" role="option" aria-selected={index === suggestionIndex} className={index === suggestionIndex ? "active" : ""} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setSuggestionIndex(index)} onClick={() => acceptSuggestion(item.command)}><code>{item.command}</code><small>{item.description[locale]}</small></button>)}
+        </div>}
         <span className="composer-measure" ref={measureRef} aria-hidden="true">{draft || " "}</span>
-        <textarea ref={textRef} aria-label={pendingInput ? c.choiceWaiting : c.messagePlaceholder} enterKeyHint="enter" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} onPaste={(event) => {
+        <textarea ref={textRef} className={isCommand ? "command-text" : ""} aria-label={pendingInput ? c.choiceWaiting : c.messagePlaceholder} enterKeyHint="enter" rows={1} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={composerKeyDown} onPaste={(event) => {
           const images = clipboardImages(event.clipboardData);
           if (!images.length) return;
           event.preventDefault();
@@ -2301,51 +2356,81 @@ function ReasoningStep({ c, locale, text, seconds, startedAt, promptSeconds, pro
   peak.current = { thought: shownThought, prompt: shownPrompt, summed };
   // The thinking number is counting whenever the model reasons, or, with prompt time added in, while a prompt stage runs.
   const thinkingLive = live || summed && stageLive;
+  const follow = useLiveFollow(live, text);
+  const shown = live || open;
+  return <div className={`thinking-block ${live ? "streaming" : ""}`}>
+    <button onClick={() => !live && setOpen((value) => !value)} aria-expanded={shown}><Lightbulb size={15} /> <ThinkingLabel locale={locale} seconds={shownThought} live={thinkingLive} promptSeconds={appearance.thinkingShowsPromptTime && (shownPrompt >= 1 || stageLive) ? shownPrompt : undefined} promptLive={stageLive} /> {!live && <ChevronRight size={14} className={open ? "disclosure-open" : ""} />}</button>
+    {shown && <LivePreview c={c} live={live} follow={follow}>{text}</LivePreview>}
+  </div>;
+}
+
+/**
+ * Keeps a live text box at its newest line. Text that grows faster than a programmatic scroll lands must not read as
+ * the person scrolling away, so only their own wheel, touch, drag or keys stop the follow, and auto-scroll pauses
+ * briefly after such input.
+ */
+function useLiveFollow(live: boolean, text: string) {
   const [autoFollow, setAutoFollow] = useState(true);
   const autoFollowRef = useRef(true);
   const bodyRef = useRef<HTMLDivElement>(null);
-  // Last wheel, touch, drag or key on the box: only these may stop it from following the newest text.
   const userIntentAt = useRef(0);
   const markUserIntent = () => { userIntentAt.current = Date.now(); };
   useLayoutEffect(() => {
-    // Right after the person's own scroll input, leave the box alone until its scroll event says where it ended up.
     if (live && autoFollowRef.current && bodyRef.current && Date.now() - userIntentAt.current > SCROLL_INTENT_MS) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [live, text]);
-  function handleScroll() {
+  const handleScroll = () => {
     const body = bodyRef.current;
     if (!live || !body) return;
     const nearBottom = isNearScrollBottom(body, 24);
     const following = followAfterScroll(nearBottom, autoFollowRef.current, userIntentAt.current, Date.now(), SCROLL_INTENT_MS);
     if (following && !nearBottom) body.scrollTop = body.scrollHeight;
     if (following !== autoFollowRef.current) { autoFollowRef.current = following; setAutoFollow(following); }
-  }
-  function resumeAutoFollow() {
-    autoFollowRef.current = true;
-    setAutoFollow(true);
+  };
+  const resume = () => {
+    autoFollowRef.current = true; setAutoFollow(true);
     if (bodyRef.current) bodyRef.current.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" });
-  }
-  const shown = live || open;
-  return <div className={`thinking-block ${live ? "streaming" : ""}`}>
-    <button onClick={() => !live && setOpen((value) => !value)} aria-expanded={shown}><Lightbulb size={15} /> <ThinkingLabel locale={locale} seconds={shownThought} live={thinkingLive} promptSeconds={appearance.thinkingShowsPromptTime && (shownPrompt >= 1 || stageLive) ? shownPrompt : undefined} promptLive={stageLive} /> {!live && <ChevronRight size={14} className={open ? "disclosure-open" : ""} />}</button>
-    {shown && <div className="thinking-preview-shell"><div ref={bodyRef} className={`thinking-preview ${live ? "live" : ""}`} onScroll={handleScroll} onWheel={markUserIntent} onTouchStart={markUserIntent} onTouchMove={markUserIntent} onPointerDown={markUserIntent} onKeyDown={markUserIntent}>{text}</div>{live && !autoFollow && <button type="button" className="scroll-resume reasoning-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeAutoFollow}><ArrowDown size={16} /></button>}</div>}
-  </div>;
+  };
+  return { bodyRef, autoFollow, handleScroll, markUserIntent, resume };
+}
+
+function LivePreview({ c, live, follow, children }: { c: CopySet; live: boolean; follow: ReturnType<typeof useLiveFollow>; children: ReactNode }) {
+  return <div className="thinking-preview-shell"><div ref={follow.bodyRef} className={`thinking-preview ${live ? "live" : ""}`} onScroll={follow.handleScroll} onWheel={follow.markUserIntent} onTouchStart={follow.markUserIntent} onTouchMove={follow.markUserIntent} onPointerDown={follow.markUserIntent} onKeyDown={follow.markUserIntent}>{children}</div>
+    {live && !follow.autoFollow && <button type="button" className="scroll-resume reasoning-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={follow.resume}><ArrowDown size={16} /></button>}</div>;
+}
+
+/** "12초 동안 압축 중" while it runs; "12초 동안 압축 완료 (3.7k 토큰 절약됨)" when done. */
+function CompactionLabel({ locale, seconds, live, savedTokens }: { locale: Locale; seconds: number; live: boolean; savedTokens?: number }) {
+  const ko = locale === "ko";
+  const saved = !live && savedTokens !== undefined ? (ko ? ` (${formatTokenCount(savedTokens)} 토큰 절약됨)` : ` (${formatTokenCount(savedTokens)} tokens saved)`) : "";
+  const text = ko ? `${durationText(seconds, locale)} 동안 압축 ${live ? "중" : "완료"}${saved}` : `${live ? "Compacting for" : "Compacted in"} ${durationText(seconds, locale)}${saved}`;
+  const time = <RollingDuration seconds={seconds} locale={locale} live={live} />;
+  return <span className="timed-label"><span className="visually-hidden">{text}</span>
+    <span aria-hidden="true">{ko ? <>{time} 동안 압축 {live ? "중" : "완료"}</> : <>{live ? "Compacting for" : "Compacted in"} {time}</>}{saved}</span></span>;
 }
 
 /**
- * A compaction stage. Its fold holds the compaction model's own reasoning and the summary it
- * produced, each in its own small window, so the stage reads like a reasoning block.
+ * A compaction stage, shown like a reasoning block: while it runs the compaction model's thinking and the summary it
+ * writes stream into the box under a running timer; when done the label gives the time and the tokens saved.
+ * Stages without text (dropped details, removed turns) are just the finished label.
  */
 function CompactionStep({ c, locale, step, live }: { c: CopySet; locale: Locale; step: Extract<MessageStep, { kind: "compaction" }>; live: boolean }) {
   const [open, setOpen] = useState(false);
-  const hasOutput = Boolean(step.reasoning || step.summary);
+  const mountedAt = useRef(Date.now());
+  const now = useTicker(live);
+  const started = step.startedAt !== undefined ? step.startedAt + serverClockOffset : mountedAt.current;
+  const seconds = live ? Math.floor(Math.max(0, now - started) / 1000) : Math.max(1, Math.round(step.seconds || 1));
+  const text = [step.reasoning, step.summary].filter(Boolean).join("\n\n");
+  const follow = useLiveFollow(live, text);
+  const hasOutput = Boolean(text);
   const shown = live || open && hasOutput;
   return <div className={`thinking-block compaction-block ${live ? "streaming" : ""}`}>
-    <button onClick={() => !live && hasOutput && setOpen((value) => !value)} aria-expanded={shown} disabled={!live && !hasOutput}><Minimize2 size={15} /> {live ? c.compactingNow : step.method === "drop" ? c.detailsDropped : step.method === "roll" ? c.turnsRolled : formatCompactionDuration(step.seconds || 1, locale)}{!live && step.savedTokens !== undefined && <span className="compaction-saved">{locale === "ko" ? `${formatTokenCount(step.savedTokens)} 토큰 절약됨` : `${formatTokenCount(step.savedTokens)} tokens saved`}</span>} {!live && hasOutput && <ChevronDown size={14} className={open ? "rotate" : ""} />}</button>
-    {shown && <div className="compaction-panes">
-      {step.reasoning && <div className="compaction-pane"><small>{c.compactionThought}</small><div className="thinking-preview">{step.reasoning}</div></div>}
-      {step.summary && <div className="compaction-pane"><small>{c.compactionSummary}</small><div className="thinking-preview">{step.summary}</div></div>}
-      {live && !hasOutput && <div className="compaction-pane"><small>{c.compactionSummary}</small><div className="thinking-preview live"><span className="typing"><i /><i /><i /></span></div></div>}
-    </div>}
+    <button onClick={() => !live && hasOutput && setOpen(value => !value)} aria-expanded={shown} disabled={!live && !hasOutput}><Minimize2 size={15} /> <CompactionLabel locale={locale} seconds={seconds} live={live} savedTokens={step.savedTokens} /> {!live && hasOutput && <ChevronRight size={14} className={open ? "disclosure-open" : ""} />}</button>
+    {shown && <LivePreview c={c} live={live} follow={follow}>
+      {step.reasoning && <span className="compaction-thought">{step.reasoning}</span>}
+      {step.reasoning && step.summary && "\n\n"}
+      {step.summary && <span className="compaction-summary">{step.summary}</span>}
+      {live && !hasOutput && <span className="typing"><i /><i /><i /></span>}
+    </LivePreview>}
   </div>;
 }
 

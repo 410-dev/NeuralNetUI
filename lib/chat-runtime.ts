@@ -194,8 +194,11 @@ function closeReasoningStep(job: ChatJob, seconds: number) {
 function completeCompaction(job: ChatJob, record: CompactionRecord) {
   const steps = job.message.steps ? [...job.message.steps] : [];
   const open = steps.findLastIndex(step => step.kind === "compaction" && step.seconds === undefined);
-  const retainedToolIds = open >= 0 && steps[open].kind === "compaction" ? steps[open].retainedToolIds : undefined;
-  const finished: MessageStep = { kind: "compaction", seconds: Math.max(1, Math.round(record.seconds)), ...(record.method ? { method: record.method } : {}), ...(record.savedTokens !== undefined ? { savedTokens: Math.round(record.savedTokens) } : {}), ...(record.summary ? { summary: record.summary } : {}), ...(record.reasoning ? { reasoning: record.reasoning } : {}), ...(retainedToolIds?.length ? { retainedToolIds } : {}) };
+  const current = open >= 0 && steps[open].kind === "compaction" ? steps[open] : undefined;
+  const seconds = Math.max(1, Math.round(record.seconds));
+  const finished: MessageStep = { kind: "compaction", seconds, startedAt: current?.startedAt ?? Date.now() - seconds * 1000,
+    ...(record.method ? { method: record.method } : {}), ...(record.savedTokens !== undefined ? { savedTokens: Math.round(record.savedTokens) } : {}),
+    ...(record.summary ? { summary: record.summary } : {}), ...(record.reasoning ? { reasoning: record.reasoning } : {}), ...(current?.retainedToolIds?.length ? { retainedToolIds: current.retainedToolIds } : {}) };
   if (open >= 0) steps[open] = finished; else steps.push(finished);
   job.message = { ...job.message, steps };
 }
@@ -204,10 +207,11 @@ function completeCompaction(job: ChatJob, record: CompactionRecord) {
 function updateCompaction(job: ChatJob, record: CompactionUpdate) {
   const steps = job.message.steps ? [...job.message.steps] : [];
   let open = steps.findLastIndex(step => step.kind === "compaction" && step.seconds === undefined);
-  if (open < 0) { steps.push({ kind: "compaction" }); open = steps.length - 1; }
+  if (open < 0) { steps.push({ kind: "compaction", startedAt: Date.now() }); open = steps.length - 1; }
   const current = steps[open];
   const retainedToolIds = current.kind === "compaction" ? current.retainedToolIds : undefined;
-  steps[open] = { kind: "compaction", ...(record.summary ? { summary: record.summary } : {}), ...(record.reasoning ? { reasoning: record.reasoning } : {}), ...(retainedToolIds?.length ? { retainedToolIds } : {}) };
+  const startedAt = current.kind === "compaction" ? current.startedAt ?? Date.now() : Date.now();
+  steps[open] = { kind: "compaction", startedAt, ...(record.summary ? { summary: record.summary } : {}), ...(record.reasoning ? { reasoning: record.reasoning } : {}), ...(retainedToolIds?.length ? { retainedToolIds } : {}) };
   job.message = { ...job.message, steps }; broadcast(job);
 }
 
@@ -217,7 +221,7 @@ function beginToolCompaction(job: ChatJob) {
   if (steps.some(step => step.kind === "compaction" && step.seconds === undefined)) return;
   const latestTools = steps.findLastIndex(step => step.kind === "tools");
   const retainedToolIds = latestTools >= 0 && steps[latestTools].kind === "tools" ? steps[latestTools].ids : [];
-  steps.push({ kind: "compaction", ...(retainedToolIds.length ? { retainedToolIds } : {}) });
+  steps.push({ kind: "compaction", startedAt: Date.now(), ...(retainedToolIds.length ? { retainedToolIds } : {}) });
   job.message = { ...job.message, steps };
 }
 

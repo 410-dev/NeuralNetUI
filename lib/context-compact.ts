@@ -17,7 +17,7 @@ import type { StoredMessage } from "./types";
  * count toward the account's token usage. The result is stored in the branch's context state.
  */
 export type CompactMode = "default" | "summarize";
-export type CompactResult = { state: ContextState; method: "drop" | "summary" | "none"; savedTokens: number };
+export type CompactResult = { state: ContextState; method: "drop" | "summary" | "none"; savedTokens: number; seconds: number; startedAt: number; summary?: string; reasoning?: string };
 
 /** Text form of what the model would receive, for summaries and size estimates. */
 function modelView(messages: StoredMessage[], state: ContextState, includeReasoning: boolean) {
@@ -31,7 +31,8 @@ function modelView(messages: StoredMessage[], state: ContextState, includeReason
   return { summary: applied.summary || "", history };
 }
 
-export async function compactConversation(input: { userId: string; conversationId: string; branchId: string; mode: CompactMode; modelId?: string; aliasBaseModelId?: string; signal: AbortSignal }): Promise<CompactResult> {
+export async function compactConversation(input: { userId: string; conversationId: string; branchId: string; mode: CompactMode; modelId?: string; aliasBaseModelId?: string; signal: AbortSignal; onUpdate?: (update: { summary: string; reasoning: string }) => void }): Promise<CompactResult> {
+  const startedAt = Date.now();
   const conversation = await readConversation(input.conversationId, input.userId);
   const branch = conversation?.branches.find(item => item.id === input.branchId);
   if (!conversation || !branch) throw new AuthError("대화를 찾을 수 없습니다.", 404);
@@ -49,6 +50,7 @@ export async function compactConversation(input: { userId: string; conversationI
   const before = size(original);
   let next = original;
   let method: CompactResult["method"] = "none";
+  let reasoning = "";
   if (input.mode === "default" && (harness.dropDetailsFirst || harness.contextMode === "rolling")) {
     next = { ...next, droppedThroughMessageId: lastId };
     if (size(next) < before) method = "drop";
@@ -60,10 +62,12 @@ export async function compactConversation(input: { userId: string; conversationI
     assertPlanAccess(input.userId, model.id, model.sourceModel);
     const view = modelView(messages, next, includeReasoning);
     if (!view.history.length && !view.summary) throw new AuthError("요약할 대화가 없습니다.", 400);
-    const compaction = await summarizeContext({ config, model, userId: input.userId, sessionId: input.conversationId, signal: input.signal, onPhase: () => undefined }, view);
+    const compaction = await summarizeContext({ config, model, userId: input.userId, sessionId: input.conversationId, signal: input.signal, onPhase: () => undefined }, view, input.onUpdate);
+    reasoning = compaction.reasoning;
     next = { ...next, summary: { text: compaction.summary, throughMessageId: lastId } };
     method = "summary";
   }
   saveContextState(input.branchId, next);
-  return { state: next, method, savedTokens: Math.max(0, before - size(next)) };
+  return { state: next, method, savedTokens: Math.max(0, before - size(next)), startedAt, seconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
+    ...(method === "summary" && next.summary ? { summary: next.summary.text } : {}), ...(reasoning ? { reasoning } : {}) };
 }

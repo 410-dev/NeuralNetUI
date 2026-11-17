@@ -5,7 +5,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { applyContextState, type ContextMessageOverride, type ContextState } from "@/lib/context-state";
 import type { StoredMessage, ToolEvent } from "@/lib/types";
-import { useModalFocus } from "@/lib/use-modal-focus";
+import { useModalTransition } from "@/lib/use-modal-focus";
 import { TextDialog } from "./text-dialog";
 
 /**
@@ -118,23 +118,31 @@ export function ContextView({ ko, messages, state, includeReasoning, systemPromp
   </div>;
 }
 
-/** Tool arguments and result as JSON, edited in a modal so a stray keystroke cannot corrupt them inline. */
+/** Tool arguments and result as JSON, edited in a modal so a stray keystroke cannot corrupt them inline. It shares the
+ * text editor's layer, transitions and buttons. */
 function ToolEditDialog({ ko, event, onClose, onSave }: { ko: boolean; event: ToolEvent; onClose: () => void; onSave: (args: unknown, result: unknown) => void }) {
   const [args, setArgs] = useState(pretty(event.arguments));
   const [result, setResult] = useState(pretty(event.result));
   const [error, setError] = useState("");
-  const ref = useModalFocus(onClose);
-  const save = () => {
-    try { onSave(JSON.parse(args || "null"), JSON.parse(result || "null")); }
-    catch (caught) { setError((ko ? "JSON 형식이 올바르지 않습니다: " : "Invalid JSON: ") + (caught instanceof Error ? caught.message : String(caught))); }
+  const { ref, close, closing } = useModalTransition(onClose);
+  const title = ko ? `${event.name} 도구 내용 편집` : `Edit ${event.name}`;
+  const submit = () => {
+    let parsedArgs: unknown, parsedResult: unknown;
+    try { parsedArgs = JSON.parse(args || "null"); parsedResult = JSON.parse(result || "null"); }
+    catch (caught) { setError((ko ? "JSON 형식이 올바르지 않습니다: " : "Invalid JSON: ") + (caught instanceof Error ? caught.message : String(caught))); return; }
+    close(() => onSave(parsedArgs, parsedResult));
   };
-  return createPortal(<div className="mini-dialog-layer context-tool-layer" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section ref={ref} className="mini-dialog context-tool-dialog" role="dialog" aria-modal="true" aria-label={ko ? "도구 내용 편집" : "Edit tool content"}>
-      <header><strong>{ko ? `${event.name} 도구 내용 편집` : `Edit ${event.name}`}</strong><button type="button" onClick={onClose} aria-label={ko ? "닫기" : "Close"}><X size={16} /></button></header>
-      <label className="field"><span>{ko ? "호출 인자 (JSON)" : "Arguments (JSON)"}</span><textarea spellCheck={false} value={args} onChange={item => { setArgs(item.target.value); setError(""); }} rows={6} /></label>
+  return createPortal(<div ref={ref} tabIndex={-1} className={`harness-modal-layer ${closing ? "modal-closing" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+    <button className="settings-backdrop" tabIndex={-1} onClick={() => close()} aria-label={ko ? "닫기" : "Close"} />
+    <form className="harness-dialog text-dialog context-tool-dialog" onSubmit={item => { item.preventDefault(); submit(); }}>
+      <header><h2>{title}</h2><button type="button" onClick={() => close()} aria-label={ko ? "닫기" : "Close"}><X size={20} /></button></header>
+      <label className="field"><span>{ko ? "호출 인자 (JSON)" : "Arguments (JSON)"}</span><textarea data-autofocus spellCheck={false} value={args} onChange={item => { setArgs(item.target.value); setError(""); }} rows={6} /></label>
       <label className="field"><span>{ko ? "결과 (JSON)" : "Result (JSON)"}</span><textarea spellCheck={false} value={result} onChange={item => { setResult(item.target.value); setError(""); }} rows={12} /></label>
-      {error && <p className="context-tool-error">{error}</p>}
-      <footer><button type="button" className="subtle-action" onClick={onClose}>{ko ? "취소" : "Cancel"}</button><button type="button" className="primary-action" onClick={save}><Check size={14} />{ko ? "저장" : "Save"}</button></footer>
-    </section>
+      {error && <p className="context-tool-error" role="alert">{error}</p>}
+      <footer className="text-dialog-actions">
+        <button type="button" className="secondary-button" onClick={() => close()}>{ko ? "취소" : "Cancel"}</button>
+        <button className="save-button">{ko ? "저장" : "Save"}</button>
+      </footer>
+    </form>
   </div>, document.body);
 }
