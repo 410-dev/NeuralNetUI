@@ -9,7 +9,7 @@
   "scripts": {
     "browser:install": "playwright-core install chromium --no-shell",
     "dev": "node scripts/start-server.mjs dev",
-    "test": "node --test --experimental-strip-types \"lib/*.test.ts\"",
+    "test": "node --test --experimental-strip-types \"lib/*.test.ts\" \"lib/tools/*.test.ts\"",
     "build": "next build",
     "start": "node scripts/start-server.mjs start"
   },

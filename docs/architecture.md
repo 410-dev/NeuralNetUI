@@ -43,6 +43,7 @@
 | `lib/harness.ts` | 토큰 추정, 롤링, 재개 프롬프트, 컨텍스트 초과 해석 |
 | `lib/connection-drivers.ts` / `driver-capabilities.ts` | 드라이버별 동작과 지원 범위 |
 | `lib/model-residency.ts` / `residency-adapter.ts` | 모델 상주 admission, 축출 |
+| `lib/tools/` | 도구 레지스트리: 공급자 계약, 내장·MCP 공급자, 켜고 끄기 상태, 공용 승인 ([설계](design/tool-registry.md)) |
 | `lib/web-tools.ts` | 검색·페이지 방문·시간·위치·선택형 질문 도구 |
 | `lib/mcp.ts` / `mcp-utils.ts` | 사용자별 MCP CRUD, Streamable HTTP 실행, 도구 네임스페이스, 네트워크 경계 |
 | `lib/browser-tool.ts` | Chromium 세션, 탭, 스냅샷, 스크린샷 |

@@ -79,17 +79,20 @@ try {
   await json("/api/config", "PUT", memberConfig, memberCookie);
   assert.equal((await json("/api/config", "GET", undefined, memberCookie)).showModelWeights, false, "a standard account cannot change the workspace switch");
 
-  // Tool switches are saved on the account and survive a settings save.
+  // Tool switches are saved on the account and survive a settings save. An older client's switch object is converted.
   const saved = await json("/api/preferences/tools", "PUT", { internetSearch: true, storageAccess: false, bogus: true });
-  assert.equal(saved.enabledTools.internetSearch, true); assert.equal("bogus" in saved.enabledTools, false);
+  assert.equal(saved.enabledTools.version, 2); assert.equal(saved.enabledTools.providers["web-search"].enabled, true); assert.equal("bogus" in saved.enabledTools.providers, false);
+  // A provider-format patch changes only the providers it names.
+  await json("/api/preferences/tools", "PUT", { version: 2, providers: { "page-visit": { enabled: true } } });
   const beforeSave = await json("/api/config");
   await json("/api/config", "PUT", beforeSave);
   const afterSave = await json("/api/config");
-  assert.equal(afterSave.preferences.enabledTools.internetSearch, true);
-  assert.equal(afterSave.preferences.enabledTools.storageAccess, false);
-  assert.equal(afterSave.preferences.enabledTools.currentTime, true);
-  assert.equal((await json("/api/config", "GET", undefined, memberCookie)).preferences.enabledTools.internetSearch, false, "tool switches are per account");
-  await json("/api/preferences/tools", "PUT", { internetSearch: false, storageAccess: true });
+  assert.equal(afterSave.preferences.enabledTools.providers["web-search"].enabled, true);
+  assert.equal(afterSave.preferences.enabledTools.providers["page-visit"].enabled, true);
+  assert.equal(afterSave.preferences.enabledTools.providers.storage.enabled, false);
+  assert.equal("current-time" in afterSave.preferences.enabledTools.providers, false, "untouched providers keep following their defaults");
+  assert.equal("web-search" in (await json("/api/config", "GET", undefined, memberCookie)).preferences.enabledTools.providers, false, "tool switches are per account");
+  await json("/api/preferences/tools", "PUT", { version: 2, providers: { "web-search": { enabled: false }, "page-visit": { enabled: false }, storage: { enabled: true } } });
 
   // A usage request during streaming includes the tokens produced so far.
   const stamp = new Date().toISOString();

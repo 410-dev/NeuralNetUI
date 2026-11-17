@@ -2,7 +2,7 @@ import { authErrorResponse, requireUser } from "@/lib/auth";
 import { moveUploadsToTrash, purgeDeletedUploads, storagePage, type StorageSort } from "@/lib/uploads";
 import { readConfig } from "@/lib/config";
 import { deleteReferencedConversationsAndUpload } from "@/lib/conversations";
-import { closeBrowserSessions } from "@/lib/browser-tool";
+import { disposeConversationTools } from "@/lib/tools";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,7 +21,7 @@ export async function DELETE(request: Request) {
       if(ids.length!==1)return Response.json({error:"Referenced conversations can be deleted with one file at a time."},{status:400});
       const conversationIds=Array.isArray(body.conversationIds)?[...new Set<string>(body.conversationIds.map((value:unknown)=>String(value)))]:[];
       await deleteReferencedConversationsAndUpload(ids[0],conversationIds,user.id);
-      await Promise.all(conversationIds.map(id=>closeBrowserSessions(`${user.id}:${id}`)));
+      await disposeConversationTools(user.id,conversationIds);
     }else await moveUploadsToTrash(ids, user.id);
     const config=await readConfig();await purgeDeletedUploads(user.id,config.userStorageSettings.trashRetentionDays);
     const result=await storagePage(user.id,{page:Number(body.page||1),pageSize:Number(body.pageSize||24),sort:String(body.sort||"created_desc") as StorageSort,query:String(body.query||""),state:"active"});const{trashQuotaBytes:_trashQuotaBytes,trashUsedBytes:_trashUsedBytes,...visible}=result;return Response.json(visible);

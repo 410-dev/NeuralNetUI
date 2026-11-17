@@ -1,3 +1,4 @@
+import type { ToolState } from "./tools/state.ts";
 import type { PersonalSampling, SamplingParams } from "./sampling-params.ts";
 import type { GreetingOverrides } from "./greetings.ts";
 import type { HostTrustedPermissions } from "./host-permissions.ts";
@@ -248,8 +249,8 @@ export interface AppConfig {
     /** Per-account default served model for each alias. Alias settings remain recommendations. */
     aliasBaseModelIds?: Record<string, string>;
     appearance: AppearancePreferences;
-    /** Per-account composer tool switches; absent keys use the built-in defaults. */
-    enabledTools?: Partial<EnabledTools>;
+    /** Per-account tool provider switches; providers without an entry use their defaults. Older saves use the legacy switch object. */
+    enabledTools?: ToolState;
     /** Legacy per-account replacements by model id, then preset id; read once into `modelSystemPrompts`. */
     systemPromptOverrides?: Record<string, Record<string, string>>;
     /** The account's own system prompt per model, replacing the model's server default. */
@@ -386,25 +387,6 @@ export interface MultipleChoiceQuestion {
   options: string[];
 }
 
-export interface EnabledTools {
-  internetSearch: boolean;
-  pageVisit: boolean;
-  browser: boolean;
-  storageAccess: boolean;
-  /** Fine-grained private-storage permissions for the current chat session. */
-  storageRead: boolean;
-  storageWrite: boolean;
-  /** Maximum text files the storage tool may create in one conversation. */
-  storageWriteMaxFiles: number;
-  currentTime: boolean;
-  location: boolean;
-  multipleChoice: boolean;
-  artifact: boolean;
-  hostComputer: boolean;
-  mcpConnectionIds: string[];
-  /** Per-chat MCP tool allow-list. Missing connections use every non-blocked tool. */
-  mcpToolNames: Record<string, string[]>;
-}
 
 export interface StoredAttachment {
   id: string;

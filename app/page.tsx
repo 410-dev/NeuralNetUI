@@ -18,7 +18,8 @@ import { SyntaxHighlightedCode } from "./syntax-highlighted-code";
 import { UsageDonut } from "./usage-donut";
 import { USAGE_REFRESH_EVENT } from "@/lib/usage-popover";
 import { formatModelWeight } from "@/lib/plan-usage";
-import { DEFAULT_ENABLED_TOOLS } from "@/lib/enabled-tools";
+import { BUILTIN_TOOL_PROVIDERS, builtinToolProvider, clientRendererFor, mcpManifest, pendingApprovalKind, TOOL_SECTION_LABELS, TOOL_SECTION_ORDER, toolIconFor, toolRequirementsMet, transcriptCardFor, type ToolIcon, type ToolProviderManifest } from "@/lib/tools/catalog";
+import { clearFunctionSelections, DEFAULT_TOOL_STATE, enabledProviderCount, normalizeToolState, resolveProviderState, setProviderEnabled, setProviderFunctions, setProviderOption, type ToolState } from "@/lib/tools/state";
 import { SectionTitle } from "./section-title";
 import { SelectMenu, usePopoverPresence } from "./select-menu";
 import { NeuralMark } from "./neural-mark";
@@ -47,7 +48,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type {
   ChatWaitPhase, ChatBranch, ConnectionConfig, Conversation, ConversationSummary, MessageStep, ModelConfig, PublicConfig,
-  ReasoningPreset, StoredAttachment, StoredMessage, StorageFile, Locale, AccountInfo, UserSummary, EnabledTools, ToolEvent, MultipleChoiceQuestion, ToolSettings, AccentPaletteId, AppearancePreferences, LoginAppearance, ConnectionDriver, McpConnection, McpToolInfo, ArtifactDocument, HarnessSettings,
+  ReasoningPreset, StoredAttachment, StoredMessage, StorageFile, Locale, AccountInfo, UserSummary, ToolEvent, MultipleChoiceQuestion, ToolSettings, AccentPaletteId, AppearancePreferences, LoginAppearance, ConnectionDriver, McpConnection, McpToolInfo, ArtifactDocument, HarnessSettings,
 } from "@/lib/types";
 import { advertisedContextWindowTokens, contextUsageDisplayLimitTokens, effectiveContextWindowTokens } from "@/lib/model-context";
 import { shouldExpandComposer } from "@/lib/composer-layout";
@@ -86,7 +87,7 @@ type QueuedPrompt = {
   modelId: string;
   aliasBaseModelId?: string;
   reasoningPresetId?: string;
-  tools: EnabledTools;
+  tools: ToolState;
 };
 type CompletionOptions = Omit<QueuedPrompt, "id" | "content" | "attachments">;
 type ChatJobSnapshot = { conversationId: string; branchId: string; status: "running" | "waiting" | "completed" | "stopped" | "error"; message: StoredMessage; error?: string; waitPhase?: ChatWaitPhase; waitProgress?: number; repetition?: RepetitionFinding; waitPhaseStartedAt?: number; serverTime?: number };
@@ -108,8 +109,10 @@ const emptyConfig: PublicConfig = {
 const uid = createClientId;
 const now = () => new Date().toISOString();
 const titleFrom = (text: string) => text.trim().split(/\s+/).slice(0, 7).join(" ").slice(0, 58) || "New chat";
-const McpToolsContext = createContext<{ connections: McpConnection[]; selectedIds: string[]; setSelectedIds: (ids: string[]) => void; selectedTools:Record<string,string[]>;setSelectedTools:(id:string,names:string[])=>void }>({ connections: [], selectedIds: [], setSelectedIds: () => undefined,selectedTools:{},setSelectedTools:()=>undefined });
-const StorageToolsContext=createContext<{read:boolean;write:boolean;maxFiles:number;setRead:(value:boolean)=>void;setWrite:(value:boolean)=>void;setMaxFiles:(value:number)=>void}>({read:true,write:false,maxFiles:5,setRead:()=>undefined,setWrite:()=>undefined,setMaxFiles:()=>undefined});
+/** The composer's tool menu: every provider offered to this account and this chat's switches for them. */
+type ToolMenu = { state: ToolState; providers: ToolProviderManifest[]; setEnabled: (manifest: ToolProviderManifest, value: boolean) => void; setOption: (manifest: ToolProviderManifest, key: string, value: boolean | number) => void; setFunctions: (manifest: ToolProviderManifest, names: string[]) => void };
+const ToolMenuContext = createContext<ToolMenu>({ state: DEFAULT_TOOL_STATE, providers: [], setEnabled: () => undefined, setOption: () => undefined, setFunctions: () => undefined });
+const BROWSER_TOOL = builtinToolProvider("browser")!;
 /** On a phone a settings list and its editor take turns on screen; choosing an item opens its editor. */
 const SettingsDetailContext = createContext<(open: boolean) => void>(() => undefined);
 
@@ -411,48 +414,36 @@ export default function Home() {
   sessionPromptsRef.current = sessionPrompts;
   const [draftAttachments, setDraftAttachments] = useState<StoredAttachment[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
-  const [internetSearchEnabled, setInternetSearchEnabled] = useState(false);
-  const [pageVisitEnabled, setPageVisitEnabled] = useState(false);
-  const [browserEnabled, setBrowserEnabled] = useState(false);
+  const [toolState, setToolState] = useState<ToolState>(DEFAULT_TOOL_STATE);
   const [browserViewOpen, setBrowserViewOpen] = useState(false);
   const browserToolAvailable = config.experimental?.browserTool === true;
-  useEffect(() => { if (!browserToolAvailable) { setBrowserEnabled(false); setBrowserViewOpen(false); } }, [browserToolAvailable]);
-  const [hostComputerEnabled, setHostComputerEnabled] = useState(false);
-  const hostComputerToolAvailable = config.account?.role === "superadmin" && config.hostComputerAvailable === true && config.experimental?.hostComputerTool === true;
-  useEffect(() => { if (!hostComputerToolAvailable) setHostComputerEnabled(false); }, [hostComputerToolAvailable]);
-  const [storageAccessEnabled, setStorageAccessEnabled] = useState(true);
-  const [storageReadEnabled,setStorageReadEnabled]=useState(true);
-  const [storageWriteEnabled,setStorageWriteEnabled]=useState(false);
-  const [storageWriteMaxFiles,setStorageWriteMaxFiles]=useState(5);
-  const [currentTimeEnabled, setCurrentTimeEnabled] = useState(true);
-  const [locationEnabled, setLocationEnabled] = useState(false);
-  const [multipleChoiceEnabled, setMultipleChoiceEnabled] = useState(true);
-  const [artifactEnabled, setArtifactEnabled] = useState(true);
-  const [mcpConnectionIds, setMcpConnectionIds] = useState<string[]>([]);
-  const [mcpToolNames,setMcpToolNames]=useState<Record<string,string[]>>({});
-  const pendingToolsRef = useRef<Partial<EnabledTools>>({});
+  const browserEnabled = browserToolAvailable && resolveProviderState(toolState, BROWSER_TOOL).enabled;
+  useEffect(() => { if (!browserToolAvailable) setBrowserViewOpen(false); }, [browserToolAvailable]);
+  // Built-in tools this account may use, then the account's own MCP connections. The server enforces the same rules.
+  const offeredTools = useMemo(() => {
+    const environment = { role: config.account?.role, experimental: config.experimental, hostEnvironment: config.hostComputerAvailable === true };
+    const connections = config.mcpEntitlement?.enabled ? config.mcpConnections.filter(connection => connection.enabled) : [];
+    return [...BUILTIN_TOOL_PROVIDERS.filter(manifest => toolRequirementsMet(manifest, environment)), ...connections.map((connection, index) => mcpManifest(connection, index))];
+  }, [config.account?.role, config.experimental, config.hostComputerAvailable, config.mcpEntitlement?.enabled, config.mcpConnections]);
+  const pendingToolsRef = useRef<Record<string, unknown>>({});
   const toolSaveTimerRef = useRef<number | undefined>(undefined);
-  /** Composer tool switches are account preferences: apply locally, then save the batched change. */
-  const persistedTool = (key: Exclude<keyof EnabledTools,"mcpConnectionIds"|"mcpToolNames"|"storageWriteMaxFiles">, set: (value: boolean) => void) => (value: boolean) => {
-    set(value);
-    pendingToolsRef.current = { ...pendingToolsRef.current, [key]: value };
+  /** Tool switches and options are account preferences: apply locally, then save the batched change. */
+  const changeSavedTool = (next: ToolState, id: string) => {
+    setToolState(next);
+    const { functions: _functions, ...saved } = next.providers[id] || { enabled: false };
+    pendingToolsRef.current = { ...pendingToolsRef.current, [id]: saved };
     window.clearTimeout(toolSaveTimerRef.current);
     toolSaveTimerRef.current = window.setTimeout(() => {
-      const patch = pendingToolsRef.current; pendingToolsRef.current = {};
-      void fetch("/api/preferences/tools", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }).catch(() => undefined);
+      const providers = pendingToolsRef.current; pendingToolsRef.current = {};
+      void fetch("/api/preferences/tools", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: 2, providers }) }).catch(() => undefined);
     }, 250);
   };
-  const persistedStorageWriteLimit=(value:number)=>{
-    const next=Math.max(1,Math.min(20,Math.floor(value)||1));setStorageWriteMaxFiles(next);
-    pendingToolsRef.current={...pendingToolsRef.current,storageWriteMaxFiles:next};window.clearTimeout(toolSaveTimerRef.current);
-    toolSaveTimerRef.current=window.setTimeout(()=>{const patch=pendingToolsRef.current;pendingToolsRef.current={};void fetch("/api/preferences/tools",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch)}).catch(()=>undefined);},250);
-  };
-  const persistedMcpConnections = (ids: string[]) => {
-    const next = [...new Set(ids)].filter(id => config.mcpConnections.some(connection => connection.id === id && connection.enabled));
-    setMcpConnectionIds(next);
-    pendingToolsRef.current = { ...pendingToolsRef.current, mcpConnectionIds: next };
-    window.clearTimeout(toolSaveTimerRef.current);
-    toolSaveTimerRef.current = window.setTimeout(() => { const patch = pendingToolsRef.current; pendingToolsRef.current = {}; void fetch("/api/preferences/tools", { method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(patch) }).catch(()=>undefined); },250);
+  const toolMenu: ToolMenu = {
+    state: toolState, providers: offeredTools,
+    setEnabled: (manifest, value) => changeSavedTool(setProviderEnabled(toolState, manifest.id, value), manifest.id),
+    setOption: (manifest, key, value) => changeSavedTool(setProviderOption(toolState, manifest, key, value), manifest.id),
+    // Narrowing a provider's functions applies to this chat only and is not saved.
+    setFunctions: (manifest, names) => setToolState(current => setProviderFunctions(current, manifest.id, names, manifest.defaultEnabled)),
   };
   const [renderedMessageCount, setRenderedMessageCount] = useState(60);
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
@@ -504,9 +495,7 @@ export default function Home() {
     Promise.all([fetch("/api/config").then((r) => r.json()), fetch(`/api/conversations${openedId ? `?keepTemporary=${encodeURIComponent(openedId)}` : ""}`).then((r) => r.json())])
       .then(async ([next, stored]: [PublicConfig, { conversations: ConversationSummary[] }]) => {
         setConfig(next);
-        const tools = { ...DEFAULT_ENABLED_TOOLS, ...next.preferences.enabledTools };
-        setInternetSearchEnabled(tools.internetSearch); setPageVisitEnabled(tools.pageVisit); setBrowserEnabled(tools.browser); setHostComputerEnabled(tools.hostComputer);
-        setStorageAccessEnabled(tools.storageAccess);setStorageReadEnabled(tools.storageRead);setStorageWriteEnabled(tools.storageWrite);setStorageWriteMaxFiles(tools.storageWriteMaxFiles); setCurrentTimeEnabled(tools.currentTime); setLocationEnabled(tools.location); setMultipleChoiceEnabled(tools.multipleChoice);setArtifactEnabled(tools.artifact); setMcpConnectionIds(next.mcpEntitlement.enabled?tools.mcpConnectionIds.filter(id=>next.mcpConnections.some(connection=>connection.id===id&&connection.enabled)):[]);setMcpToolNames({});
+        setToolState(normalizeToolState(next.preferences.enabledTools));
         setHistories(stored.conversations || []);
         const visible = next.models.filter((model) => model.visible !== false&&(next.planModelIds.includes(model.id)||next.planModelIds.includes(model.sourceModel)));
         const first = visible.find((model) => model.id === next.preferences.defaultModelId) || visible[0];
@@ -725,7 +714,7 @@ export default function Home() {
       const events = messages[messageIndex].toolEvents || [];
       for (let eventIndex = events.length - 1; eventIndex >= 0; eventIndex -= 1) {
         const event = events[eventIndex];
-        if ((event.name === "host_computer" || event.name.startsWith("mcp_")) && event.status === "waiting") return event;
+        if (event.status === "waiting" && pendingApprovalKind(event)) return event;
       }
     }
     return undefined;
@@ -736,7 +725,7 @@ export default function Home() {
       for (let eventIndex = events.length - 1; eventIndex >= 0; eventIndex -= 1) {
         const event = events[eventIndex];
         const args = event.arguments && typeof event.arguments === "object" ? event.arguments as Record<string, unknown> : {};
-        if (event.name === "browser" && event.status === "waiting" && String(args.action || "").toLowerCase() === "request_user") return event;
+        if (clientRendererFor(event.name) === "browser-handoff" && event.status === "waiting" && String(args.action || "").toLowerCase() === "request_user") return event;
       }
     }
     return undefined;
@@ -921,7 +910,7 @@ export default function Home() {
     autoFollowThreadRef.current = true;
     setThreadAutoFollow(true);
     temporaryIdRef.current = ""; setTemporaryMode(temporary); setPromoting(false);
-    setDraftAttachments([]); setRenderedMessageCount(60); setIsGenerating(false); setPendingWait(null); setConversation(null); setMessages([]); setMcpToolNames({}); setDraft(""); setError(""); setMobileOpen(false);
+    setDraftAttachments([]); setRenderedMessageCount(60); setIsGenerating(false); setPendingWait(null); setConversation(null); setMessages([]); setToolState(clearFunctionSelections); setDraft(""); setError(""); setMobileOpen(false);
     // Leaving a temporary chat discards it; the refresh tells the server it is no longer open.
     if (abandoned) void refreshHistories();
   }
@@ -950,7 +939,7 @@ export default function Home() {
       setThreadAutoFollow(true);
       if (selectedBranchId && next.branches.some(item => item.id === selectedBranchId)) { next.activeBranchId = selectedBranchId; await saveConversationRequest(next, false); }
       temporaryIdRef.current = next.temporary ? next.id : ""; setTemporaryMode(next.temporary === true); setPromoting(false);
-      setConversation(next); setMessages((selectedBranchId ? next.branches.find(item => item.id === selectedBranchId) : branch)?.messages || []);if(conversation?.id!==next.id)setMcpToolNames({}); selectedModelIdRef.current = next.modelId; setSelectedModelId(next.modelId);
+      setConversation(next); setMessages((selectedBranchId ? next.branches.find(item => item.id === selectedBranchId) : branch)?.messages || []);if(conversation?.id!==next.id)setToolState(clearFunctionSelections); selectedModelIdRef.current = next.modelId; setSelectedModelId(next.modelId);
       setRenderedMessageCount(60);
       setSelectedPresetId(next.reasoningPresetId || ""); setSessionPrompts(next.systemPromptOverrides || {}); setMobileOpen(false); setError("");
       pendingConversationIdRef.current = next.id; if (navigate) navigateToChat(next.id);
@@ -1118,7 +1107,7 @@ export default function Home() {
               setPendingWait(next.waitPhase ? { messageId: next.message.id, phase: next.waitPhase, progress: next.waitProgress, startedAt: next.waitPhaseStartedAt === undefined ? undefined : next.waitPhaseStartedAt + serverClockOffset } : null);
               setRepetitionAlert(next.repetition && ["running", "waiting"].includes(next.status) ? { conversationId: next.conversationId, messageId: next.message.id, finding: next.repetition } : null);
               setConversation((current) => current ? { ...current, branches: current.branches.map((item) => item.id === next.branchId ? { ...item, messages: baseMessages } : item) } : current);
-              const waitingLocation = next.message.toolEvents?.find((event) => event.name === "get_current_location" && event.status === "waiting");
+              const waitingLocation = next.message.toolEvents?.find((event) => clientRendererFor(event.name) === "location" && event.status === "waiting");
               if (waitingLocation) provideBrowserLocation(next.conversationId, waitingLocation.id);
               if (["completed", "stopped", "error"].includes(next.status)) { terminal = next; break; }
             }
@@ -1167,7 +1156,7 @@ export default function Home() {
       const response = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversationId: working.id, branchId, assistantMessageId: placeholder.id, revisionGroupId, modelId: working.modelId, aliasBaseModelId: runtimeAliasBaseModelId, reasoningPresetId: working.reasoningPresetId, systemPromptOverrides: sessionPromptsRef.current,
-          tools: options?.tools || { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserToolAvailable && browserEnabled, storageAccess:storageAccessEnabled, storageRead:storageReadEnabled, storageWrite:storageWriteEnabled, storageWriteMaxFiles, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled,artifact:artifactEnabled, mcpConnectionIds,mcpToolNames },
+          tools: options?.tools || toolState,
           clientContext: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: navigator.language, language: config.preferences.language },
           messages: requestMessages.map((message) => ({ role: message.role, content: message.content, reasoning_content: message.reasoning, toolEvents: message.toolEvents, attachments: message.attachments?.map(({ id }) => ({ id })) })) }),
       });
@@ -1227,7 +1216,7 @@ export default function Home() {
       if (!requestModel) { setError(c.noModel); return; }
       if (uploadingImages) return;
       const queued: QueuedPrompt = { id: uid("user"), content: text, attachments: draftAttachments, modelId: requestModel.id, aliasBaseModelId: requestModel.isAlias ? selectedAliasBase?.id : undefined, reasoningPresetId: requestPreset?.id,
-        tools: { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserEnabled, storageAccess:storageAccessEnabled, storageRead:storageReadEnabled, storageWrite:storageWriteEnabled, storageWriteMaxFiles, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled,artifact:artifactEnabled, mcpConnectionIds,mcpToolNames } };
+        tools: toolState };
       replaceQueue([...queuedPromptsRef.current, queued]); setDraft(""); setDraftAttachments([]); return;
     }
     if (!hasMessage || uploadingImages) return;
@@ -1237,7 +1226,7 @@ export default function Home() {
     const attachments = draftAttachments;
     const userMessage: StoredMessage = { id: uid("user"), role: "user", content: text, attachments, createdAt: now() }; setDraft(""); setDraftAttachments([]);
     const options: CompletionOptions = { modelId: requestModel.id, aliasBaseModelId: requestModel.isAlias ? selectedAliasBase?.id : undefined, reasoningPresetId: requestPreset?.id,
-      tools: { internetSearch: internetSearchEnabled, pageVisit: pageVisitEnabled, browser: browserEnabled, storageAccess:storageAccessEnabled, storageRead:storageReadEnabled, storageWrite:storageWriteEnabled, storageWriteMaxFiles, hostComputer: hostComputerToolAvailable && hostComputerEnabled, currentTime: currentTimeEnabled, location: locationEnabled, multipleChoice: multipleChoiceEnabled,artifact:artifactEnabled, mcpConnectionIds,mcpToolNames } };
+      tools: toolState };
     if (!conversation) {
       const next = createConversation(userMessage, requestModel, requestPreset); await runCompletionAndDrain(next, next.activeBranchId, [userMessage], true, undefined, options); return;
     }
@@ -1434,8 +1423,7 @@ export default function Home() {
     </div>;
   }
   return (
-    <McpToolsContext.Provider value={{connections:config.mcpEntitlement.enabled?config.mcpConnections.filter(connection=>connection.enabled):[],selectedIds:mcpConnectionIds,setSelectedIds:persistedMcpConnections,selectedTools:mcpToolNames,setSelectedTools:(id,names)=>setMcpToolNames(current=>({...current,[id]:names}))}}>
-    <StorageToolsContext.Provider value={{read:storageReadEnabled,write:storageWriteEnabled,maxFiles:storageWriteMaxFiles,setRead:persistedTool("storageRead",setStorageReadEnabled),setWrite:persistedTool("storageWrite",setStorageWriteEnabled),setMaxFiles:persistedStorageWriteLimit}}>
+    <ToolMenuContext.Provider value={toolMenu}>
     <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""} ${browserEnabled && browserViewOpen ? "browser-split-open" : ""}`}>
       <button className="mobile-menu" aria-label={locale === "ko" ? "메뉴 열기" : "Open menu"} onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
       <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-visible" : ""}`}>
@@ -1476,7 +1464,7 @@ export default function Home() {
         </div>
 
         <div className="conversation-stage">
-          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={persistedTool("internetSearch", setInternetSearchEnabled)} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={persistedTool("pageVisit", setPageVisitEnabled)} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={persistedTool("browser", setBrowserEnabled)} hostComputerToolAvailable={hostComputerToolAvailable} hostComputerEnabled={hostComputerEnabled} setHostComputerEnabled={persistedTool("hostComputer", setHostComputerEnabled)} storageAccessEnabled={storageAccessEnabled} setStorageAccessEnabled={persistedTool("storageAccess", setStorageAccessEnabled)} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={persistedTool("currentTime", setCurrentTimeEnabled)} locationEnabled={locationEnabled} setLocationEnabled={persistedTool("location", setLocationEnabled)} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={persistedTool("multipleChoice", setMultipleChoiceEnabled)} artifactEnabled={artifactEnabled} setArtifactEnabled={persistedTool("artifact",setArtifactEnabled)} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} /></div> : <>
+          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} /></div> : <>
             <div className="thread-shell">
               <div className={`thread ${activityHidden ? "activity-hidden" : ""}`} ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
                 {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
@@ -1484,7 +1472,7 @@ export default function Home() {
               </div>
               {!threadAutoFollow && <button type="button" className="scroll-resume thread-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeThreadAutoFollow}><ArrowDown size={18} /></button>}
             </div>
-            <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} internetSearchEnabled={internetSearchEnabled} setInternetSearchEnabled={persistedTool("internetSearch", setInternetSearchEnabled)} pageVisitEnabled={pageVisitEnabled} setPageVisitEnabled={persistedTool("pageVisit", setPageVisitEnabled)} browserToolAvailable={browserToolAvailable} browserEnabled={browserEnabled} setBrowserEnabled={persistedTool("browser", setBrowserEnabled)} hostComputerToolAvailable={hostComputerToolAvailable} hostComputerEnabled={hostComputerEnabled} setHostComputerEnabled={persistedTool("hostComputer", setHostComputerEnabled)} storageAccessEnabled={storageAccessEnabled} setStorageAccessEnabled={persistedTool("storageAccess", setStorageAccessEnabled)} currentTimeEnabled={currentTimeEnabled} setCurrentTimeEnabled={persistedTool("currentTime", setCurrentTimeEnabled)} locationEnabled={locationEnabled} setLocationEnabled={persistedTool("location", setLocationEnabled)} multipleChoiceEnabled={multipleChoiceEnabled} setMultipleChoiceEnabled={persistedTool("multipleChoice", setMultipleChoiceEnabled)} artifactEnabled={artifactEnabled} setArtifactEnabled={persistedTool("artifact",setArtifactEnabled)} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} />
+            <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} />
           </>}
         </div>
       </section>
@@ -1502,12 +1490,11 @@ export default function Home() {
       />}
       {renameTarget && <TextDialog ko={locale === "ko"} title={locale === "ko" ? "채팅 제목 변경" : "Rename chat"} value={renameTarget.title} saveLabel={c.saveEdit} cancelLabel={c.cancel} secondary={{ label: c.duplicateChat, icon: <Copy size={15} />, busy: duplicating, onAction: (title) => { const target = renameTarget; void duplicateHistory(target.id, title); } }} onClose={() => setRenameTarget(null)} onSave={title => { const target = renameTarget; void (async () => { try { const response = await fetch(`/api/conversations/${target.id}`, {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({title})}); if (!response.ok) throw new Error(locale === "ko" ? "제목 변경 실패" : "Rename failed"); setConversation(current => current?.id === target.id ? {...current,title} : current); await refreshHistories(); setRenameTarget(null); } catch (caught) { setError(caught instanceof Error ? caught.message : "Rename failed"); setRenameTarget(null); } })(); }} />}
       {systemPromptOpen && selectedModel && <SystemPromptDialog ko={locale === "ko"} model={selectedModel} personalPrompt={personalPrompt} initialPresetId={selectedPreset?.id} overrides={sessionPrompts} onSave={saveSystemPrompts} onClose={() => setSystemPromptOpen(false)} />}
-      {settingsOpen && <SettingsPanel initial={config} serverStates={serverStates} onAccentPreview={setAccentPreview} onClose={() => { setSettingsOpen(false); setAccentPreview(""); }} onLogout={async () => { resetWorkspaceForAuthChange(); await fetch("/api/auth/logout", { method: "POST" }); setSettingsOpen(false); setAuth(await fetch("/api/auth/status").then((response) => response.json()).catch(() => ({ setupRequired: false, authenticated: false, user: null }))); }} onSaved={(next) => { setConfig(next); setMcpConnectionIds(current=>next.mcpEntitlement.enabled?current.filter(id=>next.mcpConnections.some(connection=>connection.id===id&&connection.enabled)):[]); const visible = next.models.filter((item) => item.visible !== false); const model = visible.find((item) => item.id === selectedModelIdRef.current) || visible.find((item) => item.id === next.preferences.defaultModelId) || visible[0]; const preset = model?.reasoningPresets.find((item) => item.id === selectedPresetId) || model?.reasoningPresets.find((item) => item.id === next.preferences.defaultReasoningPresetId) || model?.reasoningPresets[0]; selectedModelIdRef.current = model?.id || ""; setSelectedModelId(model?.id || ""); setSelectedPresetId(preset?.id || ""); }} />}
+      {settingsOpen && <SettingsPanel initial={config} serverStates={serverStates} onAccentPreview={setAccentPreview} onClose={() => { setSettingsOpen(false); setAccentPreview(""); }} onLogout={async () => { resetWorkspaceForAuthChange(); await fetch("/api/auth/logout", { method: "POST" }); setSettingsOpen(false); setAuth(await fetch("/api/auth/status").then((response) => response.json()).catch(() => ({ setupRequired: false, authenticated: false, user: null }))); }} onSaved={(next) => { setConfig(next); const visible = next.models.filter((item) => item.visible !== false); const model = visible.find((item) => item.id === selectedModelIdRef.current) || visible.find((item) => item.id === next.preferences.defaultModelId) || visible[0]; const preset = model?.reasoningPresets.find((item) => item.id === selectedPresetId) || model?.reasoningPresets.find((item) => item.id === next.preferences.defaultReasoningPresetId) || model?.reasoningPresets[0]; selectedModelIdRef.current = model?.id || ""; setSelectedModelId(model?.id || ""); setSelectedPresetId(preset?.id || ""); }} />}
       {exportOpen && <ExportDialog c={c} conversation={conversation || undefined} initialIncludeReasoning={config.preferences.exportReasoning} onClose={() => setExportOpen(false)} onPreference={(value) => { const next = { ...config, preferences: { ...config.preferences, exportReasoning: value } }; setConfig(next); fetch("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) }); }} />}
       {messageDialog}
     </main>
-    </StorageToolsContext.Provider>
-    </McpToolsContext.Provider>
+    </ToolMenuContext.Provider>
   );
 }
 
@@ -1651,10 +1638,9 @@ function ContextWindowIndicator({ c, locale, model, models, usage, includeReason
 /** Inline padding plus the gaps between the composer's three cells. */
 const INLINE_COMPOSER_CHROME = 26;
 
-function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; repetition?: RepetitionFinding; onRepetitionStop: () => void; onRepetitionRetry: () => void; onRepetitionIgnore: () => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextBreakdown: ContextUsage; harnessSettings?: HarnessSettings; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; rememberReasoning: boolean; onEditSystemPrompt?: () => void; error: string; clearError: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onOpenStorage: () => void; onRemoveAttachment: (attachment: StoredAttachment) => void; internetSearchEnabled: boolean; setInternetSearchEnabled: (value: boolean) => void; pageVisitEnabled: boolean; setPageVisitEnabled: (value: boolean) => void; browserToolAvailable: boolean; browserEnabled: boolean; setBrowserEnabled: (value: boolean) => void; hostComputerToolAvailable: boolean; hostComputerEnabled: boolean; setHostComputerEnabled: (value: boolean) => void; storageAccessEnabled:boolean;setStorageAccessEnabled:(value:boolean)=>void; currentTimeEnabled: boolean; setCurrentTimeEnabled: (value: boolean) => void; locationEnabled: boolean; setLocationEnabled: (value: boolean) => void; multipleChoiceEnabled: boolean; setMultipleChoiceEnabled: (value: boolean) => void;artifactEnabled:boolean;setArtifactEnabled:(value:boolean)=>void; pendingChoice?: ToolEvent; pendingHostApproval?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean>; sendHeld: boolean; switchNotice: string }) {
-  const { c, appearance, draft, setDraft, sendMessage, keyDown, repetition, onRepetitionStop, onRepetitionRetry, onRepetitionIgnore, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextBreakdown, harnessSettings, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, rememberReasoning, onEditSystemPrompt, error, clearError, attachments, maxAttachments, uploadingImages, onFiles, onOpenStorage, onRemoveAttachment, internetSearchEnabled, setInternetSearchEnabled, pageVisitEnabled, setPageVisitEnabled, browserToolAvailable, browserEnabled, setBrowserEnabled, hostComputerToolAvailable, hostComputerEnabled, setHostComputerEnabled, storageAccessEnabled,setStorageAccessEnabled,currentTimeEnabled, setCurrentTimeEnabled, locationEnabled, setLocationEnabled, multipleChoiceEnabled, setMultipleChoiceEnabled,artifactEnabled,setArtifactEnabled, pendingChoice, pendingHostApproval, onChoiceSubmit, sendHeld, switchNotice } = props;
-  const {connections:mcpConnections,selectedIds:mcpConnectionIds,setSelectedIds:setMcpConnectionIds,selectedTools:mcpToolNames,setSelectedTools:setMcpToolNames}=useContext(McpToolsContext);
-  const storagePermissions=useContext(StorageToolsContext);
+function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; repetition?: RepetitionFinding; onRepetitionStop: () => void; onRepetitionRetry: () => void; onRepetitionIgnore: () => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextBreakdown: ContextUsage; harnessSettings?: HarnessSettings; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; rememberReasoning: boolean; onEditSystemPrompt?: () => void; error: string; clearError: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onOpenStorage: () => void; onRemoveAttachment: (attachment: StoredAttachment) => void; pendingChoice?: ToolEvent; pendingHostApproval?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean>; sendHeld: boolean; switchNotice: string }) {
+  const { c, appearance, draft, setDraft, sendMessage, keyDown, repetition, onRepetitionStop, onRepetitionRetry, onRepetitionIgnore, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextBreakdown, harnessSettings, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, rememberReasoning, onEditSystemPrompt, error, clearError, attachments, maxAttachments, uploadingImages, onFiles, onOpenStorage, onRemoveAttachment, pendingChoice, pendingHostApproval, onChoiceSubmit, sendHeld, switchNotice } = props;
+  const toolMenu = useContext(ToolMenuContext);
   const fileRef = useRef<HTMLInputElement>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -1689,8 +1675,8 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
   const locale: Locale = c === translations.ko ? "ko" : "en";
   const { mounted: addMenuMounted, closing: addMenuClosing } = usePopoverPresence(addMenuOpen);
   const { mounted: presetMounted, closing: presetClosing } = usePopoverPresence(presetOpen);
-  const activeToolCount = Number(internetSearchEnabled) + Number(pageVisitEnabled) + Number(browserToolAvailable && browserEnabled) + Number(hostComputerToolAvailable && hostComputerEnabled) + Number(storageAccessEnabled) + Number(currentTimeEnabled) + Number(locationEnabled) + Number(multipleChoiceEnabled)+Number(artifactEnabled) + mcpConnectionIds.length;
-  const[toolGroups,setToolGroups]=useState<Record<string,boolean>>({storage:false,internet:true,awareness:true,agent:true,interaction:true,mcp:true});
+  const activeToolCount = enabledProviderCount(toolMenu.state, toolMenu.providers);
+  const[toolGroups,setToolGroups]=useState<Record<string,boolean>>({internet:true,awareness:true,agent:true,interaction:true,workspace:true,mcp:true});
   const toggleToolGroup=(key:string)=>setToolGroups(current=>({...current,[key]:!current[key]}));
   useEffect(() => {
     const measureShell = () => setShellWidth(formRef.current?.clientWidth || 0);
@@ -1720,7 +1706,7 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
     {error && <div className="error-toast"><span>{error}</span><button aria-label={c.cancel} onClick={clearError}><X size={15} /></button></div>}
     {repetition && <RepetitionAlertCard key={repetition.id} c={c} finding={repetition} onStop={onRepetitionStop} onRetry={onRepetitionRetry} onIgnore={onRepetitionIgnore} />}
     {pendingChoice && <MultipleChoiceComposer key={pendingChoice.id} c={c} event={pendingChoice} onSubmit={(value) => onChoiceSubmit(pendingChoice.id, value)} />}
-    {pendingHostApproval && (pendingHostApproval.name.startsWith("mcp_")?<McpApprovalComposer key={pendingHostApproval.id} c={c} event={pendingHostApproval} onSubmit={(value)=>onChoiceSubmit(pendingHostApproval.id,value)}/>:<HostApprovalComposer key={pendingHostApproval.id} c={c} event={pendingHostApproval} onSubmit={(value) => onChoiceSubmit(pendingHostApproval.id, value)} />)}
+    {pendingHostApproval && (pendingApprovalKind(pendingHostApproval)==="mcp"?<McpApprovalComposer key={pendingHostApproval.id} c={c} event={pendingHostApproval} onSubmit={(value)=>onChoiceSubmit(pendingHostApproval.id,value)}/>:<HostApprovalComposer key={pendingHostApproval.id} c={c} event={pendingHostApproval} onSubmit={(value) => onChoiceSubmit(pendingHostApproval.id, value)} />)}
     <form ref={formRef} className={`composer ${expanded ? "expanded" : ""}`} onSubmit={sendMessage}>
       <input ref={fileRef} className="visually-hidden" type="file" accept={`image/jpeg,image/png,image/gif,image/webp,image/avif,application/pdf,${TEXT_ATTACHMENT_ACCEPT}`} multiple onChange={(event) => { onFiles(Array.from(event.target.files || [])); event.target.value = ""; }} />
       {queuedPrompts.length > 0 && <div className="queued-prompts"><p><span>{c.queuedMessages}</span><b>{queuedPrompts.length}</b></p>{queuedPrompts.map((prompt, index) => <div key={prompt.id}><b>{index + 1}</b><span><strong>{prompt.content || c.imageChat}</strong>{prompt.attachments.length > 0 && <small>{prompt.attachments.length} {c.imagesAttached}</small>}</span><button type="button" title={c.removeQueuedMessage} aria-label={c.removeQueuedMessage} onClick={() => onRemoveQueuedPrompt(prompt.id)}><X size={13} /></button></div>)}</div>}
@@ -1733,11 +1719,11 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
             <button type="button" className="add-menu-action" onClick={() => { fileRef.current?.click(); setAddMenuOpen(false); }} disabled={attachmentControlsDisabled || uploadingImages || attachments.length >= maxAttachments}><ImagePlus size={17} /><span><strong>{c.attachImages}</strong></span></button>
             <button type="button" className="add-menu-action" onClick={() => { onOpenStorage(); setAddMenuOpen(false); }} disabled={attachmentControlsDisabled || attachments.length >= maxAttachments}><HardDrive size={17}/><span><strong>{c.loadFromStorage}</strong></span></button>
             <p>{c.tools}</p>
-            <section className="composer-tool-group"><button type="button" aria-expanded={toolGroups.internet} onClick={()=>toggleToolGroup("internet")}><span>{c.internetGroup}</span><ChevronDown size={14}/></button>{toolGroups.internet&&<div><div className="tool-toggle-row"><Globe2 size={17} /><span><strong>{c.internetSearch}</strong><small>{c.internetSearchDesc}</small></span><button type="button" role="switch" aria-label={c.internetSearch} aria-checked={internetSearchEnabled} className={`toggle ${internetSearchEnabled ? "on" : ""}`} onClick={() => setInternetSearchEnabled(!internetSearchEnabled)}><i /></button></div><div className="tool-toggle-row"><Link2 size={17} /><span><strong>{c.pageVisit}</strong><small>{c.pageVisitDesc}</small></span><button type="button" role="switch" aria-label={c.pageVisit} aria-checked={pageVisitEnabled} className={`toggle ${pageVisitEnabled ? "on" : ""}`} onClick={() => setPageVisitEnabled(!pageVisitEnabled)}><i /></button></div></div>}</section>
-            <section className="composer-tool-group"><button type="button" aria-expanded={toolGroups.awareness} onClick={()=>toggleToolGroup("awareness")}><span>{c.awarenessGroup}</span><ChevronDown size={14}/></button>{toolGroups.awareness&&<div><div className="tool-toggle-row"><Clock3 size={17} /><span><strong>{c.currentTime}</strong><small>{c.currentTimeDesc}</small></span><button type="button" role="switch" aria-label={c.currentTime} aria-checked={currentTimeEnabled} className={`toggle ${currentTimeEnabled ? "on" : ""}`} onClick={() => setCurrentTimeEnabled(!currentTimeEnabled)}><i /></button></div><div className="tool-toggle-row"><MapPin size={17} /><span><strong>{c.locationTool}</strong><small>{c.locationToolDesc}</small></span><button type="button" role="switch" aria-label={c.locationTool} aria-checked={locationEnabled} className={`toggle ${locationEnabled ? "on" : ""}`} onClick={() => setLocationEnabled(!locationEnabled)}><i /></button></div></div>}</section>
-            <section className="composer-tool-group"><button type="button" aria-expanded={toolGroups.agent} onClick={()=>toggleToolGroup("agent")}><span>{c.agentGroup}</span><ChevronDown size={14}/></button>{toolGroups.agent&&<div><section className={`storage-composer-entry ${toolGroups.storage?"open":""}`}><div className="tool-toggle-row"><HardDrive size={17}/><span><strong>{c.storageAccess}</strong><small>{c.storageAccessDesc}</small></span><button type="button" className="storage-session-fold" aria-label={c.storageAccess} aria-expanded={toolGroups.storage} onClick={()=>toggleToolGroup("storage")}><ChevronDown size={14}/></button><button type="button" role="switch" aria-label={c.storageAccess} aria-checked={storageAccessEnabled} className={`toggle ${storageAccessEnabled?"on":""}`} onClick={()=>setStorageAccessEnabled(!storageAccessEnabled)}><i/></button></div>{toolGroups.storage&&<div className="storage-session-tools"><div className="storage-session-tool"><span><strong>{c.storageRead}</strong><small>{c.storageReadDesc}</small></span><button type="button" role="switch" aria-label={c.storageRead} aria-checked={storagePermissions.read} className={`toggle ${storagePermissions.read?"on":""}`} onClick={()=>storagePermissions.setRead(!storagePermissions.read)}><i/></button></div><div className="storage-session-tool"><span><strong>{c.storageWrite}</strong><small>{c.storageWriteDesc}</small></span><label className="storage-write-limit"><input type="number" min={1} max={20} value={storagePermissions.maxFiles} aria-label={c.storageWriteLimit} onChange={event=>storagePermissions.setMaxFiles(Number(event.target.value))}/><small>{c.storageWriteLimit}</small></label><button type="button" role="switch" aria-label={c.storageWrite} aria-checked={storagePermissions.write} className={`toggle ${storagePermissions.write?"on":""}`} onClick={()=>storagePermissions.setWrite(!storagePermissions.write)}><i/></button></div></div>}</section>{browserToolAvailable && <div className="tool-toggle-row"><Monitor size={17} /><span><strong>{c.browserTool}</strong><small>{c.browserToolDesc}</small></span><button type="button" role="switch" aria-label={c.browserTool} aria-checked={browserEnabled} className={`toggle ${browserEnabled ? "on" : ""}`} onClick={() => setBrowserEnabled(!browserEnabled)}><i /></button></div>}{hostComputerToolAvailable && <div className="tool-toggle-row"><HardDrive size={17} /><span><strong>{c.hostComputerTool}</strong><small>{c.hostComputerToolDesc}</small></span><button type="button" role="switch" aria-label={c.hostComputerTool} aria-checked={hostComputerEnabled} className={`toggle ${hostComputerEnabled ? "on" : ""}`} onClick={() => setHostComputerEnabled(!hostComputerEnabled)}><i /></button></div>}</div>}</section>
-            <section className="composer-tool-group"><button type="button" aria-expanded={toolGroups.interaction} onClick={()=>toggleToolGroup("interaction")}><span>{c.interactionGroup}</span><ChevronDown size={14}/></button>{toolGroups.interaction&&<div><div className="tool-toggle-row"><ListChecks size={17} /><span><strong>{c.multipleChoice}</strong><small>{c.multipleChoiceDesc}</small></span><button type="button" role="switch" aria-label={c.multipleChoice} aria-checked={multipleChoiceEnabled} className={`toggle ${multipleChoiceEnabled ? "on" : ""}`} onClick={() => setMultipleChoiceEnabled(!multipleChoiceEnabled)}><i /></button></div><div className="tool-toggle-row"><Code2 size={17}/><span><strong>{c.artifact}</strong><small>{c.artifactDesc}</small></span><button type="button" role="switch" aria-label={c.artifact} aria-checked={artifactEnabled} className={`toggle ${artifactEnabled?"on":""}`} onClick={()=>setArtifactEnabled(!artifactEnabled)}><i/></button></div></div>}</section>
-            {mcpConnections.length>0&&<section className="composer-tool-group mcp-tool-group"><button type="button" aria-expanded={toolGroups.mcp} onClick={()=>toggleToolGroup("mcp")}><span>MCP</span><ChevronDown size={14}/></button>{toolGroups.mcp&&<div>{mcpConnections.map(connection=><McpComposerConnection key={connection.id} connection={connection} enabled={mcpConnectionIds.includes(connection.id)} selectedNames={mcpToolNames[connection.id]} onEnabled={value=>setMcpConnectionIds(value?[...mcpConnectionIds,connection.id]:mcpConnectionIds.filter(id=>id!==connection.id))} onSelected={names=>setMcpToolNames(connection.id,names)} c={c}/>)}</div>}</section>}
+            {TOOL_SECTION_ORDER.map(section => {
+              const providers = toolMenu.providers.filter(manifest => manifest.section === section).sort((left, right) => left.order - right.order);
+              if (!providers.length) return null;
+              return <section key={section} className={`composer-tool-group ${section === "mcp" ? "mcp-tool-group" : ""}`}><button type="button" aria-expanded={toolGroups[section]} onClick={() => toggleToolGroup(section)}><span>{TOOL_SECTION_LABELS[section][locale]}</span><ChevronDown size={14} /></button>{toolGroups[section] && <div>{providers.map(manifest => <ToolProviderEntry key={manifest.id} manifest={manifest} c={c} locale={locale} />)}</div>}</section>;
+            })}
           </div>}
         </div>
         {attachments.length > 0 && <small className="attachment-count">{attachments.length} {c.imagesAttached}</small>}
@@ -1801,11 +1787,52 @@ function CodeSnippet({ c, children, fadeDurationMs = 0 }: { c: CopySet; children
   </div>;
 }
 
-function McpComposerConnection({connection,enabled,selectedNames,onEnabled,onSelected,c}:{connection:McpConnection;enabled:boolean;selectedNames?:string[];onEnabled:(value:boolean)=>void;onSelected:(names:string[])=>void;c:CopySet}){
-  const[open,setOpen]=useState(false),[tools,setTools]=useState<McpToolInfo[]>([]),[loading,setLoading]=useState(false),[error,setError]=useState("");
-  useEffect(()=>{if(!open||tools.length||loading)return;setLoading(true);void fetch(`/api/mcp-connections/${connection.id}/tools`,{cache:"no-store"}).then(async response=>{const body=await response.json();if(!response.ok)throw new Error(body.error);const next:McpToolInfo[]=body.tools;setTools(next);if(selectedNames===undefined)onSelected(next.filter(tool=>tool.policy!=="blocked").map(tool=>tool.name));}).catch(caught=>setError(caught instanceof Error?caught.message:String(caught))).finally(()=>setLoading(false));},[open,tools.length,loading,connection.id,onSelected,selectedNames]);
-  const selected=selectedNames||tools.filter(tool=>tool.policy!=="blocked").map(tool=>tool.name);
-  return <div className={`mcp-composer-entry ${open?"open":""}`}><div className="tool-toggle-row"><Cable size={17}/><span><strong>{connection.name}</strong><small>{connection.description||connection.url}</small></span><button className="mcp-session-fold" type="button" aria-label={c===translations.ko?`${connection.name} 도구 펼치기`:`Expand ${connection.name} tools`} aria-expanded={open} onClick={()=>setOpen(value=>!value)}><ChevronDown size={15}/></button><button type="button" role="switch" aria-label={connection.name} aria-checked={enabled} className={`toggle ${enabled?"on":""}`} onClick={()=>onEnabled(!enabled)}><i/></button></div>{open&&<div className="mcp-session-tools">{loading&&<p><LoaderCircle className="spin" size={14}/>{c===translations.ko?"도구를 불러오는 중":"Loading tools"}</p>}{error&&<p className="error">{error}</p>}{tools.map(tool=>{const active=enabled&&tool.policy!=="blocked"&&selected.includes(tool.name);return <div className="mcp-session-tool" key={tool.name}><span><strong>{tool.name}</strong><small>{tool.policy==="blocked"?(c===translations.ko?"설정에서 차단됨":"Blocked in settings"):tool.description||"MCP"}</small></span><button type="button" role="switch" disabled={!enabled||tool.policy==="blocked"} aria-label={tool.name} aria-checked={active} className={`toggle ${active?"on":""}`} onClick={()=>onSelected(active?selected.filter(name=>name!==tool.name):[...selected,tool.name])}><i/></button></div>})}</div>}</div>;
+const MENU_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, monitor: Monitor, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, terminal: HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench };
+
+/**
+ * One tool provider in the composer menu. Built-in tools and installed MCP connections share this row: a switch for the
+ * provider and a fold with its options and functions. MCP functions are listed from the server when first unfolded.
+ */
+function ToolProviderEntry({ manifest, c, locale }: { manifest: ToolProviderManifest; c: CopySet; locale: Locale }) {
+  const { state, setEnabled, setOption, setFunctions } = useContext(ToolMenuContext);
+  const { enabled, options, functions: selectedNames } = resolveProviderState(state, manifest);
+  const connectionId = manifest.origin === "user" && manifest.id.startsWith("mcp:") ? manifest.id.slice(4) : undefined;
+  const [open, setOpen] = useState(false), [remote, setRemote] = useState<McpToolInfo[]>(), [loading, setLoading] = useState(false), [error, setError] = useState("");
+  useEffect(() => {
+    if (!open || !connectionId || remote || loading) return;
+    setLoading(true);
+    void fetch(`/api/mcp-connections/${connectionId}/tools`, { cache: "no-store" }).then(async response => { const body = await response.json(); if (!response.ok) throw new Error(body.error); setRemote(body.tools); })
+      .catch(caught => setError(caught instanceof Error ? caught.message : String(caught))).finally(() => setLoading(false));
+  }, [open, connectionId, remote, loading]);
+  const listed = connectionId
+    ? (remote || []).map(tool => ({ name: tool.name, title: tool.name, description: tool.policy === "blocked" ? (locale === "ko" ? "설정에서 차단됨" : "Blocked in settings") : tool.description || "MCP", blocked: tool.policy === "blocked" }))
+    : manifest.functions.map(fn => ({ name: fn.name, title: fn.label[locale], description: fn.description[locale], blocked: false }));
+  const selectable = listed.filter(item => !item.blocked).map(item => item.name);
+  const selected = selectedNames || selectable;
+  // A provider with one function is switched by its row alone; per-function switches appear once there are several.
+  const functionSwitches = Boolean(connectionId) || manifest.functions.length > 1;
+  const Icon = MENU_TOOL_ICONS[manifest.icon] || Wrench;
+  const label = manifest.label[locale];
+  const booleanOptions = (manifest.options || []).filter(field => field.kind === "boolean");
+  return <div className={`mcp-composer-entry tool-provider-entry ${open ? "open" : ""}`}>
+    <div className="tool-toggle-row"><Icon size={17} /><span><strong>{label}</strong><small>{manifest.description[locale]}</small></span><button className="mcp-session-fold" type="button" aria-label={locale === "ko" ? `${label} 세부 항목 펼치기` : `Expand ${label} details`} aria-expanded={open} onClick={() => setOpen(value => !value)}><ChevronDown size={15} /></button><button type="button" role="switch" aria-label={label} aria-checked={enabled} className={`toggle ${enabled ? "on" : ""}`} onClick={() => setEnabled(manifest, !enabled)}><i /></button></div>
+    {open && <div className="mcp-session-tools">
+      {booleanOptions.map(field => {
+        const value = options[field.key] === true;
+        const paired = manifest.options?.find(other => other.kind === "integer" && other.pairedWith === field.key);
+        return <div className="tool-option-row" key={field.key}><span><strong>{field.label[locale]}</strong>{field.description && <small>{field.description[locale]}</small>}</span>
+          {paired?.kind === "integer" ? <label className="tool-option-limit"><input type="number" min={paired.min} max={paired.max} value={Number(options[paired.key])} aria-label={paired.label[locale]} onChange={event => setOption(manifest, paired.key, Number(event.target.value))} /><small>{paired.label[locale]}</small></label> : <span />}
+          <button type="button" role="switch" aria-label={field.label[locale]} aria-checked={value} className={`toggle ${value ? "on" : ""}`} onClick={() => setOption(manifest, field.key, !value)}><i /></button></div>;
+      })}
+      {loading && <p><LoaderCircle className="spin" size={14} />{locale === "ko" ? "도구를 불러오는 중" : "Loading tools"}</p>}
+      {error && <p className="error">{error}</p>}
+      {listed.map(item => {
+        const active = enabled && !item.blocked && selected.includes(item.name);
+        return <div className="mcp-session-tool" key={item.name}><span><strong>{functionSwitches ? item.title : item.name}</strong><small>{item.description}</small></span>
+          {functionSwitches && <button type="button" role="switch" disabled={!enabled || item.blocked} aria-label={item.title} aria-checked={active} className={`toggle ${active ? "on" : ""}`} onClick={() => setFunctions(manifest, active ? selected.filter(name => name !== item.name) : [...selected, item.name])}><i /></button>}</div>;
+      })}
+    </div>}
+  </div>;
 }
 
 /**
@@ -1984,8 +2011,10 @@ function HostApprovalComposer({ c, event, onSubmit }: { c: CopySet; event: ToolE
   </section>;
 }
 
+const EVENT_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Search, link: Link2, monitor: Monitor, clock: Clock3, "map-pin": LocateFixed, "hard-drive": HardDrive, terminal: HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench };
+
 function ToolEventIcon({ name, size = 15 }: { name: string; size?: number }) {
-  const Icon = name === "internet_search" ? Search : name === "visit_page" ? Link2 : name === "browser" ? Monitor : name === "host_computer" ? HardDrive : name === "get_current_time" ? Clock3 : name === "get_current_location" ? LocateFixed : name === "ask_multiple_choice" ? ListChecks:name==="create_artifact"?Code2 : Wrench;
+  const Icon = EVENT_TOOL_ICONS[toolIconFor(name)] || Wrench;
   return <Icon size={size} />;
 }
 
@@ -2003,7 +2032,7 @@ function ToolActivity({ c, locale, event }: { c: CopySet; locale: Locale; event:
     </summary>
     <div className="tool-activity-body">
       <details open><summary>{c.toolCall}</summary><StructuredJson value={event.arguments} /></details>
-      {event.status === "waiting" && event.name === "get_current_location" && <p className="location-wait"><LoaderCircle className="spin" size={14} />{c.locationPermission}</p>}
+      {event.status === "waiting" && clientRendererFor(event.name) === "location" && <p className="location-wait"><LoaderCircle className="spin" size={14} />{c.locationPermission}</p>}
       {attachment && <AttachmentGrid attachments={[attachment]} />}
       {event.result !== undefined && <details open><summary>{c.toolResult}</summary><StructuredJson value={event.result} /></details>}
     </div>
@@ -2116,7 +2145,7 @@ function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, r
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [imagePreview,setImagePreview]=useState<{src:string;alt:string}>();
   const displayedReasoning = formatReasoningForDisplay(message.reasoning || "", message.toolEvents || [], locale);
-  const waitingForChoice = (message.toolEvents || []).some((event) => (["ask_multiple_choice", "host_computer"].includes(event.name)||event.name.startsWith("mcp_")) && event.status === "waiting");
+  const waitingForChoice = (message.toolEvents || []).some((event) => event.status === "waiting" && (clientRendererFor(event.name) === "multiple-choice" || Boolean(pendingApprovalKind(event))));
   const longPress = useLongPress(() => setMobileActionsOpen(true), pending || editing);
   const copyMessage = async () => { await copyTextToClipboard(message.content); setMobileActionsOpen(false); };
   const editMessage = () => { setMobileActionsOpen(false); setEditing(true); };
@@ -2141,10 +2170,10 @@ function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, r
       if (step.kind === "compaction") return <CompactionStep key={index} c={c} locale={locale} step={step} live={pending && Boolean(step.live) && step.seconds === undefined} />;
       if (step.kind === "tools") {
         const events = stepToolEvents(step.ids, message.toolEvents);
-        const tools = events.filter((event) => !["ask_multiple_choice","create_artifact"].includes(event.name));
-        const answered = events.filter((event) => event.name === "ask_multiple_choice" && event.status === "completed");
-        const artifacts=events.filter(event=>event.name==="create_artifact"&&event.status==="completed");
-        const creatingArtifacts=pending?events.filter(event=>event.name==="create_artifact"&&["calling","waiting"].includes(event.status)):[];
+        const tools = events.filter((event) => !transcriptCardFor(event.name));
+        const answered = events.filter((event) => transcriptCardFor(event.name) === "multiple-choice" && event.status === "completed");
+        const artifacts=events.filter(event=>transcriptCardFor(event.name)==="artifact"&&event.status==="completed");
+        const creatingArtifacts=pending?events.filter(event=>transcriptCardFor(event.name)==="artifact"&&["calling","waiting"].includes(event.status)):[];
         return <div key={index} className="transcript-tools">{tools.length ? <ToolActivityGroup c={c} locale={locale} events={tools} /> : null}{answered.map((event) => <MultipleChoiceResponse key={event.id} event={event} />)}{artifacts.map(event=><ArtifactCard key={event.id} event={event} locale={locale} onSave={artifact=>onEditArtifact(event.id,artifact)}/>)}{creatingArtifacts.map(event=><div key={event.id} className="artifact-card artifact-card-pending" role="status" aria-live="polite"><LoaderCircle className="spin" size={20}/><div className="artifact-card-label"><strong>{chatWaitLabel("creating-artifact", locale)}</strong><small>{typeof (event.arguments as {title?:unknown}|undefined)?.title==="string"?String((event.arguments as {title:string}).title):"…"}</small></div></div>)}</div>;
       }
       const live = index === liveContentIndex && pending;

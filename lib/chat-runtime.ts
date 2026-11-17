@@ -9,13 +9,12 @@ import { registerChatDisposal } from "./chat-disposal";
 import { presetEffortValue, reasoningEffort } from "./model-edits";
 import { presetVisibleTo } from "./reasoning-capabilities";
 import { restoreToolHistory, settlePendingTools } from "./conversation-messages";
-import { describeMcpApproval } from "./mcp-approval";
 import { readSsePayload } from "./stream-protocol";
 import { canUseModel, readConfig } from "./config";
 import { aliasBaseModel, aliasWithBaseModel } from "./alias-base-model";
 import { readConversation, writeConversation, renameConversation } from "./conversations";
 import { detectTextRepetition, detectToolCallRepetition, normalizeRepetitionSettings, toolArgumentText, type RepetitionFinding, type RepetitionSettings } from "./repetition.ts";
-import { readUpload, readUploadModelContent, saveArtifactFile, saveGeneratedImage } from "./uploads";
+import { readUpload, readUploadModelContent, saveGeneratedImage } from "./uploads";
 import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, nnuiEventsEndpoint } from "./connection-drivers";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
 import { readPersonalSampling, resolveSampling, samplingRequestFields, type SamplingParams } from "./sampling-params";
@@ -23,16 +22,15 @@ import { createResidencyAdapter } from "./residency-adapter";
 import { nnuiEventProgress, startNnuiEventObserver } from "./nnui-driver";
 import { modelResidency } from "./residency-runtime";
 import { progressFetch, SERVER_RESPONSE_TIMEOUT_MS, withSlowProgress } from "./chat-progress";
-import { currentTime, executeWebTool, reverseGeocode, toolDefinitions, type EnabledWebTools } from "./web-tools";
-import { assertOwnedBrowserSession, executeBrowserTool } from "./browser-tool";
-import { deterministicHostAssessment, executeHostComputerTool, hostActionRequiresApproval, hostComputerToolDefinition, isShellHostAction, type HostRiskAssessment } from "./host-computer-tool";
-import { canUseHostComputer } from "./host-environment";
-import { executeStorageAccessTool, storageAccessToolDefinition } from "./storage-tool";
-import type { ArtifactKind, ChatWaitPhase, Conversation, HarnessSettings, MessageStep, ModelConfig, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
+import { isHostComputerAvailable } from "./host-environment";
+import { resolveTools, toolSources } from "./tools";
+import { streamingPhaseFor } from "./tools/catalog";
+import { requestToolState, type ToolState } from "./tools/state";
+import type { ToolExecution, ToolRequestContext } from "./tools/types";
+import type { ChatWaitPhase, Conversation, MessageStep, ModelConfig, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
 import type { ModelContentPart } from "./document-processing";
 import { promises as fs } from "node:fs";
 import { acquirePlanAdmission, assertPlanAccess, clearLiveTokenUsage, recordTokenUsage, releasePlanAdmission, remainingPlanOutputTokens, setLiveTokenUsage } from "./plans";
-import { executeMcpTool, mcpToolDefinitions, type McpToolBinding } from "./mcp";
 import { generateCompatibleImage } from "./image-generation";
 import { createThinkingSplitter, effectiveThinkingTags, normalizeThinkingTags, type ThinkingTag } from "./thinking-tags";
 import { canPersonalizeSystemPrompt, readModelSystemPrompts, readSystemPromptOverrides, resolveSystemPrompt } from "./system-prompt";
@@ -71,7 +69,8 @@ export type StartChatJobInput = {
   /** This chat's own system prompts by model id, then reasoning preset id. */
   systemPromptOverrides?: Record<string, Record<string, string>>;
   sendReasoning?: boolean;
-  tools?: EnabledWebTools;
+  /** Tool switches for this request: the provider format, or the legacy switch object from older clients. */
+  tools?: ToolState | Record<string, unknown>;
   messages: InputMessage[];
   clientContext?: { timeZone?: string; locale?: string; language?: "en" | "ko" };
 };
@@ -407,7 +406,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     }
     if (payload.type === "tool_call.name") {
       outputStarted = true; stopStatusPoll();
-      setWaitPhase(job, payload.name === "create_artifact" ? "creating-artifact" : undefined); return;
+      setWaitPhase(job, streamingPhaseFor(String(payload.name || ""))); return;
     }
     if (!prefillSeen && !outputStarted) setWaitPhase(job, "preparing-response");
     usage = { ...usage, ...usageFrom(payload) };
@@ -430,7 +429,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
         function: { name: `${previous.function.name}${typeof fn?.name === "string" ? fn.name : ""}`, arguments: `${previous.function.arguments}${typeof fn?.arguments === "string" ? fn.arguments : ""}` },
       });
       // One phase per delta: clearing and re-setting it would broadcast twice for every argument token.
-      setWaitPhase(job, calls.get(index)?.function.name === "create_artifact" ? "creating-artifact" : undefined);
+      setWaitPhase(job, streamingPhaseFor(calls.get(index)?.function.name || ""));
     }
     if (rawContent || rawReasoning || Array.isArray(delta.tool_calls)) inspectRepetition(job, [...calls.values()]);
     const outputEstimate = estimateTokens(content) + estimateTokens(reasoning) + estimateTokens([...calls.values()]);
@@ -508,119 +507,6 @@ function waitForBrowser(job: ChatJob, call: ToolCall) {
   });
 }
 
-function parseHostAssessment(text: string): HostRiskAssessment {
-  const candidate = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const parsed = JSON.parse(candidate) as Record<string, unknown>;
-  const riskLevel = Math.floor(Number(parsed.riskLevel)); const explanation = String(parsed.explanation || "").trim();
-  if (![1, 2, 3, 4, 5].includes(riskLevel) || !explanation) throw new Error("The command assessor returned an invalid result.");
-  return { riskLevel: riskLevel as HostRiskAssessment["riskLevel"], explanation };
-}
-
-type HostExecutionPolicy = {
-  enabled: boolean;
-  settings: HarnessSettings;
-  locale: string;
-  assessShell: (args: Record<string, unknown>) => Promise<HostRiskAssessment>;
-};
-
-async function authorizeHostAction(job: ChatJob, call: ToolCall, args: Record<string, unknown>, policy: HostExecutionPolicy) {
-  if (!policy.enabled || job.userRole !== "superadmin") throw new Error("The host computer tool is restricted to Superadmin.");
-  const assessment = isShellHostAction(args) ? await policy.assessShell(args) : deterministicHostAssessment(args, policy.locale);
-  setWaitPhase(job, undefined);
-  updateToolEvent(job, call.id, { arguments: { ...args, authorization: assessment } });
-  if (!hostActionRequiresApproval(policy.settings, args, assessment.riskLevel)) return { approved: true, assessment };
-  const response = await waitForBrowser(job, call);
-  const value = response && typeof response === "object" ? response as Record<string, unknown> : {};
-  const decision = String(value.decision || "reject");
-  if (decision === "approve") return { approved: true, assessment };
-  return { approved: false, assessment, result: { executed: false, rejected: true, decision: decision === "redirect" ? "redirect" : "reject", ...(decision === "redirect" && String(value.instruction || "").trim() ? { instruction: String(value.instruction).trim() } : {}) } };
-}
-
-function validateQuestions(value: unknown, maximum: number) {
-  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const questions = Array.isArray(record.questions) ? record.questions.slice(0, maximum) : [];
-  if (!questions.length) throw new Error("No multiple-choice questions were provided.");
-  return { questions: questions.map((item, index) => {
-    const question = item && typeof item === "object" ? item as Record<string, unknown> : {};
-    const options = Array.isArray(question.options) ? question.options.map(String).filter(Boolean).slice(0, 4) : [];
-    if (options.length < 2) throw new Error("Each multiple-choice question needs 2 to 4 options.");
-    const type = ["single_select", "multi_select", "rank_priorities"].includes(String(question.type)) ? String(question.type) : "single_select";
-    return { id: `question-${index + 1}`, question: String(question.question || `Question ${index + 1}`), type, options };
-  }) };
-}
-
-type ToolExecution = { result: unknown; content?: ModelContentPart[] };
-
-const approvedMcpSessions=new Map<string,number>();
-export function clearMcpSessionApprovals(userId:string,conversationId:string){const prefix=`${userId}:${conversationId}:`;for(const key of approvedMcpSessions.keys())if(key.startsWith(prefix))approvedMcpSessions.delete(key);}
-function pruneMcpSessionApprovals(){const cutoff=Date.now()-12*60*60*1000;for(const[key,stamp]of approvedMcpSessions)if(stamp<cutoff)approvedMcpSessions.delete(key);}
-
-function storageWriteCount(job:ChatJob){
-  const seen=new Set<string>();let count=0;
-  const messages=[...job.conversation.branches.flatMap(branch=>branch.messages),job.message];
-  for(const message of messages)for(const event of message.toolEvents||[]){
-    if(seen.has(event.id)||event.name!=="storage_access"||event.status!=="completed")continue;seen.add(event.id);
-    const args=event.arguments&&typeof event.arguments==="object"?event.arguments as Record<string,unknown>:{};
-    if(["write","save_url"].includes(String(args.action||"").toLowerCase()))count++;
-  }
-  return count;
-}
-
-async function executeTool(job: ChatJob, call: ToolCall, enabled: EnabledWebTools, settings: ToolSettings, hostPolicy: HostExecutionPolicy, model: ModelConfig, mcpBindings: Map<string, McpToolBinding>, artifactAutoSave:boolean): Promise<ToolExecution> {
-  const args = parseArguments(call.function.arguments);
-  const mcpBinding = mcpBindings.get(call.function.name);
-  if (mcpBinding) {
-    const approvalKey=`${job.userId}:${job.input.conversationId}:${mcpBinding.connectionId}:${mcpBinding.toolName}`;
-    pruneMcpSessionApprovals();
-    if(mcpBinding.policy==="always_ask"||(mcpBinding.policy==="session_ask"&&!approvedMcpSessions.has(approvalKey))){
-      const locale=job.input.clientContext?.language==="ko"||job.input.clientContext?.locale?.toLowerCase().startsWith("ko")?"ko":"en";
-      updateToolEvent(job,call.id,{arguments:{...args,_mcpApproval:{connectionName:mcpBinding.connectionName,toolName:mcpBinding.toolName,policy:mcpBinding.policy,explanation:describeMcpApproval(mcpBinding.toolName,mcpBinding.tool.description,args,locale)}}});
-      const response=await waitForBrowser(job,call);const decision=response&&typeof response==="object"?String((response as Record<string,unknown>).decision||"reject"):"reject";
-      if(decision!=="approve")return {result:{executed:false,rejected:true,connection:mcpBinding.connectionName,tool:mcpBinding.toolName}};
-      if(mcpBinding.policy==="session_ask")approvedMcpSessions.set(approvalKey,Date.now());
-    }
-    return executeMcpTool(job.userId, mcpBinding, args, job.controller.signal);
-  }
-  if (call.function.name === "get_current_time" && enabled.currentTime) return { result: currentTime(job.input.clientContext?.timeZone, job.input.clientContext?.locale || "en-US") };
-  if (call.function.name === "get_current_location" && enabled.location) {
-    const browserResult = await waitForBrowser(job, call);
-    const value = browserResult && typeof browserResult === "object" ? browserResult as Record<string, unknown> : {};
-    if (value.error) return { result: { error: String(value.error) } };
-    return { result: await reverseGeocode(Number(value.latitude), Number(value.longitude), Number(value.accuracy), job.controller.signal) };
-  }
-  if (call.function.name === "ask_multiple_choice" && enabled.multipleChoice) {
-    const normalized = validateQuestions(args, settings.maxMultipleChoiceQuestions); updateToolEvent(job, call.id, { arguments: normalized });
-    return { result: await waitForBrowser(job, call) };
-  }
-  if (call.function.name === "browser" && enabled.browser) {
-    const ownerKey = `${job.userId}:${job.input.conversationId}`;
-    if (String(args.action || "").toLowerCase() === "request_user") {
-      const sessionId = String(args.session_id || "");
-      assertOwnedBrowserSession(ownerKey, sessionId);
-      const response = await waitForBrowser(job, call);
-      return { result: { session_id: sessionId, ...(response && typeof response === "object" ? response as Record<string, unknown> : { completed: true }) } };
-    }
-    return executeBrowserTool(ownerKey, call.function.arguments, settings, job.userId, job.controller.signal);
-  }
-  if (call.function.name === "host_computer") {
-    const authorization = await authorizeHostAction(job, call, args, hostPolicy);
-    if (!authorization.approved) return { result: authorization.result };
-    return executeHostComputerTool(`${job.userId}:${job.input.conversationId}`, args, job.userId, settings, model, job.controller.signal);
-  }
-  if (call.function.name === "storage_access" && enabled.storageAccess) return executeStorageAccessTool(args,job.userId,settings,{read:enabled.storageRead===true,write:enabled.storageWrite===true,maxWrites:enabled.storageWriteMaxFiles||5,writesUsed:storageWriteCount(job)},model,job.controller.signal);
-  const execution=await executeWebTool(call.function.name, call.function.arguments, enabled, settings, job.controller.signal);
-  if(call.function.name!=="create_artifact"||!enabled.artifact)return execution;
-  const result=execution.result&&typeof execution.result==="object"?execution.result as Record<string,unknown>:{};
-  const artifact=result.artifact&&typeof result.artifact==="object"?result.artifact as Record<string,unknown>:undefined;
-  if(!artifactAutoSave||!artifact)return{...execution,result:{...result,storage:{saved:false,autoSave:false}}};
-  try{
-    const stored=await saveArtifactFile(String(artifact.title||"Artifact"),String(artifact.kind||"") as ArtifactKind,String(artifact.content??""),job.userId,job.input.conversationId);
-    return{...execution,result:{...result,storage:{saved:true,autoSave:true,id:stored.attachment.id,url:stored.attachment.url,fileName:stored.fileName,requestedFileName:stored.requestedName,nameChanged:stored.nameChanged,action:stored.action,message:stored.action==="created"&&stored.nameChanged?`Artifact saved to storage as ${stored.fileName}. The requested name was already in use by another conversation.`:`Artifact ${stored.action==="updated"?"updated in":"saved to"} storage as ${stored.fileName}.`}}};
-  }catch(error){
-    return{...execution,result:{...result,storage:{saved:false,autoSave:true,error:error instanceof Error?error.message:"Artifact storage copy failed."}}};
-  }
-}
-
 async function run(job: ChatJob) {
   const requestStartedAt = performance.now(); let reasoningSeconds = 0;
   let releaseModel: (() => void) | undefined;
@@ -684,40 +570,19 @@ async function run(job: ChatJob) {
       await persist(job); broadcast(job, true); finishSubscribers(job); return;
     }
     let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt, config.toolSettings, model);
-    const enabled: EnabledWebTools = {
-      internetSearch: job.input.tools?.internetSearch === true, pageVisit: job.input.tools?.pageVisit === true,
-      browser: job.input.tools?.browser === true && config.experimental?.browserTool === true,
-      storageAccess: job.input.tools?.storageAccess === true,
-      storageRead:job.input.tools?.storageRead===true,
-      storageWrite:job.input.tools?.storageWrite===true,
-      storageWriteMaxFiles:Math.max(1,Math.min(20,Math.floor(Number(job.input.tools?.storageWriteMaxFiles)||5))),
-      currentTime: job.input.tools?.currentTime === true, location: job.input.tools?.location === true, multipleChoice: job.input.tools?.multipleChoice === true,
-      artifact: job.input.tools?.artifact === true,
-      hostComputer: job.input.tools?.hostComputer === true && canUseHostComputer(job.userRole, config.experimental?.hostComputerTool === true),
-      mcpConnectionIds: Array.isArray(job.input.tools?.mcpConnectionIds) ? job.input.tools.mcpConnectionIds : [],
-      mcpToolNames: job.input.tools?.mcpToolNames&&typeof job.input.tools.mcpToolNames==="object"?job.input.tools.mcpToolNames:{},
-    };
-    const tools = toolDefinitions(enabled, config.toolSettings);
-    const mcpTools = await mcpToolDefinitions(job.userId, enabled.mcpConnectionIds || [], enabled.mcpToolNames||{}, job.controller.signal);
-    tools.push(...mcpTools.definitions);
-    if (enabled.storageAccess&&(enabled.storageRead||enabled.storageWrite)) tools.push(storageAccessToolDefinition({read:enabled.storageRead===true,write:enabled.storageWrite===true,maxWrites:enabled.storageWriteMaxFiles||5,writesUsed:storageWriteCount(job)}));
     const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
     const harnessContext = { config, model, userId: job.userId, sessionId: job.input.conversationId, signal: job.controller.signal, onPhase: (phase: ChatWaitPhase) => setWaitPhase(job, phase) };
-    if (enabled.hostComputer) tools.push(hostComputerToolDefinition());
-    const hostLocale = job.input.clientContext?.language === "ko" || job.input.clientContext?.locale?.toLowerCase().startsWith("ko") ? "ko" : "en";
-    const hostPolicy: HostExecutionPolicy = {
-      enabled: enabled.hostComputer === true, settings: harness, locale: hostLocale,
-      assessShell: async args => {
-        try {
-          const request = JSON.stringify({ language: hostLocale === "ko" ? "Korean" : "English", shell: args.shell, command: args.command, cwd: args.cwd || null });
-          const result = await harnessCompletion(harnessContext, harness.hostCommandModelId || job.input.modelId, harness.hostCommandEffort, harness.hostCommandAnalysisPrompt, request, 700);
-          return parseHostAssessment(result.text);
-        } catch (error) {
-          job.controller.signal.throwIfAborted();
-          return { riskLevel: 5, explanation: hostLocale === "ko" ? `명령어 “${String(args.command || "")}”의 독립 위험도 분석에 실패하여 가장 높은 5단계로 분류했습니다. 실행 시 지정된 ${String(args.shell || "shell")} 셸이 이 명령 전체를 처리합니다.` : `Independent analysis failed, so command “${String(args.command || "")}” was assigned the highest risk level 5. The selected ${String(args.shell || "shell")} shell will process the complete command if approved.` };
-        }
-      },
+    const toolRequest: ToolRequestContext = {
+      userId: job.userId, role: job.userRole, conversationId: job.input.conversationId,
+      locale: job.input.clientContext?.language === "ko" || job.input.clientContext?.locale?.toLowerCase().startsWith("ko") ? "ko" : "en",
+      clientContext: job.input.clientContext, config, model, signal: job.controller.signal,
+      history: () => [...job.conversation.branches.flatMap(branch => branch.messages), job.message].flatMap(message => message.toolEvents || []),
+      services: { complete: (modelId, effort, prompt, input, maxTokens) => harnessCompletion(harnessContext, modelId || job.input.modelId, effort, prompt, input, maxTokens) },
     };
+    // Every provider the request switched on and the server allows, fixed for the whole reply.
+    const resolvedTools = await resolveTools(toolRequest, requestToolState(job.input.tools), toolSources(), { hostEnvironment: isHostComputerAvailable() });
+    for (const dropped of resolvedTools.rejected) console.warn(`Tool ${dropped.name} from ${dropped.provider} was not offered: ${dropped.reason}.`);
+    const tools = resolvedTools.definitions;
     const firstResponse = !job.conversation.branches.some(b => b.messages.some(m => m.role === "assistant" && m.content));
     const generateTitle = async () => {
       if (!harness.titleEnabled || !firstResponse) return;
@@ -882,10 +747,10 @@ async function run(job: ChatJob) {
       const visualToolContent: ModelContentPart[] = [];
       for (const call of result.calls) {
         addToolEvent(job, call); let execution: ToolExecution;
-        // A host action may wait for approval or run an isolated assessment model. Do not hold
-        // this chat's residency lease through either operation (serial policy would self-deadlock).
-        if (call.function.name === "host_computer") { releaseModel?.(); releaseModel = undefined; }
-        try { execution = await executeTool(job, call, enabled, config.toolSettings, hostPolicy, model, mcpTools.bindings, harness.artifactAutoSaveToStorage); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
+        // Some providers wait for approval or run their own model call (host computer risk checks). Do not hold
+        // this chat's residency lease through either (a serial residency policy would self-deadlock).
+        if (resolvedTools.releasesModel(call.function.name)) { releaseModel?.(); releaseModel = undefined; }
+        try { execution = await resolvedTools.execute(call.function.name, parseArguments(call.function.arguments), { callId: call.id, rawArguments: call.function.arguments, updateEvent: patch => updateToolEvent(job, call.id, patch), waitForUser: () => waitForBrowser(job, call), setWaitPhase: phase => setWaitPhase(job, phase) }); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
         catch (error) {
           if ((error as Error).name === "AbortError") throw error;
           execution = { result: { error: error instanceof Error ? error.message : "Tool execution failed." } };

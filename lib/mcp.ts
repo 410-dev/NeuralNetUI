@@ -157,26 +157,28 @@ export async function testMcpConnection(userId: string, input: unknown & { id?: 
 
 export type McpToolBinding = { advertisedName: string; connectionId: string; connectionName: string; toolName: string; tool: Tool; policy: McpToolPolicy };
 
-export async function mcpToolDefinitions(userId: string, selectedIds: string[], selectedTools: Record<string,string[]> = {}, signal?: AbortSignal): Promise<{ definitions: Array<Record<string, unknown>>; bindings: Map<string, McpToolBinding> }> {
-  if (!selectedIds.length) return { definitions: [], bindings: new Map() };
+/**
+ * One enabled connection's tools as call bindings, blocked tools left out. Advertised names are namespaced by the
+ * connection so two servers can offer tools with the same name.
+ */
+export async function mcpConnectionBindings(userId: string, connectionId: string, signal?: AbortSignal): Promise<McpToolBinding[]> {
   assertEntitled(userId);
-  const ids = [...new Set(selectedIds)].slice(0, 100);
-  const rows = ids.map(id => ownedRow(userId, id)).filter(row => row.enabled === 1);
-  const listed = await Promise.all(rows.map(async row => {
-    const client = await connectedClient(row, signal);
-    try { return { row, tools: (await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" })).tools, policies:toolPolicies(row.id) }; }
-    finally { await client.close().catch(() => undefined); }
-  }));
-  const definitions: Array<Record<string, unknown>> = [], bindings = new Map<string, McpToolBinding>();
-  for (const { row, tools, policies } of listed) for (const tool of tools) {
-    const policy=policies.get(tool.name)||DEFAULT_TOOL_POLICY;
-    if(policy==="blocked"||(Object.hasOwn(selectedTools,row.id)&&!selectedTools[row.id].includes(tool.name)))continue;
+  const row = ownedRow(userId, connectionId);
+  if (row.enabled !== 1) return [];
+  const client = await connectedClient(row, signal);
+  let tools: Tool[];
+  try { tools = (await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" })).tools; }
+  finally { await client.close().catch(() => undefined); }
+  const policies = toolPolicies(row.id);
+  const bindings = new Map<string, McpToolBinding>();
+  for (const tool of tools) {
+    const policy = policies.get(tool.name) || DEFAULT_TOOL_POLICY;
+    if (policy === "blocked") continue;
     let advertisedName = mcpToolAlias(row.id, tool.name), suffix = 2;
     while (bindings.has(advertisedName)) advertisedName = `${mcpToolAlias(row.id, tool.name).slice(0, 60)}_${suffix++}`;
     bindings.set(advertisedName, { advertisedName, connectionId: row.id, connectionName: row.name, toolName: tool.name, tool, policy });
-    definitions.push({ type: "function", function: { name: advertisedName, description: `[MCP: ${row.name}] ${tool.description || tool.name}`, parameters: tool.inputSchema || { type: "object", properties: {} } } });
   }
-  return { definitions, bindings };
+  return [...bindings.values()];
 }
 
 function bounded(value: string) { return value.length <= MAX_RESULT_CHARS ? value : `${value.slice(0, MAX_RESULT_CHARS)}\n[Result truncated]`; }

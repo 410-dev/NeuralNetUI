@@ -7,7 +7,7 @@ import type { ChatBranch, Conversation, ConversationSummary, StoredAttachment, S
 import { completeStorageMigration, dataDir, db, storageMigrationCompleted } from "./database";
 import { deleteUploadFiles, ensureLegacyUploadsMigrated } from "./uploads";
 import { discardChatJobs, hasChatDisposal } from "./chat-disposal";
-import { closeHostComputerSession } from "./host-computer-tool";
+import { disposeConversationTools } from "./tools";
 
 const messageSchema = z.object({
   id: z.string().min(1),
@@ -266,7 +266,7 @@ export async function deleteConversations(ids:string[],userId:string){
     db.prepare(`UPDATE conversations SET deleted_at=? WHERE user_id=? AND deleted_at IS NULL AND id IN (${placeholders})`).run(stamp,userId,...unique);
     return found;
   })();
-  for(const id of deleted){discardChatJobs(userId,id);closeHostComputerSession(`${userId}:${id}`);}
+  for(const id of deleted)discardChatJobs(userId,id);void disposeConversationTools(userId,deleted);
   return deleted;
 }
 
@@ -293,7 +293,7 @@ export async function deleteReferencedConversationsAndUpload(uploadId:string,con
     db.prepare("UPDATE uploads SET deleted_at=? WHERE id=? AND user_id=? AND deleted_at IS NULL").run(stamp,uploadId,userId);
     return referenced;
   })();
-  for(const id of deleted){discardChatJobs(userId,id);closeHostComputerSession(`${userId}:${id}`);}
+  for(const id of deleted)discardChatJobs(userId,id);void disposeConversationTools(userId,deleted);
   return{deletedConversations:deleted.length,deletedFile:true};
 }
 
@@ -453,7 +453,7 @@ export async function deleteConversation(id: string, userId: string) {
   const result=db.prepare("UPDATE conversations SET deleted_at = ? WHERE id = ? AND user_id = ? AND deleted_at IS NULL").run(new Date().toISOString(),id,userId);
   if(!result.changes)throw Object.assign(new Error("Conversation not found."),{code:"ENOENT"});
   discardChatJobs(userId, id);
-  closeHostComputerSession(`${userId}:${id}`);
+  void disposeConversationTools(userId,[id]);
 }
 
 export async function permanentlyDeleteConversation(id:string,userId:string,allowActive=false){
@@ -477,7 +477,7 @@ export async function permanentlyDeleteConversation(id:string,userId:string,allo
     return orphaned.map(({ id: uploadId }) => uploadId);
   })();
   discardChatJobs(userId, id);
-  closeHostComputerSession(`${userId}:${id}`);
+  void disposeConversationTools(userId,[id]);
   await Promise.all(orphanedIds.map((uploadId) => deleteUploadFiles(uploadId)));
 }
 
