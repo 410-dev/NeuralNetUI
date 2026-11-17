@@ -525,6 +525,13 @@ function openDatabase() {
     if (!columns.some(column => column.name === "system_prompt_overrides")) connection.exec("ALTER TABLE conversations ADD COLUMN system_prompt_overrides TEXT;");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(26, new Date().toISOString());
   })();
+  const contextStateVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (contextStateVersion.version < 27) connection.transaction(() => {
+    // What each branch sends to the model: summary, dropped details and context-view edits (JSON, see lib/context-state.ts).
+    connection.exec(`CREATE TABLE IF NOT EXISTS context_states (branch_id TEXT PRIMARY KEY REFERENCES branches(id) ON DELETE CASCADE,
+      state TEXT NOT NULL, updated_at TEXT NOT NULL);`);
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(27, new Date().toISOString());
+  })();
   return connection;
 }
 

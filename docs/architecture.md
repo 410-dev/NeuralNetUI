@@ -73,6 +73,8 @@
 | 13 | 소프트 삭제와 보존 |
 | 14 | 할당량 기본값 상속 |
 | 15 | `storage_upload_sessions` (청크 업로드) |
+| 16 ~ 26 | 플랜, MCP, 대화 고정, 메시지 타이밍, 대화별 시스템 프롬프트 등 |
+| 27 | `context_states` (브랜치별 모델 컨텍스트: 요약, 버린 세부 내용, 컨텍스트 편집) |
 
 파일 기반 구버전 데이터의 1회성 이관은 `storage_migrations`에 따로 기록되며 원본을 삭제하지 않습니다.
 
@@ -108,6 +110,8 @@
 | --- | --- | --- |
 | `/api/conversations` | GET, POST, DELETE | 목록·요약, 생성, 일괄 삭제 |
 | `/api/conversations/[id]` | GET, PUT, PATCH, DELETE | 전체 읽기, 저장, 이름 변경·승격, 삭제 |
+| `/api/conversations/[id]/context` | GET, PUT | 브랜치의 컨텍스트 상태 읽기·저장 (`branchId`) |
+| `/api/conversations/[id]/compact` | POST | `/compact`, `/compact summarize` 수동 압축 |
 | `/api/chat` | POST | 채팅 작업 시작(SSE 스트림) |
 | `/api/chat/[id]` | GET, DELETE | 작업 스냅샷 구독, 중단 |
 | `/api/chat/[id]/input` | POST | 선택형 질문 답변, 호스트 승인 응답 |

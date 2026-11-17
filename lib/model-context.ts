@@ -65,9 +65,9 @@ export function effectiveContextWindowTokens(model?: ModelConfig, models: ModelC
 }
 
 /** Display 100% at the point context compaction starts, not at the model's hard limit. */
-export function contextUsageDisplayLimitTokens(model?: ModelConfig, models: ModelConfig[] = [], settings?: Pick<HarnessSettings, "contextMode" | "compactThreshold">): number | undefined {
+export function contextUsageDisplayLimitTokens(model?: ModelConfig, models: ModelConfig[] = [], settings?: Pick<HarnessSettings, "contextMode" | "compactThreshold"> & Partial<Pick<HarnessSettings, "dropDetailsFirst">>): number | undefined {
   const window = effectiveContextWindowTokens(model, models);
-  if (!window || !usesCompactionThreshold(settings?.contextMode)) return window;
+  if (!window || !settings || !usesCompactionThreshold(settings)) return window;
   const threshold = Number(settings.compactThreshold);
   if (!Number.isFinite(threshold) || threshold <= 0) return window;
   return Math.max(1, Math.floor(window * Math.min(95, threshold) / 100));

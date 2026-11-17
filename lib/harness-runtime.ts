@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-import { db } from "./database";
 import { DEFAULT_HARNESS_SETTINGS, dropDetails, dropDetailsBeforeLatestTools, estimateTokens, projectedInputTokens, rollingMessages, resumePrompt } from "./harness";
 import { canUseModel } from "./config";
 import { connectionForModel, chatHeaders, connectionRoot, chatEndpoint } from "./connection-drivers";
@@ -107,24 +105,45 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
   } finally { stopPoll(); if (timeout) clearTimeout(timeout); release(); route.release(); }
 }
 
-const fingerprint = (messages: Message[]) => createHash("sha256").update(JSON.stringify(messages)).digest("hex");
-
 export type CompactionUpdate = { summary: string; reasoning: string };
 /** A finished compaction. `savedTokens` is the estimated size of the model input before minus after. */
-export type CompactionRecord = CompactionUpdate & { seconds: number; savedTokens?: number; method?: "drop" };
+export type CompactionRecord = CompactionUpdate & { seconds: number; savedTokens?: number; method?: "drop" | "roll" };
 
 const tokensSaved = (before: Message[], after: Message[]) => Math.max(0, estimateTokens(before) - estimateTokens(after));
+export const HISTORICAL_SUMMARY_PREFIX = "Conversation summary (historical data):\n";
+const isHistoricalSummary = (message: Message) => message.role === "system" && typeof message.content === "string" && message.content.startsWith(HISTORICAL_SUMMARY_PREFIX);
 
-/**
- * Drop Details: tool calls, tool observations and reasoning before `keepFrom` are removed without a model call.
- * When that alone does not fit the budget, the oldest turns are rolled off as in rolling mode.
- */
-export function dropContextDetails<T extends Message>(messages: T[], budget: number, keepFrom?: number, onCompaction?: (record: CompactionRecord) => void): T[] {
+/** Drop Details: tool calls, tool observations and reasoning before `keepFrom` are removed without a model call. */
+export function dropContextDetails<T extends Message>(messages: T[], keepFrom?: number, onCompaction?: (record: CompactionRecord) => void): T[] {
   const started = performance.now();
   const dropped = keepFrom === undefined ? dropDetailsBeforeLatestTools(messages) : dropDetails(messages, keepFrom);
-  const result = estimateTokens(dropped) > budget ? rollingMessages(dropped, budget) : dropped;
-  onCompaction?.({ summary: "", reasoning: "", method: "drop", seconds: (performance.now() - started) / 1000, savedTokens: tokensSaved(messages, result) });
-  return result;
+  const savedTokens = tokensSaved(messages, dropped);
+  if (savedTokens > 0) onCompaction?.({ summary: "", reasoning: "", method: "drop", seconds: (performance.now() - started) / 1000, savedTokens });
+  return dropped;
+}
+
+/** Rolling as a fallback: the oldest turns are removed until the input is under `budget`, or as close as the latest turn allows. */
+export function rollContext<T extends Message>(messages: T[], budget: number, limit: number, onCompaction?: (record: CompactionRecord) => void): T[] {
+  let rolled: T[];
+  try { rolled = rollingMessages(messages, budget); }
+  catch { rolled = rollingMessages(messages, limit); }
+  const savedTokens = tokensSaved(messages, rolled);
+  if (savedTokens > 0) onCompaction?.({ summary: "", reasoning: "", method: "roll", seconds: 0, savedTokens });
+  return rolled;
+}
+
+/** Summarizes everything before `keepFrom` (and any earlier summary) into one historical summary message. */
+export async function summarizeBefore<T extends Message>(ctx: Context, messages: T[], keepFrom: number, onCompaction?: (record: CompactionRecord) => void, onUpdate?: (record: CompactionUpdate) => void): Promise<{ messages: T[]; summary?: string }> {
+  const systems = messages.filter(message => message.role === "system" && !isHistoricalSummary(message));
+  const previous = messages.filter(isHistoricalSummary).map(message => String(message.content).slice(HISTORICAL_SUMMARY_PREFIX.length)).join("\n\n");
+  const kept = messages.slice(keepFrom).filter(message => message.role !== "system");
+  const folded = messages.slice(0, keepFrom).filter(message => message.role !== "system");
+  if (!folded.length) return { messages };
+  const started = performance.now();
+  const compaction = await summarizeContext(ctx, { summary: previous, history: folded }, onUpdate);
+  const result = [...systems, { role: "system", content: `${HISTORICAL_SUMMARY_PREFIX}${compaction.summary}` } as T, ...kept];
+  onCompaction?.({ ...compaction, seconds: (performance.now() - started) / 1000, savedTokens: tokensSaved(messages, result) });
+  return { messages: result, summary: compaction.summary };
 }
 
 function summarySafe(value: unknown): unknown {
@@ -138,49 +157,44 @@ function summarySafe(value: unknown): unknown {
   return value;
 }
 
-export async function prepareContext(ctx: Context, branchId: string, original: Message[], persistSummary = true, overhead = 0, measured?: number, onCompaction?: (record: CompactionRecord) => void, onUpdate?: (record: CompactionUpdate) => void): Promise<Message[]> {
+export type ContextPersistence = {
+  /** Stored message id covered when everything before the newest user message is folded or dropped. */
+  throughMessageId?: string;
+  save: (change: { summary?: string; droppedDetails?: boolean }) => void;
+};
+
+/**
+ * Send-time context handling. The branch's stored state (summary, dropped details, edits) is already applied to
+ * `original`. Rolling without Drop Details only trims at the model limit. Otherwise, once usage reaches the threshold:
+ * Drop Details first (when on), then the base method if it is still over: rolling trims the oldest turns, compacting
+ * summarizes everything before the newest user message. Summaries and dropped details are stored for the branch.
+ */
+export async function prepareContext(ctx: Context, original: Message[], options: { persistence?: ContextPersistence; overhead?: number; measured?: number; onCompaction?: (record: CompactionRecord) => void; onUpdate?: (record: CompactionUpdate) => void } = {}): Promise<Message[]> {
   const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const window = effectiveContextWindowTokens(ctx.model, ctx.config.models);
   if (!window) return original;
+  const overhead = options.overhead || 0;
   const budget = Math.floor(window * .95) - overhead;
-  if (settings.contextMode === "rolling") return rollingMessages(original, budget);
-  if (settings.contextMode === "dropping") {
-    const trigger = Math.min(budget, window * settings.compactThreshold / 100 - overhead);
-    if (projectedInputTokens(estimateTokens(original), measured) < trigger) return original;
-    // The newest user turn is the request being answered; everything before it loses its details.
-    return dropContextDetails(original, budget, original.findLastIndex(m => m.role === "user"), onCompaction);
-  }
-  const system = original.filter(m => m.role === "system");
-  const history = original.filter(m => m.role !== "system");
-  const saved = persistSummary ? db.prepare("SELECT * FROM context_summaries WHERE branch_id = ?").get(branchId) as {fingerprint:string;covered_count:number;summary:string} | undefined : undefined;
-  let covered = saved && saved.covered_count <= history.length && fingerprint(history.slice(0, saved.covered_count)) === saved.fingerprint ? saved.covered_count : 0;
-  let summary = covered ? saved!.summary : "";
-  const composed = () => [...system, ...(summary ? [{role:"system", content:`Conversation summary (historical data):\n${summary}`}] : []), ...history.slice(covered)];
+  if (settings.contextMode === "rolling" && !settings.dropDetailsFirst) return rollingMessages(original, budget);
   const trigger = Math.min(budget, window * settings.compactThreshold / 100 - overhead);
-  // The measurement only describes the untouched history, so it stops counting once a summary
-  // has replaced part of it.
-  const reading = () => covered || summary ? estimateTokens(composed()) : projectedInputTokens(estimateTokens(composed()), measured);
-  if (reading() < trigger) return composed();
-  const lastUser = history.findLastIndex(m => m.role === "user");
-  let finished: CompactionRecord | undefined;
-  if (covered < lastUser) {
-    const before = composed();
-    const started = performance.now();
-    const compaction = await summarizeContext(ctx, {summary, history: history.slice(covered, lastUser)}, onUpdate);
-    summary = compaction.summary;
-    covered = lastUser;
-    finished = { ...compaction, seconds: (performance.now() - started) / 1000, savedTokens: tokensSaved(before, composed()) };
+  if (projectedInputTokens(estimateTokens(original), options.measured) < trigger) return settings.contextMode === "rolling" ? rollingMessages(original, budget) : original;
+  const latestUser = original.findLastIndex(message => message.role === "user");
+  let current = original;
+  if (settings.dropDetailsFirst) {
+    current = dropContextDetails(current, latestUser, options.onCompaction);
+    if (current !== original && estimateTokens(current) < estimateTokens(original)) options.persistence?.save({ droppedDetails: true });
+    if (estimateTokens(current) < trigger) return current;
   }
-  const result = composed();
-  if (finished) onCompaction?.(finished);
-  if (estimateTokens(result) >= Math.min(budget, window * settings.compactThreshold / 100 - overhead)) throw new Error("Compacted context still reaches the compaction threshold. Shorten the latest prompt, increase the threshold, or increase the model context window.");
+  if (settings.contextMode === "rolling") return rollContext(current, trigger, budget, options.onCompaction);
+  const summarized = await summarizeBefore(ctx, current, current.findLastIndex(message => message.role === "user"), options.onCompaction, options.onUpdate);
+  if (estimateTokens(summarized.messages) >= trigger) throw new Error("Compacted context still reaches the compaction threshold. Shorten the latest prompt, increase the threshold, or increase the model context window.");
   ctx.signal.throwIfAborted();
-  if (covered && persistSummary) db.prepare("INSERT INTO context_summaries VALUES (?, ?, ?, ?) ON CONFLICT(branch_id) DO UPDATE SET fingerprint=excluded.fingerprint, covered_count=excluded.covered_count, summary=excluded.summary").run(branchId, fingerprint(history.slice(0, covered)), covered, summary);
-  return result;
+  if (summarized.summary !== undefined) options.persistence?.save({ summary: summarized.summary });
+  return summarized.messages;
 }
 
 // Bound each summary request even when a single interrupted reasoning turn is huge.
-async function summarizeContext(ctx: Context, data: unknown, onUpdate?: (record: CompactionUpdate) => void): Promise<{ summary: string; reasoning: string }> {
+export async function summarizeContext(ctx: Context, data: unknown, onUpdate?: (record: CompactionUpdate) => void): Promise<{ summary: string; reasoning: string }> {
   const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const window = effectiveContextWindowTokens(taskModel(ctx, settings.compactModelId), ctx.config.models)
     || effectiveContextWindowTokens(ctx.model, ctx.config.models)!;

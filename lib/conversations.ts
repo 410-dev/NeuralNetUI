@@ -29,7 +29,7 @@ const messageSchema = z.object({
     z.object({ kind: z.literal("reasoning"), text: z.string(), seconds: z.number().nonnegative().optional(), startedAt: z.number().nonnegative().optional(), promptSeconds: z.number().nonnegative().optional() }),
     z.object({ kind: z.literal("content"), text: z.string() }),
     z.object({ kind: z.literal("tools"), ids: z.array(z.string().min(1)) }),
-    z.object({ kind: z.literal("compaction"), seconds: z.number().nonnegative().optional(), summary: z.string().optional(), reasoning: z.string().optional(), retainedToolIds: z.array(z.string().min(1)).optional(), method: z.literal("drop").optional(), savedTokens: z.number().int().nonnegative().optional() }),
+    z.object({ kind: z.literal("compaction"), seconds: z.number().nonnegative().optional(), summary: z.string().optional(), reasoning: z.string().optional(), retainedToolIds: z.array(z.string().min(1)).optional(), method: z.enum(["drop", "roll"]).optional(), savedTokens: z.number().int().nonnegative().optional() }),
   ])).optional(),
   toolEvents: z.array(z.object({
     id: z.string().min(1),
@@ -119,6 +119,7 @@ function storeConversation(record: Conversation, userId: string, guard?: () => b
     if (owner && owner.user_id !== userId) throw new Error("Conversation not found.");
     if (owner?.deleted_at) throw new Error("Conversation was deleted.");
     const summaries = db.prepare("SELECT cs.* FROM context_summaries cs JOIN branches b ON b.id = cs.branch_id WHERE b.conversation_id = ?").all(record.id) as Array<{branch_id: string; fingerprint: string; covered_count: number; summary: string}>;
+    const contextStates = db.prepare("SELECT cs.* FROM context_states cs JOIN branches b ON b.id = cs.branch_id WHERE b.conversation_id = ?").all(record.id) as Array<{branch_id: string; state: string; updated_at: string}>;
     if (owner?.title_managed) record.title = owner.title;
     db.prepare("DELETE FROM conversations WHERE id = ? AND user_id = ?").run(record.id, userId);
     const temporary = owner ? owner.temporary : Number(record.temporary === true);
@@ -137,6 +138,7 @@ function storeConversation(record: Conversation, userId: string, guard?: () => b
     }
     if (owner?.title_managed) db.prepare("UPDATE conversations SET title_managed = 1 WHERE id = ?").run(record.id);
     for (const summary of summaries) if (record.branches.some(b => b.id === summary.branch_id)) db.prepare("INSERT INTO context_summaries VALUES (@branch_id, @fingerprint, @covered_count, @summary)").run(summary);
+    for (const state of contextStates) if (record.branches.some(b => b.id === state.branch_id)) db.prepare("INSERT INTO context_states(branch_id, state, updated_at) VALUES (@branch_id, @state, @updated_at)").run(state);
     for (const branch of record.branches) {
       for (const [messagePosition, message] of branch.messages.entries()) {
         insertMessage.run({

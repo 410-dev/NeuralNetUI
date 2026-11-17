@@ -240,6 +240,10 @@ export interface AppConfig {
   preferences: {
     sendReasoningToModel: boolean;
     exportReasoning: boolean;
+    /** Editing a message that has later messages: start a new branch from it, edit it where it is, or ask. */
+    messageEditMode?: MessageEditMode;
+    /** Editing a message inside the compacted part of the context: open the summary, keep it, or ask. */
+    compactedEditMode?: CompactedEditMode;
     language: Locale;
     onDemand: boolean;
     showModelIdentifiers: boolean;
@@ -273,9 +277,17 @@ export interface AppConfig {
   models: ModelConfig[];
 }
 
+export type MessageEditMode = "truncate" | "in_place" | "ask";
+export type CompactedEditMode = "edit_summary" | "ignore" | "ask";
+
 export interface HarnessSettings {
-  /** rolling drops the oldest turns at the limit; compacting summarizes at the threshold; dropping removes tool content and reasoning at the threshold. */
-  contextMode: "rolling" | "compacting" | "dropping";
+  /** The base method: rolling drops the oldest turns, compacting summarizes earlier turns at the threshold. */
+  contextMode: "rolling" | "compacting";
+  /**
+   * Drop Details first: at the threshold, earlier tool calls, tool results and reasoning are removed without a model
+   * call. When that is not enough, the base method above takes over.
+   */
+  dropDetailsFirst: boolean;
   /** Cap on tokens the model may generate per response. Zero leaves it to the context window. */
   maxOutputTokens: number;
   compactThreshold: number;
@@ -337,7 +349,7 @@ export type MessageStep =
   | { kind: "reasoning"; text: string; seconds?: number; startedAt?: number; promptSeconds?: number }
   | { kind: "content"; text: string }
   | { kind: "tools"; ids: string[] }
-  | { kind: "compaction"; seconds?: number; summary?: string; reasoning?: string; retainedToolIds?: string[]; method?: "drop"; savedTokens?: number };
+  | { kind: "compaction"; seconds?: number; summary?: string; reasoning?: string; retainedToolIds?: string[]; method?: "drop" | "roll"; savedTokens?: number };
 
 export interface StoredMessage {
   id: string;

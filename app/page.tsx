@@ -23,6 +23,9 @@ import { normalizeCodeRunResult, readCodeRunRequest } from "@/lib/tools/code-run
 import { runInBrowserSandbox } from "@/lib/code-runner-client";
 import { readApiResponse } from "@/lib/client-response";
 import { formatTokenCount } from "@/lib/harness";
+import { applyContextState, isSummarized, normalizeContextState, withoutContentOverride, type ContextState } from "@/lib/context-state";
+import { parseCompactCommand, type CompactCommand } from "@/lib/compact-command";
+import { ContextView } from "./context-view";
 import { clearFunctionSelections, DEFAULT_TOOL_STATE, enabledProviderCount, normalizeToolState, resolveProviderState, setProviderEnabled, setProviderFunctions, setProviderOption, type ToolState } from "@/lib/tools/state";
 import { SectionTitle } from "./section-title";
 import { SelectMenu, usePopoverPresence } from "./select-menu";
@@ -40,7 +43,7 @@ import {
   ArrowDown, ArrowUp, Lightbulb, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CirclePlus, Copy, Download, FileJson,
   FileText, GitBranch, GripVertical, Image as ImageIcon, ImageOff, ImagePlus, KeyRound, LoaderCircle, Menu, MessageSquarePlus, Pencil, Plus, RefreshCw,
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
-  Braces, LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Power, Upload, HardDrive, ShieldAlert,
+  Braces, Layers, LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Power, Upload, HardDrive, ShieldAlert,
   Palette, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Repeat2, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge, Cable, Code2, Unlock,
   RotateCcw } from "lucide-react";
 import { Children, cloneElement, createContext, CSSProperties, FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -52,7 +55,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type {
   ChatWaitPhase, ChatBranch, ConnectionConfig, Conversation, ConversationSummary, MessageStep, ModelConfig, PublicConfig,
-  ReasoningPreset, StoredAttachment, StoredMessage, StorageFile, Locale, AccountInfo, UserSummary, ToolEvent, MultipleChoiceQuestion, ToolSettings, AccentPaletteId, AppearancePreferences, LoginAppearance, ConnectionDriver, McpConnection, McpToolInfo, ArtifactDocument, HarnessSettings,
+  ReasoningPreset, MessageEditMode, CompactedEditMode, StoredAttachment, StoredMessage, StorageFile, Locale, AccountInfo, UserSummary, ToolEvent, MultipleChoiceQuestion, ToolSettings, AccentPaletteId, AppearancePreferences, LoginAppearance, ConnectionDriver, McpConnection, McpToolInfo, ArtifactDocument, HarnessSettings,
 } from "@/lib/types";
 import { advertisedContextWindowTokens, contextUsageDisplayLimitTokens, effectiveContextWindowTokens } from "@/lib/model-context";
 import { shouldExpandComposer } from "@/lib/composer-layout";
@@ -60,7 +63,7 @@ import { createClientId } from "@/lib/client-id";
 import { multipleChoiceAnswers, pendingMultipleChoiceEvent } from "@/lib/conversation-messages";
 import { formatReasoningForDisplay, formatToolCallMarkers, getToolGroupLabel, getToolGroupState, getToolStatusLabel } from "@/lib/tool-presentation";
 import { APP_VERSION } from "@/lib/version";
-import { isNearScrollBottom } from "@/lib/chat-scroll";
+import { followAfterScroll, isNearScrollBottom, SCROLL_INTENT_MS } from "@/lib/chat-scroll";
 import { parseModelSettings, serializeModelSettings } from "@/lib/model-settings";
 import { copyTextToClipboard, clipboardImages } from "@/lib/client-clipboard";
 import { hasMobileComposerInput, shouldSubmitComposerOnEnter } from "@/lib/composer-keyboard";
@@ -150,7 +153,7 @@ const translations = {
     language: "Language", general: "General", generalTitle: "General settings", generalDesc: "Choose interface and inference behavior.", appearance: "Appearance", appearanceTitle: "Appearance", appearanceDesc: "Customize colors, greetings, and response display.", interfaceLanguage: "Interface language", languageHelp: "The selected language is saved for future visits.", english: "English", korean: "Korean", onDemand: "On demand", onDemandHelp: "Load the selected model through /api/inference/load before each inference request.", showModelIdentifiers: "Show model identifiers", showModelIdentifiersHelp: "Show served identifiers below model names in model lists.", renderStrikethrough: "Render strikethrough", renderStrikethroughHelp: "Render text surrounded by one or two tildes as strikethrough. When off, the tildes remain visible.", appVersion: "Version", saved: "Saved.", detectSaved: "models and capabilities detected. Save changes to apply.", detectFirst: "Detect a server model first.", useAsDefault: "Use as default", defaultModelActive: "Default model", defaultReasoningActive: "Default reasoning", modelSettingsTransfer: "Model and reasoning settings", modelSettingsTransferDesc: "Export these settings as two-space JSON, or import a compatible file and apply it immediately.", exportModelSettings: "Export JSON", importModelSettings: "Import JSON", importedModelSettings: "Imported and applied model settings.", invalidModelSettings: "This is not a valid NeuralNetUI model settings file.",
     attachImages: "Upload files", loadFromStorage: "Load files", uploadingImages: "Preparing and uploading files…", removeImage: "Remove attachment", loadEarlier: "Load earlier messages",
     imagesAttached: "files attached", imageChat: "File chat", imageUploadFailed: "File upload failed.", maxImages: "You have reached the configured attachment limit.",
-    thinking: "Thinking…", compactingNow: "Compacting context…", detailsDropped: "Dropped tool details and reasoning", compactionThought: "Compaction reasoning", compactionSummary: "Summary kept in context", editResponse: "Edit response", saveEdit: "Save", thoughtFor: "Thought for", useWrapping: "Use wrapping", copied: "Copied",
+    thinking: "Thinking…", compactingNow: "Compacting context…", detailsDropped: "Dropped tool details and reasoning", turnsRolled: "Removed the oldest turns from the context", compactionThought: "Compaction reasoning", compactionSummary: "Summary kept in context", editResponse: "Edit response", saveEdit: "Save", thoughtFor: "Thought for", useWrapping: "Use wrapping", copied: "Copied",
     addMenu: "Add", tools: "Tools", internetGroup: "Internet", awarenessGroup: "Ambient awareness", agentGroup: "Agent", interactionGroup: "Interaction", internetSearch: "Internet search", internetSearchDesc: "Let the model search DuckDuckGo", pageVisit: "Visit pages", pageVisitDesc: "Let the model read public web pages", hostComputerTool: "Host computer", hostComputerToolDesc: "Let the model control files, shells, programs, uploads, and the host screen", storageAccess: "Storage access", storageAccessDesc: "Let the model privately access your stored files", storageRead:"Read", storageReadDesc:"Search and load files", storageWrite:"Write", storageWriteDesc:"Create text files and save URL files", storageWriteLimit:"files per session", currentTime: "Current time", currentTimeDesc: "Provide local time and time zone to the model", locationTool: "Current location", locationToolDesc: "Use browser location and detailed reverse geocoding", multipleChoice: "Multiple choice", multipleChoiceDesc: "Let the model ask selectable questions", artifact: "Artifact", artifactDesc: "Render HTML, CSV, JSON, XML, or Markdown in an interactive viewer", usingTool: "Using a tool…", toolCall: "Tool call", toolResult: "Tool result", submitChoices: "Submit answers", otherChoice: "Or type a direct answer…", choiceNext: "Next", choiceBack: "Previous question", choiceProgress: "Question", choiceWaiting: "Answer the request above to continue", locationPermission: "Waiting for browser location permission…", codeRunning: "Running in this browser's sandbox…", hostApprovalTitle: "Host action approval", mcpApprovalTitle:"MCP tool approval", repetitionTitle: "Repetitive output detected", repetitionMessage: "The model has produced the same {kind} {count} times in a row in its {segment}.", repetitionInReasoning: "reasoning", repetitionInResponse: "response", repetitionInTool: "tool calls", repetitionWord: "word", repetitionSentence: "sentence", repetitionParagraph: "paragraph", repetitionGroup: "group of paragraphs", repetitionToolCall: "tool call", repetitionToolCalls: "sequence of tool calls", repetitionSample: "Repeated content", repetitionStop: "Stop", repetitionRetry: "Retry", repetitionIgnore: "Ignore", hostApprove: "Allow", hostReject: "Deny", hostRedirect: "Deny and redirect", hostRedirectPlaceholder: "Tell the model what to do instead…", hostRiskLevel: "Risk level",
     account: "Account", users: "Users", signOut: "Sign out", changePassword: "Change password", currentPassword: "Current password", newPassword: "New password", passwordChanged: "Password changed. Please sign in again.",
     toolsSettings: "Harness settings", toolsSettingsTitle: "Tool and file limits", toolsSettingsDesc: "Control tool iterations, interactive tools, downloads, PDF processing, and temporary upload cleanup.", maxToolRounds: "Maximum tool rounds", maxMultipleChoiceQuestions: "Questions per multiple-choice call", maxAttachments: "Attachments per message", textDownloadLimit: "Text download limit (MB)", textCharacterLimit: "Text characters sent to model", imageDownloadLimit: "Image URL limit (MB)", imageUploadLimit: "Image upload limit (MB)", pdfSizeLimit: "PDF limit (MB)", pdfPageLimit: "PDF pages processed", pdfTextLimit: "PDF characters sent to model", pdfVisionPages: "Scanned PDF vision pages", pdfTimeout: "PDF processing timeout (seconds)", temporaryFileTtl: "Temporary file cleanup (minutes)", orphanTtl: "Unattached upload retention (hours)", toolLoopGroup: "Tool loop", interactiveToolGroup: "Interactive tools", attachmentGroup: "Attachments and downloads", pdfGroup: "PDF processing", cleanupGroup: "Temporary file cleanup", toolsSafetyHelp: "Tool and file limit values are validated against server safety boundaries when saved.",
@@ -198,7 +201,7 @@ const translations = {
     language: "언어", general: "일반", generalTitle: "일반 설정", generalDesc: "인터페이스와 추론 동작을 설정합니다.", appearance: "모양", appearanceTitle: "모양", appearanceDesc: "색상, 환영 메시지, 응답 표시 방식을 설정합니다.", interfaceLanguage: "인터페이스 언어", languageHelp: "선택한 언어는 저장되어 다음 접속에도 유지됩니다.", english: "영어", korean: "한국어", onDemand: "On demand", onDemandHelp: "추론 요청 전에 /api/inference/load를 호출해 선택한 모델을 로드합니다.", showModelIdentifiers: "모델 identifier 표시", showModelIdentifiersHelp: "모델 목록에서 모델 이름 아래에 서빙 identifier를 표시합니다.", renderStrikethrough: "취소선 렌더링", renderStrikethroughHelp: "물결표 한 개 또는 두 개로 감싼 텍스트를 취소선으로 표시합니다. 끄면 물결표를 그대로 표시합니다.", appVersion: "버전", saved: "저장했습니다.", detectSaved: "개 모델과 기능을 감지했습니다. 저장을 눌러 적용하세요.", detectFirst: "먼저 서버 모델을 감지해 주세요.", useAsDefault: "기본으로 사용", defaultModelActive: "기본 모델", defaultReasoningActive: "기본 추론 강도", modelSettingsTransfer: "모델 및 추론 강도 설정", modelSettingsTransferDesc: "2칸 들여쓰기 JSON으로 내보내거나 호환 파일을 가져와 즉시 적용합니다.", exportModelSettings: "JSON 내보내기", importModelSettings: "JSON 가져오기", importedModelSettings: "모델 설정을 가져와 적용했습니다.", invalidModelSettings: "올바른 NeuralNetUI 모델 설정 파일이 아닙니다.",
     attachImages: "파일 업로드", loadFromStorage: "파일 불러오기", uploadingImages: "파일 준비 및 업로드 중…", removeImage: "첨부 제거", loadEarlier: "이전 메시지 불러오기",
     imagesAttached: "개 파일 첨부", imageChat: "파일 대화", imageUploadFailed: "파일 업로드에 실패했습니다.", maxImages: "설정된 첨부 개수 제한에 도달했습니다.",
-    thinking: "생각 중…", compactingNow: "컨텍스트 압축 중…", detailsDropped: "도구 세부 내용과 추론을 버림", compactionThought: "압축 모델의 사고", compactionSummary: "맥락으로 유지되는 요약", editResponse: "응답 편집", saveEdit: "저장", thoughtFor: "동안 생각함", useWrapping: "줄 바꿈 사용", copied: "복사됨",
+    thinking: "생각 중…", compactingNow: "컨텍스트 압축 중…", detailsDropped: "도구 세부 내용과 추론을 버림", turnsRolled: "오래된 턴을 컨텍스트에서 뺌", compactionThought: "압축 모델의 사고", compactionSummary: "맥락으로 유지되는 요약", editResponse: "응답 편집", saveEdit: "저장", thoughtFor: "동안 생각함", useWrapping: "줄 바꿈 사용", copied: "복사됨",
     addMenu: "추가", tools: "도구", internetGroup: "인터넷", awarenessGroup: "주변 인식", agentGroup: "에이전트", interactionGroup: "상호 작용", internetSearch: "인터넷 검색", internetSearchDesc: "모델이 DuckDuckGo를 검색하도록 허용", pageVisit: "페이지 방문", pageVisitDesc: "모델이 공개 웹 페이지를 읽도록 허용", hostComputerTool: "호스트 컴퓨터", hostComputerToolDesc: "모델의 파일·셸·프로그램·업로드·호스트 화면 제어 허용", storageAccess: "저장소 접근", storageAccessDesc: "모델의 개인 저장소 접근 권한", storageRead:"읽기", storageReadDesc:"파일 검색 및 불러오기", storageWrite:"쓰기", storageWriteDesc:"텍스트 파일 생성 및 URL 파일 저장", storageWriteLimit:"세션당 파일", currentTime: "현재 시간", currentTimeDesc: "현지 시간과 시간대를 모델에 제공", locationTool: "현재 위치", locationToolDesc: "브라우저 위치와 상세 역지오코딩 사용", multipleChoice: "다중 선택", multipleChoiceDesc: "모델이 설정된 개수만큼 선택형 질문을 요청", artifact: "아티팩트", artifactDesc: "HTML·CSV·JSON·XML·Markdown을 전용 뷰어로 렌더링", usingTool: "도구 사용 중…", toolCall: "도구 호출", toolResult: "도구 결과", submitChoices: "답변 제출", otherChoice: "또는 직접 답변…", choiceNext: "다음", choiceBack: "이전 질문", choiceProgress: "질문", choiceWaiting: "위 요청에 응답하면 모델이 계속 작업합니다", locationPermission: "브라우저 위치 권한을 기다리는 중…", codeRunning: "이 브라우저의 샌드박스에서 실행하는 중…", hostApprovalTitle: "호스트 작업 승인", mcpApprovalTitle:"MCP 도구 승인", repetitionTitle: "반복 출력 감지", repetitionMessage: "모델이 {segment}에서 같은 {kind} {count}번 연속으로 출력하고 있습니다.", repetitionInReasoning: "추론", repetitionInResponse: "응답", repetitionInTool: "도구 호출", repetitionWord: "단어를", repetitionSentence: "문장을", repetitionParagraph: "문단을", repetitionGroup: "문단 묶음을", repetitionToolCall: "도구 호출을", repetitionToolCalls: "도구 호출 묶음을", repetitionSample: "반복된 내용", repetitionStop: "정지하기", repetitionRetry: "다시 시도하기", repetitionIgnore: "무시하기", hostApprove: "허용", hostReject: "거부", hostRedirect: "거부 후 다른 작업 지시", hostRedirectPlaceholder: "대신 수행할 작업을 모델에 알려주세요…", hostRiskLevel: "위험도",
     account: "계정", users: "사용자", signOut: "로그아웃", changePassword: "비밀번호 변경", currentPassword: "현재 비밀번호", newPassword: "새 비밀번호", passwordChanged: "비밀번호를 변경했습니다. 다시 로그인해 주세요.",
     toolsSettings: "하네스 설정", toolsSettingsTitle: "도구 및 파일 제한", toolsSettingsDesc: "도구 반복, 인터랙티브 도구, 다운로드, PDF 처리 및 임시 업로드 정리 기준을 설정합니다.", maxToolRounds: "최대 도구 호출 라운드", maxMultipleChoiceQuestions: "다중 선택 호출당 질문 수", maxAttachments: "메시지당 첨부 개수", textDownloadLimit: "텍스트 다운로드 제한 (MB)", textCharacterLimit: "모델에 전달할 텍스트 글자 수", imageDownloadLimit: "이미지 URL 제한 (MB)", imageUploadLimit: "이미지 업로드 제한 (MB)", pdfSizeLimit: "PDF 제한 (MB)", pdfPageLimit: "처리할 PDF 페이지 수", pdfTextLimit: "모델에 전달할 PDF 글자 수", pdfVisionPages: "스캔 PDF 비전 페이지 수", pdfTimeout: "PDF 처리 제한 시간 (초)", temporaryFileTtl: "임시 파일 정리 시간 (분)", orphanTtl: "미첨부 업로드 보관 시간", toolLoopGroup: "도구 반복", interactiveToolGroup: "인터랙티브 도구", attachmentGroup: "첨부 및 다운로드", pdfGroup: "PDF 처리", cleanupGroup: "임시 파일 정리", toolsSafetyHelp: "도구 및 파일 제한 값은 저장 시 서버의 안전 범위 안에서 검증됩니다.",
@@ -381,6 +384,9 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [pendingWait, setPendingWait] = useState<{ messageId: string; phase: ChatWaitPhase; progress?: number; startedAt?: number } | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [contextViewOpen, setContextViewOpen] = useState(false);
+  const [contextSummaryEditing, setContextSummaryEditing] = useState(false);
   const [searching, setSearching] = useState(false);
   const [storageOpen, setStorageOpen] = useState(false);
   const [storagePickerOpen, setStoragePickerOpen] = useState(false);
@@ -725,7 +731,30 @@ export default function Home() {
   const canEditSystemPrompt = Boolean(selectedModel && canPersonalizeSystemPrompt(selectedModel, config.account?.role));
   const personalPrompt = selectedModel ? config.preferences.modelSystemPrompts?.[selectedModel.id] : undefined;
   const selectedSystemPrompt = selectedModel ? resolveSystemPrompt({ model: selectedModel, selectedId: selectedModel.id, preset: selectedPreset, allowed: canEditSystemPrompt, personal: personalPrompt, session: sessionPrompts }) : "";
-  const contextBreakdown = useMemo(() => contextUsage(messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length), [messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length]);
+  // What this branch sends to the model: summary, dropped details and context-view edits.
+  const [contextState, setContextState] = useState<{ key: string; state: ContextState }>();
+  const contextKey = conversation && activeBranch ? `${conversation.id}:${activeBranch.id}` : "";
+  const branchContext = contextState?.key === contextKey ? contextState.state : undefined;
+  const refreshContextState = async () => {
+    if (!conversation || !activeBranch) return;
+    const key = `${conversation.id}:${activeBranch.id}`;
+    const response = await fetch(`/api/conversations/${encodeURIComponent(conversation.id)}/context?branchId=${encodeURIComponent(activeBranch.id)}`, { cache: "no-store" }).catch(() => undefined);
+    if (!response?.ok) return;
+    const body = await response.json().catch(() => undefined) as { state?: unknown } | undefined;
+    if (body?.state) setContextState({ key, state: normalizeContextState(body.state) });
+  };
+  useEffect(() => { if (contextKey && !isGenerating) void refreshContextState(); }, [contextKey, isGenerating]);
+  // The context view belongs to one branch; another chat or branch starts on its transcript.
+  useEffect(() => { setContextViewOpen(false); setContextSummaryEditing(false); }, [contextKey]);
+  const saveContextState = async (state: ContextState) => {
+    if (!conversation || !activeBranch) return false;
+    const key = `${conversation.id}:${activeBranch.id}`;
+    setContextState({ key, state });
+    const response = await fetch(`/api/conversations/${encodeURIComponent(conversation.id)}/context`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ branchId: activeBranch.id, state }) }).catch(() => undefined);
+    if (!response?.ok) { setError(locale === "ko" ? "컨텍스트 변경을 저장하지 못했습니다." : "The context change could not be saved."); return false; }
+    return true;
+  };
+  const contextBreakdown = useMemo(() => contextUsage(messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length, branchContext), [messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length, branchContext]);
   const messageRevisions = useMemo(() => {
     const groups = new Map<string, Map<string, MessageRevision>>();
     for (const branch of conversation?.branches || []) {
@@ -1158,7 +1187,7 @@ export default function Home() {
         body: JSON.stringify({ conversationId: working.id, branchId, assistantMessageId: placeholder.id, revisionGroupId, modelId: working.modelId, aliasBaseModelId: runtimeAliasBaseModelId, reasoningPresetId: working.reasoningPresetId, systemPromptOverrides: sessionPromptsRef.current,
           tools: options?.tools || toolState,
           clientContext: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: navigator.language, language: config.preferences.language },
-          messages: requestMessages.map((message) => ({ role: message.role, content: message.content, reasoning_content: message.reasoning, toolEvents: message.toolEvents, attachments: message.attachments?.map(({ id }) => ({ id })) })) }),
+          messages: requestMessages.map((message) => ({ id: message.id, role: message.role, content: message.content, reasoning_content: message.reasoning, toolEvents: message.toolEvents, attachments: message.attachments?.map(({ id }) => ({ id })) })) }),
       });
       if (!response.ok) { const detail = await response.json().catch(() => ({})); throw new Error(detail.error || `요청에 실패했습니다 (${response.status})`); }
       const completed = await watchChatJob(working, branchId); if (completed) void refreshModelContextWindow(working.modelId, runtimeAliasBaseModelId); return completed;
@@ -1191,11 +1220,32 @@ export default function Home() {
     return latest;
   }
 
+  /** /compact and /compact summarize: compact this branch's context now instead of sending a message. */
+  async function runCompactCommand(mode: CompactCommand) {
+    const ko = locale === "ko";
+    if (isGenerating) { setError(ko ? "응답을 생성하는 동안에는 컨텍스트를 압축할 수 없습니다." : "The context cannot be compacted while a reply is being generated."); return; }
+    if (!conversation || !activeBranch || !messages.length) { setError(ko ? "압축할 대화가 없습니다." : "There is no conversation to compact."); return; }
+    setDraft(""); setError("");
+    setNotice(mode === "summarize" ? (ko ? "요약으로 컨텍스트를 압축하는 중… (토큰을 사용합니다)" : "Summarizing the context… (uses tokens)") : (ko ? "컨텍스트를 압축하는 중…" : "Compacting the context…"));
+    try {
+      const response = await fetch(`/api/conversations/${encodeURIComponent(conversation.id)}/compact`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ branchId: activeBranch.id, mode, modelId: selectedModel?.id, aliasBaseModelId: selectedModel?.isAlias ? selectedAliasBase?.id : undefined }) });
+      const result = await readApiResponse<{ state: unknown; method: "drop" | "summary" | "none"; savedTokens: number }>(response, locale);
+      setContextState({ key: `${conversation.id}:${activeBranch.id}`, state: normalizeContextState(result.state) });
+      const saved = ko ? `${formatTokenCount(result.savedTokens)} 토큰 절약됨` : `${formatTokenCount(result.savedTokens)} tokens saved`;
+      setNotice(result.method === "summary" ? (ko ? `이전 대화를 요약으로 압축했습니다 · ${saved} · 요약에 토큰을 사용했습니다.` : `Earlier turns were summarized · ${saved} · the summary used tokens.`)
+        : result.method === "drop" ? (ko ? `이전 도구 세부 내용과 추론을 버렸습니다 · ${saved}` : `Earlier tool details and reasoning were dropped · ${saved}`)
+        : (ko ? "더 줄일 내용이 없습니다." : "There was nothing left to reduce."));
+    } catch (caught) { setNotice(""); setError(caught instanceof Error ? caught.message : String(caught)); }
+  }
+
   async function sendMessage(event?: FormEvent) {
     event?.preventDefault();
     const requestModel = visibleModels.find((model) => model.id === selectedModelIdRef.current) || selectedModel;
     const requestPreset = requestModel?.reasoningPresets.find((preset) => preset.id === selectedPresetId) || requestModel?.reasoningPresets[0];
     const text = draft.trim();
+    const compactCommand = draftAttachments.length ? undefined : parseCompactCommand(text);
+    if (compactCommand) { await runCompactCommand(compactCommand); return; }
+    if (text || draftAttachments.length) setContextViewOpen(false);
     const hasMessage = Boolean(text || draftAttachments.length);
     if(requestModel&&draftAttachments.some(attachment=>!attachmentAllowedForModel(requestModel,attachment))){setError(c.modelAttachmentUnsupported);return;}
     if (hasMessage && !pendingChoice) {
@@ -1235,6 +1285,59 @@ export default function Home() {
     const next: Conversation = { ...conversation, modelId: requestModel.id, reasoningPresetId: requestPreset?.id, updatedAt: stamp,
       branches: conversation.branches.map((item) => item.id === branch.id ? { ...item, messages: requestMessages, updatedAt: stamp } : item) };
     await runCompletionAndDrain(next, branch.id, requestMessages, false, undefined, options);
+  }
+
+  /**
+   * Editing a message that has later messages: remove what follows (a new branch from the edited message, the old
+   * behavior) or change it where it is. The personal setting decides, or the person is asked.
+   */
+  async function chooseEditBehavior(role: "user" | "assistant", hasFollowing: boolean): Promise<"truncate" | "in_place" | undefined> {
+    if (!hasFollowing) return "truncate";
+    const mode = config.preferences.messageEditMode || "ask";
+    if (mode !== "ask") return mode;
+    const ko = locale === "ko";
+    const picked = await choose({ title: ko ? "메시지 수정" : "Edit message",
+      message: ko ? "이 메시지 뒤에 이어진 대화를 어떻게 할까요?" : "What should happen to the conversation after this message?",
+      detail: ko ? "기본 동작은 설정 > 일반 > 메시지 수정에서 정할 수 있습니다." : "Set the default in Settings > General > Editing messages.",
+      choices: [{ id: "truncate", label: role === "user" ? (ko ? "뒷부분 삭제 후 다시 생성" : "Remove what follows and regenerate") : (ko ? "뒷부분 삭제" : "Remove what follows"), quiet: true }, { id: "in_place", label: ko ? "수정만 적용" : "Apply edit only" }] });
+    return picked === "in_place" || picked === "truncate" ? picked : undefined;
+  }
+
+  /** Changes one message where it is, in every branch that shares it, keeping everything after it. */
+  async function applyInPlaceEdit(messageId: string, content: string) {
+    if (!conversation || isGenerating || !content) return;
+    const source = activeBranch || conversation.branches[0]; if (!source) return;
+    const stamp = now();
+    const update = (message: StoredMessage) => message.id !== messageId ? message : message.role === "assistant" ? replaceAssistantContent(message, content) : { ...message, content };
+    const next: Conversation = { ...conversation, updatedAt: stamp, branches: conversation.branches.map(branch => branch.messages.some(message => message.id === messageId) ? { ...branch, messages: branch.messages.map(update), updatedAt: stamp } : branch) };
+    setMessages(source.messages.map(update)); await persist(next);
+    // The model's context follows the transcript again for this message's text.
+    if (branchContext?.overrides[messageId]?.content !== undefined) await saveContextState(withoutContentOverride(branchContext, messageId));
+    if (!branchContext || !isSummarized(source.messages, branchContext, messageId)) return;
+    const mode = config.preferences.compactedEditMode || "ask";
+    if (mode === "ignore") return;
+    const ko = locale === "ko";
+    const open = mode === "edit_summary" || await choose({ title: ko ? "압축된 메시지 수정" : "Edited a compacted message",
+      message: ko ? "압축된 영역에 있는 메시지를 수정했습니다. 직접 압축 내용을 수정 하시겠습니까?" : "You edited a message inside the compacted part of the context. Edit the compaction summary yourself?",
+      detail: ko ? "모델은 이 메시지 대신 압축 요약을 받습니다. 기본 동작은 설정 > 일반에서 정할 수 있습니다." : "The model receives the summary instead of this message. Set the default in Settings > General.",
+      choices: [{ id: "ignore", label: ko ? "그대로 두기" : "Leave it", quiet: true }, { id: "edit", label: ko ? "압축 내용 편집" : "Edit summary" }] }) === "edit";
+    if (open) { setContextViewOpen(true); setContextSummaryEditing(true); }
+  }
+
+  async function editUserRequest(messageId: string, editedText: string) {
+    const source = activeBranch || conversation?.branches[0]; const index = source?.messages.findIndex(message => message.id === messageId) ?? -1;
+    if (!source || index < 0) return;
+    const choice = await chooseEditBehavior("user", index < source.messages.length - 1);
+    if (choice === "truncate") await forkFromMessage(messageId, editedText);
+    else if (choice === "in_place") await applyInPlaceEdit(messageId, editedText.trim());
+  }
+
+  async function editAssistantResponse(messageId: string, editedText: string) {
+    const source = activeBranch || conversation?.branches[0]; const index = source?.messages.findIndex(message => message.id === messageId) ?? -1;
+    if (!source || index < 0) return;
+    const choice = await chooseEditBehavior("assistant", index < source.messages.length - 1);
+    if (choice === "truncate") await editAssistantMessage(messageId, editedText);
+    else if (choice === "in_place") await applyInPlaceEdit(messageId, editedText.trim());
   }
 
   async function forkFromMessage(messageId: string, editedText: string) {
@@ -1424,7 +1527,7 @@ export default function Home() {
   }
   return (
     <ToolMenuContext.Provider value={toolMenu}>
-    <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""}`}>
+    <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""} ${contextViewOpen && messages.length ? "context-view-active" : ""}`}>
       <button className="mobile-menu" aria-label={locale === "ko" ? "메뉴 열기" : "Open menu"} onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
       <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-visible" : ""}`}>
         <section className="side-panel">
@@ -1458,20 +1561,24 @@ export default function Home() {
             ? conversation?.temporary !== true && messages.length === 0
               ? <button className="surface-action active icon-only" title={c.returnToRegularChat} aria-label={c.returnToRegularChat} onClick={() => setTemporaryMode(false)}><MessageSquareDashed size={16} /></button>
               : <button className="surface-action active" disabled={promoting || conversation?.temporary !== true} title={c.saveChat} aria-label={c.saveChat} onClick={() => void promoteTemporaryChat()}><Save size={16} /><span>{promoting ? c.savingChat : c.saveChat}</span></button>
-            : <button className="surface-action icon-only" title={c.temporaryChat} aria-label={c.temporaryChat} onClick={() => newChat(false, true)}><MessageSquareDashed size={16} /></button>}
+            : messages.length > 0 && conversation && !conversation.temporary
+              ? <button type="button" className={`surface-action icon-only ${contextViewOpen ? "active" : ""}`} title={locale === "ko" ? "모델에게 전달될 컨텍스트" : "Model context"} aria-label={locale === "ko" ? "모델에게 전달될 컨텍스트" : "Model context"} aria-pressed={contextViewOpen} onClick={() => { setContextViewOpen(value => !value); if (!contextViewOpen) void refreshContextState(); }}><Layers size={16} /></button>
+              : <button className="surface-action icon-only" title={c.temporaryChat} aria-label={c.temporaryChat} onClick={() => newChat(false, true)}><MessageSquareDashed size={16} /></button>}
           {messages.length > 0 && conversation && <button type="button" className={`surface-action icon-only ${activityHidden ? "active" : ""}`} title={activityHidden ? c.showActivity : c.hideActivity} aria-label={activityHidden ? c.showActivity : c.hideActivity} aria-pressed={activityHidden} onClick={() => setHiddenActivityChats((current) => ({ ...current, [conversation.id]: !current[conversation.id] }))}>{activityHidden ? <EyeOff size={16} /> : <Eye size={16} />}</button>}
         </div>
 
         <div className="conversation-stage">
-          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} /></div> : <>
+          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} notice={notice} clearNotice={() => setNotice("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} /></div> : <>
             <div className="thread-shell">
               <div className={`thread ${activityHidden ? "activity-hidden" : ""}`} ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
+                {contextViewOpen ? <ContextView ko={locale === "ko"} messages={messages} state={branchContext} includeReasoning={rememberReasoning} systemPrompt={selectedSystemPrompt} summaryEditing={contextSummaryEditing} setSummaryEditing={setContextSummaryEditing} onSave={saveContextState} confirm={askConfirm} onClose={() => setContextViewOpen(false)} /> : <>
                 {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
-                {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} waitStartedAt={pendingWait?.messageId === message.id ? pendingWait.startedAt : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={forkFromMessage} onEditAssistant={editAssistantMessage} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
+                {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} waitStartedAt={pendingWait?.messageId === message.id ? pendingWait.startedAt : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={editUserRequest} onEditAssistant={editAssistantResponse} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
+                </>}
               </div>
               {!threadAutoFollow && <button type="button" className="scroll-resume thread-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeThreadAutoFollow}><ArrowDown size={18} /></button>}
             </div>
-            <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} />
+            <Composer c={c} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} notice={notice} clearNotice={() => setNotice("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingHostApproval={pendingHostApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} />
           </>}
         </div>
       </section>
@@ -1539,8 +1646,8 @@ function ContextWindowIndicator({ c, locale, model, models, usage, includeReason
 /** Inline padding plus the gaps between the composer's three cells. */
 const INLINE_COMPOSER_CHROME = 26;
 
-function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; repetition?: RepetitionFinding; onRepetitionStop: () => void; onRepetitionRetry: () => void; onRepetitionIgnore: () => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextBreakdown: ContextUsage; harnessSettings?: HarnessSettings; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; rememberReasoning: boolean; onEditSystemPrompt?: () => void; error: string; clearError: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onOpenStorage: () => void; onRemoveAttachment: (attachment: StoredAttachment) => void; pendingChoice?: ToolEvent; pendingHostApproval?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean>; sendHeld: boolean; switchNotice: string }) {
-  const { c, appearance, draft, setDraft, sendMessage, keyDown, repetition, onRepetitionStop, onRepetitionRetry, onRepetitionIgnore, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextBreakdown, harnessSettings, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, rememberReasoning, onEditSystemPrompt, error, clearError, attachments, maxAttachments, uploadingImages, onFiles, onOpenStorage, onRemoveAttachment, pendingChoice, pendingHostApproval, onChoiceSubmit, sendHeld, switchNotice } = props;
+function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft: string; setDraft: (value: string) => void; sendMessage: (event?: FormEvent) => Promise<void>; keyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void; repetition?: RepetitionFinding; onRepetitionStop: () => void; onRepetitionRetry: () => void; onRepetitionIgnore: () => void; isGenerating: boolean; queuedPrompts: QueuedPrompt[]; onRemoveQueuedPrompt: (id: string) => void; selectedModel?: ModelConfig; models: ModelConfig[]; selectedPreset?: ReasoningPreset; contextBreakdown: ContextUsage; harnessSettings?: HarnessSettings; presetOpen: boolean; setPresetOpen: (value: boolean) => void; setPreset: (id: string) => void; defaultReasoningPresetId?: string; setDefaultReasoning: () => void; rememberReasoning: boolean; onEditSystemPrompt?: () => void; error: string; clearError: () => void; notice?: string; clearNotice?: () => void; attachments: StoredAttachment[]; maxAttachments: number; uploadingImages: boolean; onFiles: (files: File[]) => void; onOpenStorage: () => void; onRemoveAttachment: (attachment: StoredAttachment) => void; pendingChoice?: ToolEvent; pendingHostApproval?: ToolEvent; onChoiceSubmit: (id: string, value: unknown) => Promise<boolean>; sendHeld: boolean; switchNotice: string }) {
+  const { c, appearance, draft, setDraft, sendMessage, keyDown, repetition, onRepetitionStop, onRepetitionRetry, onRepetitionIgnore, isGenerating, queuedPrompts, onRemoveQueuedPrompt, selectedModel, models, selectedPreset, contextBreakdown, harnessSettings, presetOpen, setPresetOpen, setPreset, defaultReasoningPresetId, setDefaultReasoning, rememberReasoning, onEditSystemPrompt, error, clearError, notice, clearNotice, attachments, maxAttachments, uploadingImages, onFiles, onOpenStorage, onRemoveAttachment, pendingChoice, pendingHostApproval, onChoiceSubmit, sendHeld, switchNotice } = props;
   const toolMenu = useContext(ToolMenuContext);
   const fileRef = useRef<HTMLInputElement>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
@@ -1605,6 +1712,7 @@ function Composer(props: { c: CopySet; appearance: AppearancePreferences; draft:
   }, [draft, expanded, shellWidth]);
   return <div className="composer-wrap">
     {error && <div className="error-toast"><span>{error}</span><button aria-label={c.cancel} onClick={clearError}><X size={15} /></button></div>}
+    {notice && !error && <div className="error-toast info-toast" role="status"><span>{notice}</span><button aria-label={c.cancel} onClick={clearNotice}><X size={15} /></button></div>}
     {repetition && <RepetitionAlertCard key={repetition.id} c={c} finding={repetition} onStop={onRepetitionStop} onRetry={onRepetitionRetry} onIgnore={onRepetitionIgnore} />}
     {pendingChoice && <MultipleChoiceComposer key={pendingChoice.id} c={c} event={pendingChoice} onSubmit={(value) => onChoiceSubmit(pendingChoice.id, value)} />}
     {pendingHostApproval && (pendingApprovalKind(pendingHostApproval)==="mcp"?<McpApprovalComposer key={pendingHostApproval.id} c={c} event={pendingHostApproval} onSubmit={(value)=>onChoiceSubmit(pendingHostApproval.id,value)}/>:<HostApprovalComposer key={pendingHostApproval.id} c={c} event={pendingHostApproval} onSubmit={(value) => onChoiceSubmit(pendingHostApproval.id, value)} />)}
@@ -2196,14 +2304,20 @@ function ReasoningStep({ c, locale, text, seconds, startedAt, promptSeconds, pro
   const [autoFollow, setAutoFollow] = useState(true);
   const autoFollowRef = useRef(true);
   const bodyRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (live && autoFollowRef.current && bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  // Last wheel, touch, drag or key on the box: only these may stop it from following the newest text.
+  const userIntentAt = useRef(0);
+  const markUserIntent = () => { userIntentAt.current = Date.now(); };
+  useLayoutEffect(() => {
+    // Right after the person's own scroll input, leave the box alone until its scroll event says where it ended up.
+    if (live && autoFollowRef.current && bodyRef.current && Date.now() - userIntentAt.current > SCROLL_INTENT_MS) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [live, text]);
   function handleScroll() {
-    if (!live || !bodyRef.current) return;
-    const following = isNearScrollBottom(bodyRef.current, 24);
-    autoFollowRef.current = following;
-    setAutoFollow(following);
+    const body = bodyRef.current;
+    if (!live || !body) return;
+    const nearBottom = isNearScrollBottom(body, 24);
+    const following = followAfterScroll(nearBottom, autoFollowRef.current, userIntentAt.current, Date.now(), SCROLL_INTENT_MS);
+    if (following && !nearBottom) body.scrollTop = body.scrollHeight;
+    if (following !== autoFollowRef.current) { autoFollowRef.current = following; setAutoFollow(following); }
   }
   function resumeAutoFollow() {
     autoFollowRef.current = true;
@@ -2213,7 +2327,7 @@ function ReasoningStep({ c, locale, text, seconds, startedAt, promptSeconds, pro
   const shown = live || open;
   return <div className={`thinking-block ${live ? "streaming" : ""}`}>
     <button onClick={() => !live && setOpen((value) => !value)} aria-expanded={shown}><Lightbulb size={15} /> <ThinkingLabel locale={locale} seconds={shownThought} live={thinkingLive} promptSeconds={appearance.thinkingShowsPromptTime && (shownPrompt >= 1 || stageLive) ? shownPrompt : undefined} promptLive={stageLive} /> {!live && <ChevronRight size={14} className={open ? "disclosure-open" : ""} />}</button>
-    {shown && <div className="thinking-preview-shell"><div ref={bodyRef} className={`thinking-preview ${live ? "live" : ""}`} onScroll={handleScroll}>{text}</div>{live && !autoFollow && <button type="button" className="scroll-resume reasoning-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeAutoFollow}><ArrowDown size={16} /></button>}</div>}
+    {shown && <div className="thinking-preview-shell"><div ref={bodyRef} className={`thinking-preview ${live ? "live" : ""}`} onScroll={handleScroll} onWheel={markUserIntent} onTouchStart={markUserIntent} onTouchMove={markUserIntent} onPointerDown={markUserIntent} onKeyDown={markUserIntent}>{text}</div>{live && !autoFollow && <button type="button" className="scroll-resume reasoning-scroll-resume" title={c.scrollToBottom} aria-label={c.scrollToBottom} onClick={resumeAutoFollow}><ArrowDown size={16} /></button>}</div>}
   </div>;
 }
 
@@ -2226,7 +2340,7 @@ function CompactionStep({ c, locale, step, live }: { c: CopySet; locale: Locale;
   const hasOutput = Boolean(step.reasoning || step.summary);
   const shown = live || open && hasOutput;
   return <div className={`thinking-block compaction-block ${live ? "streaming" : ""}`}>
-    <button onClick={() => !live && hasOutput && setOpen((value) => !value)} aria-expanded={shown} disabled={!live && !hasOutput}><Minimize2 size={15} /> {live ? c.compactingNow : step.method === "drop" ? c.detailsDropped : formatCompactionDuration(step.seconds || 1, locale)}{!live && step.savedTokens !== undefined && <span className="compaction-saved">{locale === "ko" ? `${formatTokenCount(step.savedTokens)} 토큰 절약됨` : `${formatTokenCount(step.savedTokens)} tokens saved`}</span>} {!live && hasOutput && <ChevronDown size={14} className={open ? "rotate" : ""} />}</button>
+    <button onClick={() => !live && hasOutput && setOpen((value) => !value)} aria-expanded={shown} disabled={!live && !hasOutput}><Minimize2 size={15} /> {live ? c.compactingNow : step.method === "drop" ? c.detailsDropped : step.method === "roll" ? c.turnsRolled : formatCompactionDuration(step.seconds || 1, locale)}{!live && step.savedTokens !== undefined && <span className="compaction-saved">{locale === "ko" ? `${formatTokenCount(step.savedTokens)} 토큰 절약됨` : `${formatTokenCount(step.savedTokens)} tokens saved`}</span>} {!live && hasOutput && <ChevronDown size={14} className={open ? "rotate" : ""} />}</button>
     {shown && <div className="compaction-panes">
       {step.reasoning && <div className="compaction-pane"><small>{c.compactionThought}</small><div className="thinking-preview">{step.reasoning}</div></div>}
       {step.summary && <div className="compaction-pane"><small>{c.compactionSummary}</small><div className="thinking-preview">{step.summary}</div></div>}
@@ -2474,7 +2588,14 @@ function GeneralSettings({ c, draft, setDraft, admin, onExport, onImport, import
   const importInputRef = useRef<HTMLInputElement>(null);
   function selectLanguage(language: Locale) { setDraft((current) => ({ ...current, preferences: { ...current.preferences, language } })); }
   function toggleOnDemand() { setDraft((current) => ({ ...current, preferences: { ...current.preferences, onDemand: !current.preferences.onDemand } })); }
-  return <div className="settings-section"><SectionTitle icon={<Settings2 size={19} />} title={c.generalTitle} description={c.generalDesc} /><div className="general-setting-card"><div><strong>{c.interfaceLanguage}</strong><small>{c.languageHelp}</small></div><div className="language-options" role="radiogroup" aria-label={c.interfaceLanguage}><button role="radio" aria-checked={draft.preferences.language === "en"} className={draft.preferences.language === "en" ? "active" : ""} onClick={() => selectLanguage("en")}><span>EN</span><div><strong>{c.english}</strong><small>English</small></div>{draft.preferences.language === "en" && <Check size={16} />}</button><button role="radio" aria-checked={draft.preferences.language === "ko"} className={draft.preferences.language === "ko" ? "active" : ""} onClick={() => selectLanguage("ko")}><span>한</span><div><strong>{c.korean}</strong><small>한국어</small></div>{draft.preferences.language === "ko" && <Check size={16} />}</button></div></div>{admin && <div className="general-setting-card general-toggle-card"><div><strong>{c.onDemand}</strong><small>{c.onDemandHelp}</small></div><button role="switch" aria-checked={draft.preferences.onDemand} aria-label={c.onDemand} className={`toggle ${draft.preferences.onDemand ? "on" : ""}`} onClick={toggleOnDemand}><i /></button></div>}<div className="general-setting-card settings-transfer-card"><div><strong>{c.modelSettingsTransfer}</strong><small>{c.modelSettingsTransferDesc}</small></div><div className="settings-transfer-actions"><button type="button" onClick={onExport}><Download size={15} />{c.exportModelSettings}</button><button type="button" disabled={importing} onClick={() => importInputRef.current?.click()}><Upload size={15} />{c.importModelSettings}</button><input ref={importInputRef} type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void onImport(file); }} /></div></div><div className="general-setting-card app-version-card"><div><strong>{c.appVersion}</strong><small>NeuralNetUI</small></div><b>{APP_VERSION}</b></div></div>;
+  return <div className="settings-section"><SectionTitle icon={<Settings2 size={19} />} title={c.generalTitle} description={c.generalDesc} /><div className="general-setting-card"><div><strong>{c.interfaceLanguage}</strong><small>{c.languageHelp}</small></div><div className="language-options" role="radiogroup" aria-label={c.interfaceLanguage}><button role="radio" aria-checked={draft.preferences.language === "en"} className={draft.preferences.language === "en" ? "active" : ""} onClick={() => selectLanguage("en")}><span>EN</span><div><strong>{c.english}</strong><small>English</small></div>{draft.preferences.language === "en" && <Check size={16} />}</button><button role="radio" aria-checked={draft.preferences.language === "ko"} className={draft.preferences.language === "ko" ? "active" : ""} onClick={() => selectLanguage("ko")}><span>한</span><div><strong>{c.korean}</strong><small>한국어</small></div>{draft.preferences.language === "ko" && <Check size={16} />}</button></div></div>{admin && <div className="general-setting-card general-toggle-card"><div><strong>{c.onDemand}</strong><small>{c.onDemandHelp}</small></div><button role="switch" aria-checked={draft.preferences.onDemand} aria-label={c.onDemand} className={`toggle ${draft.preferences.onDemand ? "on" : ""}`} onClick={toggleOnDemand}><i /></button></div>}<div className="general-setting-card settings-transfer-card"><div><strong>{c.modelSettingsTransfer}</strong><small>{c.modelSettingsTransferDesc}</small></div><div className="settings-transfer-actions"><button type="button" onClick={onExport}><Download size={15} />{c.exportModelSettings}</button><button type="button" disabled={importing} onClick={() => importInputRef.current?.click()}><Upload size={15} />{c.importModelSettings}</button><input ref={importInputRef} type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void onImport(file); }} /></div></div><SegmentedSetting label={draft.preferences.language === "ko" ? "메시지 수정" : "Editing messages"} help={draft.preferences.language === "ko" ? "뒤에 대화가 이어진 메시지를 수정할 때의 동작입니다. 수정만 적용하면 뒤의 대화가 그대로 남습니다." : "What happens when you edit a message that has later messages. Apply edit only keeps them."} value={draft.preferences.messageEditMode || "ask"} onChange={value => setDraft(current => ({ ...current, preferences: { ...current.preferences, messageEditMode: value as MessageEditMode } }))} options={draft.preferences.language === "ko" ? [{ id: "truncate", label: "전부 삭제" }, { id: "in_place", label: "수정만 적용" }, { id: "ask", label: "항상 묻기" }] : [{ id: "truncate", label: "Remove what follows" }, { id: "in_place", label: "Apply edit only" }, { id: "ask", label: "Always ask" }]} /><SegmentedSetting label={draft.preferences.language === "ko" ? "압축된 메시지를 수정했을 때" : "Editing a compacted message"} help={draft.preferences.language === "ko" ? "모델이 압축 요약으로 받는 메시지를 수정했을 때, 압축 내용을 직접 고칠지 정합니다." : "When you edit a message the model only sees through the compaction summary, whether to edit the summary yourself."} value={draft.preferences.compactedEditMode || "ask"} onChange={value => setDraft(current => ({ ...current, preferences: { ...current.preferences, compactedEditMode: value as CompactedEditMode } }))} options={draft.preferences.language === "ko" ? [{ id: "edit_summary", label: "항상 편집으로 넘어가기" }, { id: "ignore", label: "항상 무시하기" }, { id: "ask", label: "항상 묻기" }] : [{ id: "edit_summary", label: "Always open the summary" }, { id: "ignore", label: "Always leave it" }, { id: "ask", label: "Always ask" }]} /><div className="general-setting-card app-version-card"><div><strong>{c.appVersion}</strong><small>NeuralNetUI</small></div><b>{APP_VERSION}</b></div></div>;
+}
+
+/** A setting with a few exclusive choices, shown as a segmented control. */
+function SegmentedSetting({ label, help, value, options, onChange }: { label: string; help: string; value: string; options: Array<{ id: string; label: string }>; onChange: (value: string) => void }) {
+  return <div className="general-setting-card segmented-setting"><div><strong>{label}</strong><small>{help}</small></div>
+    <div className="segmented-control" role="radiogroup" aria-label={label}>{options.map(option => <button key={option.id} type="button" role="radio" aria-checked={value === option.id} className={value === option.id ? "active" : ""} onClick={() => onChange(option.id)}>{option.label}</button>)}</div>
+  </div>;
 }
 
 /** One accent chooser: six named swatches, a custom entry, and the hex field the custom entry needs. */

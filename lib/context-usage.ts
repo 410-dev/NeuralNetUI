@@ -1,5 +1,6 @@
 import { estimateTokens } from "./harness.ts";
 import type { StoredMessage } from "./types.ts";
+import { applyContextState, type ContextState } from "./context-state.ts";
 
 export type ContextUsage = { input: number; response: number; reasoning: number; tools: number; summary: number; total: number };
 const count = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
@@ -27,7 +28,8 @@ function compactionBoundary(messages: StoredMessage[]): { start: number; summary
  * Output counters include reasoning; upstream input counters already include history and must
  * never be summed across turns. Attachments/formatting and untokenized text are estimates.
  */
-export function contextUsage(messages: StoredMessage[], includeReasoning: boolean, draft = "", systemPrompt = "", draftAttachments = 0): ContextUsage {
+export function contextUsage(messages: StoredMessage[], includeReasoning: boolean, draft = "", systemPrompt = "", draftAttachments = 0, state?: ContextState): ContextUsage {
+  if (state) return stateUsage(messages, includeReasoning, draft, systemPrompt, draftAttachments, state);
   const boundary = compactionBoundary(messages);
   const { start, summary } = boundary;
   let input = estimate(systemPrompt) + estimate(draft) + draftAttachments * 1600;
@@ -54,6 +56,32 @@ export function contextUsage(messages: StoredMessage[], includeReasoning: boolea
         const visual = result?.contextTokensConsumed !== true && Number.isFinite(Number(result?.contextTokens)) ? Math.max(0, Number(result?.contextTokens)) : 0;
         tools += Math.max(base, visual);
       }
+    }
+  }
+  return { input, response, reasoning, tools, summary, total: input + response + reasoning + tools + summary };
+}
+
+/**
+ * Usage when the branch's context state is known: the stored summary replaces what it covers, dropped details and
+ * context-view edits are applied, and the model sees each remaining message as the state shapes it.
+ */
+function stateUsage(messages: StoredMessage[], includeReasoning: boolean, draft: string, systemPrompt: string, draftAttachments: number, state: ContextState): ContextUsage {
+  const applied = applyContextState(messages, state);
+  const summary = estimate(applied.summary);
+  let input = estimate(systemPrompt) + estimate(draft) + draftAttachments * 1600;
+  let response = 0; let reasoning = 0; let tools = 0;
+  for (const { message, original, overridden, detailsDropped } of applied.entries) {
+    if (message.role === "user") { input += estimate(message.content) + (message.attachments?.length || 0) * 1600; continue; }
+    // Stored counters describe the original reply; once its text or details changed, estimate what is sent instead.
+    const counted = !overridden && !detailsDropped ? count(original.outputTokens) : undefined;
+    const thinking = message.reasoning ? Math.min(counted ?? Infinity, !overridden && !detailsDropped ? count(original.reasoningTokens) ?? estimate(message.reasoning) : estimate(message.reasoning)) : 0;
+    response += counted === undefined ? estimate(message.content) : Math.max(0, counted - thinking);
+    if (includeReasoning) reasoning += thinking;
+    for (const event of message.toolEvents || []) {
+      const base = estimateTokens({ name: event.name, arguments: event.arguments, result: event.result });
+      const result = event.result && typeof event.result === "object" ? event.result as Record<string, unknown> : undefined;
+      const visual = result?.contextTokensConsumed !== true && Number.isFinite(Number(result?.contextTokens)) ? Math.max(0, Number(result?.contextTokens)) : 0;
+      tools += Math.max(base, visual);
     }
   }
   return { input, response, reasoning, tools, summary, total: input + response + reasoning + tools + summary };

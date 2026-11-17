@@ -2,7 +2,9 @@ import { progressEvent } from "./inference-progress";
 import { nativeChatResponse, observeLmStudioPrefill } from "./lm-studio-progress";
 import { contextOverflowDetails, DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rollingMessages, contextThresholdReached, usesCompactionThreshold, VISUAL_TOOL_CONTENT_PREFIX } from "./harness";
 import { contextUsage } from "./context-usage";
-import { harnessCompletion, prepareContext, compactForResume, compactToolContext, dropContextDetails, type CompactionRecord, type CompactionUpdate } from "./harness-runtime";
+import { harnessCompletion, prepareContext, compactForResume, compactToolContext, dropContextDetails, rollContext, HISTORICAL_SUMMARY_PREFIX, type CompactionRecord, type CompactionUpdate } from "./harness-runtime";
+import { applyContextState, messageBeforeLatestUser, type ContextState } from "./context-state";
+import { loadContextState, updateContextState } from "./context-store";
 import { effectiveContextWindowTokens } from "./model-context";
 import { db } from "./database";
 import { registerChatDisposal } from "./chat-disposal";
@@ -36,7 +38,7 @@ import { createThinkingSplitter, effectiveThinkingTags, normalizeThinkingTags, t
 import { canPersonalizeSystemPrompt, readModelSystemPrompts, readSystemPromptOverrides, resolveSystemPrompt } from "./system-prompt";
 import { readUserPreferences } from "./auth";
 
-type InputMessage = { role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
+type InputMessage = { id?: string; role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
 type UpstreamMessage = { role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string };
 type ToolCall = { id: string; function: { name: string; arguments: string }; type: "function" };
 type JobStatus = "running" | "waiting" | "completed" | "stopped" | "error";
@@ -75,7 +77,7 @@ export type StartChatJobInput = {
   clientContext?: { timeZone?: string; locale?: string; language?: "en" | "ko" };
 };
 
-function runtimeModel(config: Awaited<ReturnType<typeof readConfig>>, input: Pick<StartChatJobInput, "modelId" | "aliasBaseModelId">, userId: string) {
+export function runtimeModel(config: Awaited<ReturnType<typeof readConfig>>, input: Pick<StartChatJobInput, "modelId" | "aliasBaseModelId">, userId: string) {
   const selected = config.models.find(model => model.id === input.modelId);
   if (!selected || !canUseModel(selected, { id: userId } as never)) throw new Error("The selected model is unavailable.");
   if (!selected.isAlias) return { selected, model: selected, base: selected };
@@ -569,7 +571,16 @@ async function run(job: ChatJob) {
       trackPhase(job); stampTotalDuration(job); job.waitPhase = undefined; job.waitProgress = undefined; job.status = "completed";
       await persist(job); broadcast(job, true); finishSubscribers(job); return;
     }
-    let messages: UpstreamMessage[] = await upstreamMessages(job.input, job.userId, systemPrompt, config.toolSettings, model);
+    // The branch's context state (summary, dropped details, context-view edits) shapes what the model receives.
+    let contextState: ContextState | undefined;
+    try { contextState = loadContextState(job.input.branchId); } catch (error) { console.warn("Context state could not be read:", error); }
+    const appliedContext = applyContextState(job.input.messages.map(message => ({ ...message, reasoning: message.reasoning_content })), contextState);
+    const contextInput = { ...job.input, messages: appliedContext.entries.map(({ message: { reasoning, ...message } }) => ({ ...message, ...(reasoning ? { reasoning_content: reasoning } : { reasoning_content: undefined }) })) };
+    let messages: UpstreamMessage[] = await upstreamMessages(contextInput, job.userId, systemPrompt, config.toolSettings, model);
+    if (appliedContext.summary) {
+      const systems = messages.findLastIndex(message => message.role === "system") + 1;
+      messages = [...messages.slice(0, systems), { role: "system", content: `${HISTORICAL_SUMMARY_PREFIX}${appliedContext.summary}` }, ...messages.slice(systems)];
+    }
     const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
     const harnessContext = { config, model, userId: job.userId, sessionId: job.input.conversationId, signal: job.controller.signal, onPhase: (phase: ChatWaitPhase) => setWaitPhase(job, phase) };
     const toolRequest: ToolRequestContext = {
@@ -600,11 +611,22 @@ async function run(job: ChatJob) {
     // The composer's donut reads the stored counters; the same reading has to drive compaction,
     // or a request the interface calls 89% full is sent untouched.
     const branchMessages = (job.conversation.branches.find(item => item.id === job.input.branchId) || job.conversation.branches[0])?.messages || [];
-    let measuredInput = contextUsage(branchMessages, job.input.sendReasoning === true, "", systemPrompt).total;
+    let measuredInput = contextUsage(branchMessages, job.input.sendReasoning === true, "", systemPrompt, 0, contextState).total;
     let compactedBeforeSending = false;
     const messageCountBeforePreparation = messages.length;
-    messages = await prepareContext(harnessContext, job.input.branchId, messages, true, estimateTokens(tools), measuredInput,
-      record => { compactedBeforeSending = true; completeCompaction(job, record); }, record => updateCompaction(job, record));
+    const throughMessageId = messageBeforeLatestUser(job.input.messages);
+    messages = await prepareContext(harnessContext, messages, {
+      overhead: estimateTokens(tools), measured: measuredInput,
+      onCompaction: record => { compactedBeforeSending = true; completeCompaction(job, record); }, onUpdate: record => updateCompaction(job, record),
+      persistence: { throughMessageId, save: change => {
+        if (!throughMessageId) return;
+        try {
+          updateContextState(job.input.branchId, state => ({ ...state,
+            ...(change.summary !== undefined ? { summary: { text: change.summary, throughMessageId } } : {}),
+            ...(change.droppedDetails ? { droppedThroughMessageId: throughMessageId } : {}) }));
+        } catch (error) { console.warn("Context state could not be saved:", error); }
+      } },
+    });
     // A send-time compaction happened before any output, so it opens the transcript.
     if (compactedBeforeSending || messages.length !== messageCountBeforePreparation) { measuredInput = 0; if (compactedBeforeSending) broadcast(job, true); }
     let measuredEstimate = measuredInput > 0 ? estimateTokens(messages) + estimateTokens(tools) : undefined;
@@ -643,18 +665,21 @@ async function run(job: ChatJob) {
       const contextWindow = configuredContextWindow && detectedContextWindow ? Math.min(configuredContextWindow, detectedContextWindow) : configuredContextWindow || detectedContextWindow;
       let projectedInput = projectedInputTokens(estimateTokens(messages) + estimateTokens(tools), measuredInput, measuredEstimate);
       const skipToolCompaction = skipToolCompactionOnce; skipToolCompactionOnce = false;
-      if (contextWindow && turn > 0 && !skipToolCompaction && usesCompactionThreshold(harness.contextMode) && projectedInput >= Math.min(contextWindow * .95, contextWindow * harness.compactThreshold / 100)) {
-        if (harness.contextMode === "dropping") {
-          // No model call: earlier rounds lose their tool content and reasoning, the newest tool exchange stays.
-          beginToolCompaction(job);
-          try { messages = dropContextDetails(messages, Math.floor(contextWindow * .95) - estimateTokens(tools), undefined, recordCompaction); }
-          catch { throw overflowError({ contextWindow }); }
-        } else {
-        releaseModel?.(); releaseModel = undefined;
-        if (++compactionResumes > harness.maxCompactionResumes) throw compactionError();
-        beginToolCompaction(job);
-        try { messages = await compactToolContext(harnessContext, messages, recordCompaction, record => updateCompaction(job, record)); }
-        catch (error) { job.controller.signal.throwIfAborted(); throw overflowError({ contextWindow }); }
+      const thresholdTokens = contextWindow ? Math.min(contextWindow * .95, contextWindow * harness.compactThreshold / 100) : 0;
+      if (contextWindow && turn > 0 && !skipToolCompaction && usesCompactionThreshold(harness) && projectedInput >= thresholdTokens) {
+        // Drop Details first (no model call; the newest tool exchange stays), then the base method if still over.
+        if (harness.dropDetailsFirst) messages = dropContextDetails(messages, undefined, recordCompaction);
+        if (estimateTokens(messages) + estimateTokens(tools) >= thresholdTokens) {
+          if (harness.contextMode === "compacting") {
+            releaseModel?.(); releaseModel = undefined;
+            if (++compactionResumes > harness.maxCompactionResumes) throw compactionError();
+            beginToolCompaction(job);
+            try { messages = await compactToolContext(harnessContext, messages, recordCompaction, record => updateCompaction(job, record)); }
+            catch (error) { job.controller.signal.throwIfAborted(); throw overflowError({ contextWindow }); }
+          } else {
+            try { messages = rollContext(messages, Math.floor(thresholdTokens) - estimateTokens(tools), Math.floor(contextWindow * .95) - estimateTokens(tools), recordCompaction); }
+            catch { throw overflowError({ contextWindow }); }
+          }
         }
         measuredInput = 0; measuredEstimate = undefined;
         projectedInput = estimateTokens(messages) + estimateTokens(tools);
@@ -692,15 +717,20 @@ async function run(job: ChatJob) {
         const failedEstimate = estimateTokens(messages) + estimateTokens(tools);
         if (Number.isFinite(serverWindow)) detectedContextWindow = serverWindow;
         releaseModel?.(); releaseModel = undefined;
-        if (usesCompactionThreshold(harness.contextMode) && Number.isFinite(serverWindow) && ++compactionResumes <= harness.maxCompactionResumes) {
+        if (usesCompactionThreshold(harness) && Number.isFinite(serverWindow) && ++compactionResumes <= harness.maxCompactionResumes) {
           try {
-            if (turn > 0) beginToolCompaction(job);
-            const dropBudget = Math.floor(serverWindow * .9 * Math.min(1, failedEstimate / Math.max(1, overflow.promptTokens || failedEstimate))) - estimateTokens(tools);
-            messages = harness.contextMode === "dropping"
-              ? dropContextDetails(messages, dropBudget, turn > 0 ? undefined : messages.findLastIndex(message => message.role === "user"), recordCompaction)
-              : turn > 0
-              ? await compactToolContext(harnessContext, messages, recordCompaction, record => updateCompaction(job, record))
-              : await prepareContext(harnessContext, job.input.branchId, messages, false, estimateTokens(tools), overflow.promptTokens, recordCompaction, record => updateCompaction(job, record));
+            // The server's own count can exceed the estimate; aim below its window in estimate units.
+            const target = Math.floor(serverWindow * .9 * Math.min(1, failedEstimate / Math.max(1, overflow.promptTokens || failedEstimate))) - estimateTokens(tools);
+            if (harness.dropDetailsFirst) messages = dropContextDetails(messages, turn > 0 ? undefined : messages.findLastIndex(message => message.role === "user"), recordCompaction);
+            if (estimateTokens(messages) > target) {
+              if (harness.contextMode === "rolling") messages = rollContext(messages, target, target, recordCompaction);
+              else {
+                if (turn > 0) beginToolCompaction(job);
+                messages = turn > 0
+                  ? await compactToolContext(harnessContext, messages, recordCompaction, record => updateCompaction(job, record))
+                  : await prepareContext(harnessContext, messages, { overhead: estimateTokens(tools), measured: overflow.promptTokens, onCompaction: recordCompaction, onUpdate: record => updateCompaction(job, record) });
+              }
+            }
           } catch (compactionFailure) { job.controller.signal.throwIfAborted(); throw overflowError(overflow); }
           const compactedEstimate = estimateTokens(messages) + estimateTokens(tools);
           const correction = overflow.promptTokens ? Math.max(1, overflow.promptTokens / Math.max(1, failedEstimate)) : 1;
