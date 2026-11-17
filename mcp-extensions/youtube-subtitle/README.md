@@ -44,7 +44,13 @@ docker compose up -d --build
 cat config/config.json
 ```
 
-`config` 폴더는 반드시 먼저 만들어야 합니다. Docker가 대신 만들면 root 소유가 되어 컨테이너가 키를 저장하지 못합니다. 컨테이너는 호스트의 현재 사용자(`UID`/`GID`, 기본 1000)로 실행됩니다.
+`config` 폴더는 반드시 먼저 만들어야 합니다. Docker가 대신 만들면 root 소유가 되어 컨테이너가 키를 저장하지 못합니다. 컨테이너는 UID/GID 1000으로 실행되므로 폴더 소유자가 1000이어야 합니다. root로 설치한다면 다음처럼 맞춥니다.
+
+```bash
+mkdir -p config && chown 1000:1000 config && chmod 700 config
+```
+
+다른 사용자로 실행하려면 `YOUTUBE_SUBTITLE_UID`, `YOUTUBE_SUBTITLE_GID` 환경 변수로 지정합니다(셸의 `UID`는 읽기 전용이라 쓰지 않습니다).
 
 동작 확인:
 
