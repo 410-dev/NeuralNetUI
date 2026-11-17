@@ -1,21 +1,15 @@
+import { functionLabel } from "./tools/catalog.ts";
 import type { Locale, ToolEventStatus } from "./types";
 
 export type ToolGroupState = "active" | "completed" | "error";
 
-const TOOL_NAMES: Record<string, Record<Locale, string>> = {
-  internet_search: { en: "Internet search", ko: "인터넷 검색" },
-  visit_page: { en: "Page visit", ko: "페이지 방문" },
+/** Tools that no longer ship, so calls saved in older chats keep a readable name. */
+const RETIRED_TOOL_NAMES: Record<string, Record<Locale, string>> = {
   browser: { en: "Browser", ko: "브라우저" },
-  host_computer: { en: "Host computer", ko: "호스트 컴퓨터" },
-  storage_access: { en: "Storage access", ko: "저장소 접근" },
-  get_current_time: { en: "Current time", ko: "현재 시간" },
-  get_current_location: { en: "Current location", ko: "현재 위치" },
-  ask_multiple_choice: { en: "Multiple choice", ko: "다중 선택" },
-  create_artifact: { en: "Artifact", ko: "아티팩트" },
 };
 
 export function getToolDisplayName(name: string, locale: Locale) {
-  const known = TOOL_NAMES[name]?.[locale];
+  const known = functionLabel(name, locale) ?? RETIRED_TOOL_NAMES[name]?.[locale];
   if (known) return known;
   const mcpName = name.match(/^mcp_[a-f0-9]{8}_(.+)$/i)?.[1];
   const readable = (mcpName ? `MCP ${mcpName}` : name).replaceAll("_", " ").trim() || (locale === "ko" ? "알 수 없는" : "Unknown");

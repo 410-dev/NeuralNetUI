@@ -24,10 +24,9 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000 \
     NEURAL_CHAT_DATA_DIR=/app/data \
-    NEURAL_CHAT_PYTHON=python3 \
-    NEURAL_CHAT_BROWSER_EXECUTABLE=/usr/bin/chromium
+    NEURAL_CHAT_PYTHON=python3
 
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip chromium fonts-noto-cjk \
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder --chown=node:node /app/.next/standalone ./

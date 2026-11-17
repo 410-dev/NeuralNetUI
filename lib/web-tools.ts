@@ -8,7 +8,7 @@ import { classifyDocument, cleanupTemporaryDocuments, decodeTextDocument, pdfMod
 import { pageVisitHeaders } from "./page-visit-request.ts";
 import type { ToolSettings } from "./types.ts";
 
-export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; browser?: boolean; storageAccess?: boolean; storageRead?: boolean; storageWrite?: boolean; storageWriteMaxFiles?: number; currentTime?: boolean; location?: boolean; multipleChoice?: boolean; artifact?: boolean; hostComputer?: boolean; mcpConnectionIds?: string[]; mcpToolNames?: Record<string,string[]> };
+export type EnabledWebTools = { internetSearch?: boolean; pageVisit?: boolean; storageAccess?: boolean; storageRead?: boolean; storageWrite?: boolean; storageWriteMaxFiles?: number; currentTime?: boolean; location?: boolean; multipleChoice?: boolean; artifact?: boolean; hostComputer?: boolean; mcpConnectionIds?: string[]; mcpToolNames?: Record<string,string[]> };
 export type WebToolExecution = { result: unknown; content?: ModelContentPart[] };
 
 export function toolDefinitions(enabled: EnabledWebTools, settings: ToolSettings) {
@@ -27,34 +27,6 @@ export function toolDefinitions(enabled: EnabledWebTools, settings: ToolSettings
       name: "visit_page",
       description: "Visit a public HTTP(S) page and read its title and main text. Use URLs from search results when more detail is needed.",
       parameters: { type: "object", properties: { url: { type: "string", description: "Public http:// or https:// URL" } }, required: ["url"], additionalProperties: false },
-    },
-  });
-  if (enabled.browser) tools.push({
-    type: "function",
-    function: {
-      name: "browser",
-      description: `Control a real JavaScript-enabled browser for pages that visit_page cannot render. One session supports up to ${settings.maxBrowserTabs} tabs. Open a session, inspect and interact with its active tab, and use list_tabs, new_tab, switch_tab, close_tab, and set_tab_metadata to organize parallel work. Tab listings include title, URL, model-assigned label, and note. Reuse session_id and tab_id values exactly across tool rounds and later responses in this conversation. If a CAPTCHA or another step needs the person, use request_user; they can operate the same tabs in split view and mark the handoff complete. Tabs remain open after a response ends; close a tab or session only when it is no longer needed.`,
-      parameters: {
-        type: "object",
-        properties: {
-          action: { type: "string", enum: ["open", "inspect", "click", "type", "select", "press", "scroll", "wait", "screenshot", "list_tabs", "new_tab", "switch_tab", "close_tab", "set_tab_metadata", "request_user", "close"] },
-          url: { type: "string", description: "Public HTTP(S) URL; required for open" },
-          session_id: { type: "string", description: "Session returned by open; required for every other action" },
-          tab_id: { type: "string", description: "Tab identifier from open, new_tab, or list_tabs; required for switch_tab, close_tab, and set_tab_metadata" },
-          label: { type: "string", description: "Short model-assigned tab label for new_tab or set_tab_metadata; omitted fields are preserved and an empty string clears one" },
-          note: { type: "string", description: "Model note describing the tab's purpose or findings; omitted fields are preserved and an empty string clears one" },
-          target: { type: "string", description: "Element ref such as e3 from the latest snapshot, or a CSS selector" },
-          text: { type: "string", description: "Replacement text for type" },
-          value: { type: "string", description: "Option value for select" },
-          key: { type: "string", description: "Playwright key such as Enter, Tab, or ArrowDown for press" },
-          delta_y: { type: "number", minimum: -10000, maximum: 10000, description: "Vertical pixels for scroll" },
-          wait_seconds: { type: "number", minimum: 0, maximum: 30, description: "Delay before returning or capturing" },
-          screenshot: { type: "boolean", description: "Capture after open and wait_seconds" },
-          full_page: { type: "boolean", description: "Capture the complete scrollable page" },
-          message: { type: "string", description: "Short instruction shown to the person for request_user" },
-        },
-        required: ["action"], additionalProperties: false,
-      },
     },
   });
   if (enabled.currentTime) tools.push({

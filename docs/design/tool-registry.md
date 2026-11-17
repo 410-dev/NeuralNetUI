@@ -38,7 +38,7 @@ lib/tools/
   index.ts        toolSources(), disposeConversationTools()
 ```
 
-`web-tools.ts`, `browser-tool.ts`, `storage-tool.ts`, `host-computer-tool.ts`, `mcp.ts`의 실행 로직은 그대로이고, `builtin.ts`와 `mcp-source.ts`는 얇은 어댑터입니다.
+`web-tools.ts`, `storage-tool.ts`, `host-computer-tool.ts`, `mcp.ts`의 실행 로직은 그대로이고, `builtin.ts`와 `mcp-source.ts`는 얇은 어댑터입니다.
 
 ## 4. 공급자 계약
 
@@ -112,26 +112,34 @@ interface ToolState {
 
 ## 8. 수명 주기
 
-대화를 지우는 모든 경로(단건 · 일괄 · 조건 삭제 · 저장소 파일과 함께 삭제)는 `disposeConversationTools(userId, ids)`를 부릅니다. 이 함수는 세션 승인을 지우고 각 공급자의 `disposeConversation`을 호출합니다. 브라우저 세션과 호스트 컴퓨터 상태가 여기서 정리되며, 여러 번 불러도 안전합니다.
+대화를 지우는 모든 경로(단건 · 일괄 · 조건 삭제 · 저장소 파일과 함께 삭제)는 `disposeConversationTools(userId, ids)`를 부릅니다. 이 함수는 세션 승인을 지우고 각 공급자의 `disposeConversation`을 호출합니다. 호스트 컴퓨터 상태가 여기서 정리되며, 여러 번 불러도 안전합니다.
 
-## 9. 복잡한 공급자: 샌드박스 연산 도구
+## 9. 클라이언트에서 실행되는 공급자: 코드 실행
 
-샌드박스에서 도는 Python · JavaScript 같은 연산 보조 도구는 다음처럼 이 계약에 들어갑니다. 레지스트리 쪽 추가 작업 없이 공급자 하나로 구현할 수 있습니다.
+`code-runner`(`run_javascript`, `run_python`)는 실행을 브라우저에 맡기는 공급자의 예입니다. 서버 쪽은 `builtin.ts`의 어댑터 하나이고, 레지스트리는 바꾸지 않았습니다.
+
+1. `execute`가 요청을 정규화해 도구 이벤트 인자(`{ language, code, timeoutSeconds }`)에 기록하고 `waitForUser()`로 기다립니다. 실행 중에는 `releasesModelWhileRunning`으로 모델 점유를 풉니다.
+2. 채팅을 보고 있는 브라우저는 매니페스트의 `clientRenderer: "code-runner"`를 보고 대기 중인 이벤트를 찾아 `lib/code-runner-client.ts`로 실행합니다.
+3. 실행 환경은 언어별 숨김 iframe(`sandbox="allow-scripts"`, 불투명 출처)과 그 안의 Web Worker입니다. iframe의 CSP는 JavaScript에 네트워크를 전혀 허용하지 않고, Python에는 Pyodide CDN(jsDelivr)만 허용합니다. 제한 시간이 지나면 Worker를 종료합니다.
+4. 결과는 `/api/chat/:id/input`으로 돌아오고, 서버가 `normalizeCodeRunResult`로 다시 길이를 제한해 모델에 넘깁니다.
+
+요청 · 결과 형식과 한도는 서버와 브라우저가 함께 쓰는 `lib/tools/code-runner.ts`에 있습니다.
+
+같은 계약으로 더 복잡한 도구를 붙일 때 쓰는 부분:
 
 | 필요한 것 | 계약에서 쓰는 부분 |
 | --- | --- |
-| 함수 여러 개 (`run_python`, `run_javascript`) | 매니페스트 `functions` 여러 개 → 메뉴에서 함수별 스위치 자동 표시 |
-| 사용자 옵션 (네트워크 허용, 실행 시간 등) | 매니페스트 `options` 스키마 → 메뉴에 자동 표시, 서버에서 범위 검사 |
+| 함수 여러 개 | 매니페스트 `functions` 여러 개 → 메뉴에서 함수별 스위치 자동 표시 |
+| 사용자 옵션 | 매니페스트 `options` 스키마 → 메뉴에 자동 표시, 서버에서 범위 검사 |
 | 런타임 설치 여부, 관리자 활성화 | `requires.experimental` 또는 `available()` |
-| 대화별 샌드박스 유지 · 정리 | 공급자 내부 세션 맵 + `disposeConversation` |
+| 대화별 상태 유지 · 정리 | 공급자 내부 세션 맵 + `disposeConversation` |
 | 긴 실행과 중단 | `ctx.signal` (생성 중단 시 취소) |
 | 진행 표시 | `ctx.updateEvent` |
-| 실행 중 모델 점유 해제 | `releasesModelWhileRunning` |
+| 브라우저에 실행 맡기기 | `waitForUser` + `clientRenderer` |
 | 그림 · 표 결과를 모델에 전달 | `ToolExecution.content`의 이미지 · 텍스트 파트 |
-| 결과 파일을 개인 저장소에 저장 | 내장 공급자이므로 `uploads.ts`를 직접 사용 |
 | 누적 한도 (대화당 실행 횟수 등) | `ctx.history()` |
 
-남은 부분: 관리자용 공급자 설정(메모리 상한 등)을 그릴 공용 화면은 아직 없습니다. 지금은 `toolSettings`에 필드를 추가하고 설정 화면에 직접 그려야 합니다. 샌드박스를 붙일 때 매니페스트에 관리자 설정 스키마를 추가해 일반화하는 것을 권장합니다.
+남은 부분: 관리자용 공급자 설정을 그릴 공용 화면은 아직 없습니다. 필요해지면 매니페스트에 관리자 설정 스키마를 추가해 일반화하는 것을 권장합니다.
 
 ## 10. 다음 단계: 워크스페이스 플러그인
 

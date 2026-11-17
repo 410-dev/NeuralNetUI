@@ -61,19 +61,6 @@
 - Storage access uses the same in-place disclosure pattern: the parent switch stays at the right, while the fold reveals independent read/write permissions and a compact per-session text-file limit.
 - Artifact results leave the technical tool disclosure and become quiet message cards. Keep Open left of Expand on each card. Expand renders a 2:3 preview inside the card without a modal and collapses in place; Open uses the centered work-surface size of Settings with an explicit maximize/restore control for a true viewport-filling view: isolated HTML, tabular CSV, foldable structured data, or rendered Markdown. A Preview/Code segment beside Download exposes every format's syntax-coloured source; non-HTML editing keeps source and live rendering visible together.
 
-## Shared browser surface
-
-- When browser mode is active, place one quiet monitor control with the other top-of-chat actions. A model handoff opens the same surface automatically so the user never has to hunt for it.
-- Keep desktop chat and browser as peers in a split layout. On narrow screens, let the browser become a dismissible full-screen surface instead of squeezing either pane or introducing horizontal scrolling.
-- The browser frame represents the exact Chromium page shared with the model. Preserve aspect ratio, map pointer and wheel coordinates back to the fixed browser viewport, and keep navigation and focused-field text entry immediately adjacent to the frame.
-- Put a horizontally scrollable tab strip above navigation. Titles come from pages, while model-assigned labels lead and notes remain available as concise tab context. New-tab availability must visibly follow the administrator's session limit.
-- Human and model controls operate on the same active tab. The model can list, label, note, open, switch, and close tabs by stable per-session identifiers; closing the last tab ends that browser session.
-- Browser tabs belong to the conversation rather than one assistant response. Keep them available across completed responses and periods of inactivity; only an explicit user/model close, last-tab close, or conversation deletion ends the session. Capacity limits reject new sessions instead of evicting existing work.
-- Human handoff is explicit: state why the model is waiting and provide one completion action. Closing the visual panel does not claim the task is complete or discard the shared session.
-- Browser frames and controls are authenticated conversation surfaces, not public media endpoints. Keep ownership checks and public-network navigation policy active for every operation.
-- Bound model-facing page snapshots by both body length and final serialized size; labels and links must not bypass the page-text limit.
-- A full-page screenshot is a context-safe observation, not an unlimited bitmap. Cap its captured height, disclose truncation, estimate multimodal tokens conservatively, and let the model scroll for later sections.
-
 ## Selectable questions
 
 - Present model questions above the composer rather than inside the technical tool disclosure.

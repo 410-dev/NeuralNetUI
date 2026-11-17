@@ -47,7 +47,6 @@ node scripts/start-server.mjs --check
 | `NEURAL_CHAT_SERVER_CONFIG` | `<앱 루트>/app-config.json` | 서버 설정 파일 경로 |
 | `NEURAL_CHAT_DATA_DIR` | `<앱 루트>/data` | DB·업로드가 저장될 디렉터리 |
 | `NEURAL_CHAT_DB_PATH` | `<데이터 디렉터리>/neural-chat.sqlite3` | DB 파일만 다른 위치에 둘 때 |
-| `NEURAL_CHAT_BROWSER_EXECUTABLE` | 자동 탐지 | 브라우저 도구가 사용할 Chromium 실행 파일 |
 | `NEURAL_CHAT_PYTHON` | 자동 탐지 | 검색·PDF 처리에 사용할 Python 실행 파일 |
 | `NEURAL_CHAT_WINDOWS_SERVICE` | — | Windows 서비스로 실행 중임을 알리는 내부 표시 |
 | `OPENAI_API_KEY` | — | OpenAI 드라이버 연결에 저장된 키가 없을 때의 대체 키 |

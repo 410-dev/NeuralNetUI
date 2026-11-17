@@ -14,7 +14,7 @@ const spec = (name: string, sourceName?: string) => ({ name, description: name, 
 function request(overrides: Partial<ToolRequestContext> = {}): ToolRequestContext {
   return {
     userId: "u1", role: "user", conversationId: "c1", locale: "en", signal: new AbortController().signal,
-    config: { experimental: { browserTool: false, hostComputerTool: false } } as unknown as ToolRequestContext["config"],
+    config: { experimental: { hostComputerTool: false } } as unknown as ToolRequestContext["config"],
     model: {} as ToolRequestContext["model"], history: () => [], services: { complete: async () => ({ text: "" }) },
     ...overrides,
   };

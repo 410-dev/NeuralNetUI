@@ -10,7 +10,6 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   serverExternalPackages: ["better-sqlite3"],
   outputFileTracingIncludes: {
-    "/*": ["./node_modules/playwright-core/**/*"],
     "/api/backup": ["./node_modules/7zip-bin/index.js", "./node_modules/7zip-bin/package.json", `./node_modules/7zip-bin/${sevenZipBinary}`],
   },
   outputFileTracingExcludes: {

@@ -10,7 +10,6 @@
 | 렌더링 | `react-markdown`, `remark-gfm`, `remark-math`, `rehype-katex`, KaTeX |
 | 아이콘 | `lucide-react` |
 | 이미지 처리 | `sharp` |
-| 브라우저 자동화 | `playwright-core` (Chromium) |
 | LM Studio | `@lmstudio/sdk` |
 | NNUI Server | OpenAI 호환 HTTP와 인증된 SSE 이벤트 스트림 |
 | 보조 런타임 | Python (`ddgs` 검색, PDF 처리) |
@@ -46,7 +45,7 @@
 | `lib/tools/` | 도구 레지스트리: 공급자 계약, 내장·MCP 공급자, 켜고 끄기 상태, 공용 승인 ([설계](design/tool-registry.md)) |
 | `lib/web-tools.ts` | 검색·페이지 방문·시간·위치·선택형 질문 도구 |
 | `lib/mcp.ts` / `mcp-utils.ts` | 사용자별 MCP CRUD, Streamable HTTP 실행, 도구 네임스페이스, 네트워크 경계 |
-| `lib/browser-tool.ts` | Chromium 세션, 탭, 스냅샷, 스크린샷 |
+| `lib/code-runner-client.ts` | 코드 실행 도구의 브라우저 샌드박스(격리 iframe + Worker, Pyodide) |
 | `lib/storage-tool.ts` / `uploads.ts` / `storage-chunk-upload.ts` | 개인 저장소와 업로드 |
 | `lib/host-computer-tool.ts` / `host-permissions.ts` | 호스트 컴퓨터 도구와 권한 매트릭스 |
 | `lib/document-processing.ts` | 문서 분류, 텍스트 디코딩, PDF 처리 |
@@ -112,7 +111,6 @@
 | `/api/chat` | POST | 채팅 작업 시작(SSE 스트림) |
 | `/api/chat/[id]` | GET, DELETE | 작업 스냅샷 구독, 중단 |
 | `/api/chat/[id]/input` | POST | 선택형 질문 답변, 호스트 승인 응답 |
-| `/api/browser-view` | GET, POST | 실시간 브라우저 화면 조회와 조작 |
 
 ### 저장소
 

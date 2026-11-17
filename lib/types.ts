@@ -305,13 +305,11 @@ export interface HarnessSettings {
 /** Opt-in features an administrator must switch on before anyone can use them. */
 export interface ExperimentalFeatures {
   openAIProgress?: boolean;
-  browserTool: boolean;
   hostComputerTool: boolean;
 }
 
 export interface ToolSettings {
   maxToolRounds: number;
-  maxBrowserTabs: number;
   maxMultipleChoiceQuestions: number;
   maxAttachmentsPerMessage: number;
   textDownloadLimitMb: number;

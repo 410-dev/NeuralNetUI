@@ -5,7 +5,7 @@
 | 방식 | 런타임 포함 | 자동 시작 | 데이터 위치(기본) |
 | --- | --- | --- | --- |
 | 호스팅 스크립트 | 아니요 | 아니요 | `./data` |
-| Windows MSI | 예(Node·Python·Chromium) | Windows 서비스 | `%ProgramData%\Neural Chat\data` |
+| Windows MSI | 예(Node·Python) | Windows 서비스 | `%ProgramData%\Neural Chat\data` |
 | Docker | 예 | `restart: unless-stopped` | 프로젝트의 `./data` 볼륨 |
 | LXC / systemd | 아니요 | systemd 유닛 | `NEURAL_CHAT_DATA_DIR` |
 
@@ -15,7 +15,7 @@
 
 ## Windows MSI
 
-`installer/build-msi.ps1`이 만드는 `installer/output/NeuralNetUI-<버전>-x64.msi`에는 Node.js, 앱 런타임, 헤드리스/헤디드 Chromium, 임베디드 Python, Windows 서비스, 트레이 앱이 모두 포함됩니다. (빌드 산출물 디렉터리는 저장소에 커밋되지 않습니다.)
+`installer/build-msi.ps1`이 만드는 `installer/output/NeuralNetUI-<버전>-x64.msi`에는 Node.js, 앱 런타임, 임베디드 Python, Windows 서비스, 트레이 앱이 모두 포함됩니다. (빌드 산출물 디렉터리는 저장소에 커밋되지 않습니다.)
 
 ### 설치
 

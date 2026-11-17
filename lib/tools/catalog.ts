@@ -13,7 +13,7 @@ export type ToolOrigin = "builtin" | "workspace" | "user";
 export type ToolCategory = "internet" | "awareness" | "agent" | "interaction";
 /** Menu section: the fixed built-in categories, then the installed tiers. */
 export type ToolSection = ToolCategory | "workspace" | "mcp";
-export type ToolIcon = "search" | "link" | "monitor" | "clock" | "map-pin" | "hard-drive" | "terminal" | "list-checks" | "code" | "cable" | "wrench";
+export type ToolIcon = "search" | "link" | "braces" | "clock" | "map-pin" | "hard-drive" | "terminal" | "list-checks" | "code" | "cable" | "wrench";
 export type Localized = Record<Locale, string>;
 
 export type ToolOptionField =
@@ -27,7 +27,7 @@ export interface ToolFunctionManifest { name: string; label: Localized; descript
 
 /** Conditions the server enforces before a provider is offered. The browser reads them only to hide rows. */
 export interface ToolRequirements {
-  experimental?: "browserTool" | "hostComputerTool";
+  experimental?: "hostComputerTool";
   role?: "superadmin";
   /** Needs a host that is not a container. */
   hostEnvironment?: boolean;
@@ -52,7 +52,7 @@ export interface ToolProviderManifest {
    * How a waiting call is answered in the browser. "approval" uses the shared approval card; the others pick a
    * renderer built into the app. Installed providers may only use "approval".
    */
-  clientRenderer?: "multiple-choice" | "location" | "browser-handoff";
+  clientRenderer?: "multiple-choice" | "location" | "code-runner";
   /** Wait phase shown while the model is still streaming this tool's arguments. */
   streamingPhase?: "creating-artifact";
   /** Completed calls are drawn as their own card in the transcript instead of in the tool activity list. */
@@ -84,12 +84,6 @@ export const BUILTIN_TOOL_PROVIDERS: readonly ToolProviderManifest[] = [
     functions: [{ name: "visit_page", label: text("Page visit", "페이지 방문"), description: text("Reads the title and text of a public HTTP(S) page", "공개 HTTP(S) 페이지의 제목과 본문 읽기") }],
   },
   {
-    id: "browser", origin: "builtin", section: "agent", order: 30, icon: "monitor", defaultEnabled: false,
-    label: text("Browser", "브라우저"), description: text("Render JavaScript pages, interact, and take screenshots", "JS 페이지 렌더링, 인터랙션 및 스크린샷 허용"),
-    functions: [{ name: "browser", label: text("Browser", "브라우저"), description: text("Opens, inspects and operates real Chromium tabs", "실제 Chromium 탭을 열고 살펴보고 조작") }],
-    requires: { experimental: "browserTool" }, clientRenderer: "browser-handoff",
-  },
-  {
     id: "current-time", origin: "builtin", section: "awareness", order: 10, icon: "clock", defaultEnabled: true,
     label: text("Current time", "현재 시간"), description: text("Provide local time and time zone to the model", "현지 시간과 시간대를 모델에 제공"),
     functions: [{ name: "get_current_time", label: text("Current time", "현재 시간"), description: text("Date, time with seconds, and IANA time zone", "초 단위 날짜·시각과 IANA 시간대") }],
@@ -109,6 +103,16 @@ export const BUILTIN_TOOL_PROVIDERS: readonly ToolProviderManifest[] = [
       { key: "write", kind: "boolean", default: false, label: text("Write", "쓰기"), description: text("Create text files and save files from URLs", "텍스트 파일 생성과 URL 파일 저장") },
       { key: "maxFiles", kind: "integer", default: 5, min: 1, max: 20, pairedWith: "write", label: text("files per chat", "개/대화") },
     ],
+  },
+  {
+    id: "code-runner", origin: "builtin", section: "agent", order: 20, icon: "braces", defaultEnabled: false,
+    label: text("Code runner", "코드 실행"), description: text("Run JavaScript or Python in this browser's sandbox, never on the server", "JavaScript·Python을 서버가 아닌 이 브라우저의 샌드박스에서 실행"),
+    functions: [
+      { name: "run_javascript", label: text("JavaScript", "JavaScript"), description: text("Sandboxed worker with no network or page access", "네트워크·페이지 접근이 없는 격리된 워커") },
+      { name: "run_python", label: text("Python", "Python"), description: text("Pyodide, downloaded from jsDelivr on first use in a tab", "탭에서 처음 쓸 때 jsDelivr에서 Pyodide를 내려받음") },
+    ],
+    options: [{ key: "timeoutSeconds", kind: "integer", default: 30, min: 5, max: 120, label: text("Time limit (seconds)", "실행 제한 시간(초)") }],
+    clientRenderer: "code-runner",
   },
   {
     id: "host-computer", origin: "builtin", section: "agent", order: 40, icon: "terminal", defaultEnabled: false,
@@ -154,7 +158,7 @@ export function mcpManifest(connection: { id: string; name: string; description?
 
 export interface ToolEnvironment {
   role?: string;
-  experimental?: { browserTool?: boolean; hostComputerTool?: boolean };
+  experimental?: { hostComputerTool?: boolean };
   /** True when the host is not a container. */
   hostEnvironment?: boolean;
 }

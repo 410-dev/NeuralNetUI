@@ -12,8 +12,8 @@ export function toolSources(): ToolProviderSource[] {
 }
 
 /**
- * Releases everything tools keep for these conversations: browser sessions, host computer state, remembered
- * approvals, and whatever a future provider (such as a code sandbox) holds. Safe to call more than once.
+ * Releases everything tools keep for these conversations: host computer state, remembered approvals, and whatever
+ * other providers hold per conversation. Safe to call more than once.
  */
 export async function disposeConversationTools(userId: string, conversationIds: string[]) {
   await Promise.all(conversationIds.flatMap(conversationId => {

@@ -8,10 +8,9 @@ NeuralNetUI는 Next.js 프론트엔드와 스트리밍 프록시 백엔드를 **
 | --- | --- | --- |
 | Node.js | 22 이상 | `package.json`의 `engines`에 명시 |
 | Python | 3.x | 인터넷 검색(`ddgs`)과 PDF 처리에 사용. 호스팅 스크립트가 격리 환경을 자동 구성 |
-| 브라우저 엔진 | Chrome / Edge / Chromium | **브라우저 도구**를 쓸 때만 필요 |
 | 추론 서버 | OpenAI 호환 API, LM Studio 또는 NNUI Server | 별도 호스트에 있어도 됩니다 |
 
-Docker 이미지와 Windows MSI에는 Node.js, Python 의존성, Chromium이 모두 포함되어 있어 위 준비가 필요 없습니다.
+Docker 이미지와 Windows MSI에는 Node.js와 Python 의존성이 모두 포함되어 있어 위 준비가 필요 없습니다.
 
 ## 설치 방법 선택
 
@@ -30,11 +29,7 @@ npm install
 npm run dev
 ```
 
-브라우저에서 `http://localhost:3000`을 엽니다. 브라우저 도구를 쓸 예정이고 Chrome이나 Edge가 없다면 한 번만 다음을 실행합니다.
-
-```bash
-npm run browser:install
-```
+브라우저에서 `http://localhost:3000`을 엽니다.
 
 인터넷 검색과 PDF 처리를 소스 실행 환경에서 쓰려면 Python 의존성도 설치합니다.
 

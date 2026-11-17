@@ -1,11 +1,11 @@
 import { DEFAULT_HARNESS_SETTINGS } from "../harness";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions } from "../web-tools";
-import { assertOwnedBrowserSession, closeBrowserSessions, executeBrowserTool } from "../browser-tool";
 import { closeHostComputerSession, deterministicHostAssessment, executeHostComputerTool, hostActionRequiresApproval, hostComputerToolDefinition, isShellHostAction, type HostRiskAssessment } from "../host-computer-tool";
 import { executeStorageAccessTool, storageAccessToolDefinition } from "../storage-tool";
 import { saveArtifactFile } from "../uploads";
 import type { ArtifactKind, ToolEvent } from "../types";
 import { builtinToolProvider } from "./catalog";
+import { CODE_FUNCTIONS, MAX_CODE_CHARS, normalizeCodeRunResult } from "./code-runner";
 import { specFromModelTool } from "./registry";
 import type { ToolCallContext, ToolContext, ToolProvider, ToolProviderSource, ToolSpec } from "./types";
 
@@ -37,21 +37,6 @@ const pageVisit: ToolProvider = {
   manifest: manifest("page-visit"),
   tools: ctx => webSpecs(ctx, { pageVisit: true }),
   execute: (name, _args, ctx) => executeWebTool(name, ctx.rawArguments, { pageVisit: true }, ctx.config.toolSettings, ctx.signal),
-};
-
-const browser: ToolProvider = {
-  manifest: manifest("browser"),
-  tools: ctx => webSpecs(ctx, { browser: true }),
-  async execute(_name, args, ctx) {
-    if (String(args.action || "").toLowerCase() === "request_user") {
-      const sessionId = String(args.session_id || "");
-      assertOwnedBrowserSession(ownerKey(ctx), sessionId);
-      const response = await ctx.waitForUser();
-      return { result: { session_id: sessionId, ...(response && typeof response === "object" ? response as Record<string, unknown> : { completed: true }) } };
-    }
-    return executeBrowserTool(ownerKey(ctx), ctx.rawArguments, ctx.config.toolSettings, ctx.userId, ctx.signal);
-  },
-  disposeConversation: (userId, conversationId) => closeBrowserSessions(`${userId}:${conversationId}`),
 };
 
 const time: ToolProvider = {
@@ -142,6 +127,30 @@ const hostComputer: ToolProvider = {
   disposeConversation: (userId, conversationId) => { closeHostComputerSession(`${userId}:${conversationId}`); },
 };
 
+function codeSpecs(timeoutSeconds: number): ToolSpec[] {
+  const shared = { type: "object", properties: { code: { type: "string", description: "Complete source to run" } }, required: ["code"], additionalProperties: false };
+  return [
+    { name: "run_javascript", inputSchema: shared, description: `Run JavaScript in a sandboxed Web Worker inside the user's browser, never on the server. There is no DOM, no network, and no access to the app or its data. Output from console.log/info/warn/error is captured and the value of a top-level \`return\` is reported; top-level await is allowed. Every call starts fresh. Time limit: ${timeoutSeconds} seconds. Use it for calculations, data transformation and checking logic.` },
+    { name: "run_python", inputSchema: shared, description: `Run Python 3 (Pyodide, WebAssembly) in a sandbox inside the user's browser, never on the server. print output is captured and the value of the last expression is reported. The standard library is available, and packages bundled with Pyodide (numpy, pandas, sympy, scipy and others) load automatically from import statements. There is no network access apart from those package downloads, nothing is saved, and plots cannot be shown. Every call starts with fresh variables; the first call in a browser tab may take several seconds to load Python. Time limit: ${timeoutSeconds} seconds, not counting loading.` },
+  ];
+}
+
+/** Code runs only in the person's browser: the server records the request, waits for the browser, and bounds the answer. */
+const codeRunner: ToolProvider = {
+  manifest: manifest("code-runner"),
+  releasesModelWhileRunning: true,
+  tools: ctx => codeSpecs(Number(ctx.options.timeoutSeconds) || 30),
+  async execute(name, args, ctx) {
+    const language = CODE_FUNCTIONS[name];
+    if (!language) throw new Error(`Unknown code runner function ${name}.`);
+    const code = typeof args.code === "string" ? args.code : "";
+    if (!code.trim()) throw new Error("Code is required.");
+    if (code.length > MAX_CODE_CHARS) throw new Error(`Code is limited to ${MAX_CODE_CHARS} characters.`);
+    ctx.updateEvent({ arguments: { language, code, timeoutSeconds: Number(ctx.options.timeoutSeconds) || 30 } });
+    return { result: normalizeCodeRunResult(await ctx.waitForUser(), language) };
+  },
+};
+
 function validateQuestions(value: unknown, maximum: number) {
   const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const questions = Array.isArray(record.questions) ? record.questions.slice(0, maximum) : [];
@@ -186,6 +195,6 @@ const artifact: ToolProvider = {
 };
 
 /** In catalog order, which is also the order the model sees them. */
-export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, browser, time, location, storage, hostComputer, multipleChoice, artifact];
+export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, time, location, storage, codeRunner, hostComputer, multipleChoice, artifact];
 
 export const builtinSource: ToolProviderSource = { id: "builtin", providers: () => [...BUILTIN_PROVIDERS] };

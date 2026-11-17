@@ -13,7 +13,7 @@
 | **다중 서버 라우팅** | OpenAI API·LM Studio·NNUI Server 드라이버, 연결 우선순위, 서버별 모델 설정 |
 | **브랜치 대화** | 메시지 편집·재생성이 기존 경로를 보존한 새 브랜치를 만들고 `< m / n >`으로 전환 |
 | **Reasoning 제어** | 내장 effort와 커스텀 템플릿, 서버 능력 자동 감지, 추론 스트리밍 표시 |
-| **도구** | 인터넷 검색, 페이지 방문, 실제 Chromium 브라우저, 저장소 접근, 선택형 질문, 사용자 등록 MCP, 호스트 컴퓨터 |
+| **도구** | 인터넷 검색, 페이지 방문, 브라우저 샌드박스 코드 실행(JavaScript·Python), 저장소 접근, 선택형 질문, 사용자 등록 MCP, 호스트 컴퓨터 |
 | **컨텍스트 관리** | 롤링 또는 자동 압축과 재개, 실시간 사용량 도넛, 응답 길이 상한 |
 | **개인 저장소** | 계정별 할당량, 아티팩트·생성 이미지 자동 저장, 청크 업로드, 휴지통과 보존 기간, 참조 보호 |
 | **이미지 생성** | OpenAI Compatible Images API의 base64 응답 수신, GPT Image 2 자동 감지, 생성 결과의 채팅·개인 저장소 연동 |
@@ -64,7 +64,7 @@ chmod +x deploy-docker-linux.sh
 
 ### Windows 설치 프로그램
 
-MSI는 Node.js, Chromium, Python, Windows 서비스, 트레이 앱을 함께 설치하고 부팅 시 자동으로 시작합니다. 자세한 내용은 [배포 문서](docs/deployment.md#windows-msi)를 참고하세요.
+MSI는 Node.js, Python, Windows 서비스, 트레이 앱을 함께 설치하고 부팅 시 자동으로 시작합니다. 자세한 내용은 [배포 문서](docs/deployment.md#windows-msi)를 참고하세요.
 
 ## 처음 실행할 때
 

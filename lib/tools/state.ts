@@ -57,7 +57,7 @@ function normalizeProvider(id: string, value: unknown): ToolProviderState | unde
 
 /** The account preference and chat request format before tool providers existed. */
 const LEGACY_SWITCHES: Record<string, string> = {
-  internetSearch: "web-search", pageVisit: "page-visit", browser: "browser", currentTime: "current-time",
+  internetSearch: "web-search", pageVisit: "page-visit", currentTime: "current-time",
   location: "location", multipleChoice: "multiple-choice", artifact: "artifact", hostComputer: "host-computer",
 };
 const LEGACY_KEYS = [...Object.keys(LEGACY_SWITCHES), "storageAccess", "storageRead", "storageWrite", "storageWriteMaxFiles", "mcpConnectionIds", "mcpToolNames"];

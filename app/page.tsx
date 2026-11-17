@@ -18,7 +18,9 @@ import { SyntaxHighlightedCode } from "./syntax-highlighted-code";
 import { UsageDonut } from "./usage-donut";
 import { USAGE_REFRESH_EVENT } from "@/lib/usage-popover";
 import { formatModelWeight } from "@/lib/plan-usage";
-import { BUILTIN_TOOL_PROVIDERS, builtinToolProvider, clientRendererFor, mcpManifest, pendingApprovalKind, TOOL_SECTION_LABELS, TOOL_SECTION_ORDER, toolIconFor, toolRequirementsMet, transcriptCardFor, type ToolIcon, type ToolProviderManifest } from "@/lib/tools/catalog";
+import { BUILTIN_TOOL_PROVIDERS, builtinToolProvider, clientRendererFor, mcpManifest, pendingApprovalKind, TOOL_SECTION_LABELS, TOOL_SECTION_ORDER, toolIconFor, toolRequirementsMet, transcriptCardFor, type ToolIcon, type ToolOptionField, type ToolProviderManifest } from "@/lib/tools/catalog";
+import { normalizeCodeRunResult, readCodeRunRequest } from "@/lib/tools/code-runner";
+import { runInBrowserSandbox } from "@/lib/code-runner-client";
 import { clearFunctionSelections, DEFAULT_TOOL_STATE, enabledProviderCount, normalizeToolState, resolveProviderState, setProviderEnabled, setProviderFunctions, setProviderOption, type ToolState } from "@/lib/tools/state";
 import { SectionTitle } from "./section-title";
 import { SelectMenu, usePopoverPresence } from "./select-menu";
@@ -36,7 +38,7 @@ import {
   ArrowDown, ArrowUp, Lightbulb, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CirclePlus, Copy, Download, FileJson,
   FileText, GitBranch, GripVertical, Image as ImageIcon, ImageOff, ImagePlus, KeyRound, LoaderCircle, Menu, MessageSquarePlus, Pencil, Plus, RefreshCw,
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
-  LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Monitor, Power, Upload, HardDrive, ShieldAlert,
+  Braces, LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Power, Upload, HardDrive, ShieldAlert,
   Palette, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Repeat2, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge, Cable, Code2, Unlock,
   RotateCcw } from "lucide-react";
 import { Children, cloneElement, createContext, CSSProperties, FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -100,8 +102,8 @@ const emptyConfig: PublicConfig = {
   showModelConnectionNames: false,
   planModelIds: [],
   userStorageSettings: { defaultQuotaBytes: 512 * 1024 * 1024, defaultTrashQuotaBytes: 1024 * 1024 * 1024, trashRetentionDays: 60 },
-  toolSettings: { maxToolRounds: 8, maxBrowserTabs: 8, maxMultipleChoiceQuestions: 3, maxAttachmentsPerMessage: 12, textDownloadLimitMb: 1, textCharacterLimit: 24_000, imageDownloadLimitMb: 10, imageUploadLimitMb: 20, pdfSizeLimitMb: 25, pdfPageLimit: 100, pdfTextCharacterLimit: 100_000, pdfVisionPageLimit: 6, pdfProcessingTimeoutSeconds: 30, temporaryFileTtlMinutes: 60, orphanUploadTtlHours: 24 },
-  experimental: { browserTool: false, hostComputerTool: false },
+  toolSettings: { maxToolRounds: 8, maxMultipleChoiceQuestions: 3, maxAttachmentsPerMessage: 12, textDownloadLimitMb: 1, textCharacterLimit: 24_000, imageDownloadLimitMb: 10, imageUploadLimitMb: 20, pdfSizeLimitMb: 25, pdfPageLimit: 100, pdfTextCharacterLimit: 100_000, pdfVisionPageLimit: 6, pdfProcessingTimeoutSeconds: 30, temporaryFileTtlMinutes: 60, orphanUploadTtlHours: 24 },
+  experimental: { hostComputerTool: false },
   mcpConnections: [],
   mcpEntitlement: { enabled: false, maxConnections: 0, usedConnections: 0 },
   models: [],
@@ -112,7 +114,6 @@ const titleFrom = (text: string) => text.trim().split(/\s+/).slice(0, 7).join(" 
 /** The composer's tool menu: every provider offered to this account and this chat's switches for them. */
 type ToolMenu = { state: ToolState; providers: ToolProviderManifest[]; setEnabled: (manifest: ToolProviderManifest, value: boolean) => void; setOption: (manifest: ToolProviderManifest, key: string, value: boolean | number) => void; setFunctions: (manifest: ToolProviderManifest, names: string[]) => void };
 const ToolMenuContext = createContext<ToolMenu>({ state: DEFAULT_TOOL_STATE, providers: [], setEnabled: () => undefined, setOption: () => undefined, setFunctions: () => undefined });
-const BROWSER_TOOL = builtinToolProvider("browser")!;
 /** On a phone a settings list and its editor take turns on screen; choosing an item opens its editor. */
 const SettingsDetailContext = createContext<(open: boolean) => void>(() => undefined);
 
@@ -148,9 +149,9 @@ const translations = {
     attachImages: "Upload files", loadFromStorage: "Load files", uploadingImages: "Preparing and uploading files…", removeImage: "Remove attachment", loadEarlier: "Load earlier messages",
     imagesAttached: "files attached", imageChat: "File chat", imageUploadFailed: "File upload failed.", maxImages: "You have reached the configured attachment limit.",
     thinking: "Thinking…", compactingNow: "Compacting context…", compactionThought: "Compaction reasoning", compactionSummary: "Summary kept in context", editResponse: "Edit response", saveEdit: "Save", thoughtFor: "Thought for", useWrapping: "Use wrapping", copied: "Copied",
-    addMenu: "Add", tools: "Tools", internetGroup: "Internet", awarenessGroup: "Ambient awareness", agentGroup: "Agent", interactionGroup: "Interaction", internetSearch: "Internet search", internetSearchDesc: "Let the model search DuckDuckGo", pageVisit: "Visit pages", pageVisitDesc: "Let the model read public web pages", browserTool: "Browser", browserToolDesc: "Render JavaScript pages, interact, and take screenshots", hostComputerTool: "Host computer", hostComputerToolDesc: "Let the model control files, shells, programs, uploads, and the host screen", storageAccess: "Storage access", storageAccessDesc: "Let the model privately access your stored files", storageRead:"Read", storageReadDesc:"Search and load files", storageWrite:"Write", storageWriteDesc:"Create text files and save URL files", storageWriteLimit:"files per session", browserView: "Show browser", browserViewTitle: "Live browser", browserWaiting: "The model has not opened a browser page yet.", browserHeaded: "Headed Chromium", browserFallback: "Compatibility mode", browserAddress: "Address", browserText: "Type into the focused field", browserSendText: "Type", browserBack: "Back", browserForward: "Forward", browserReload: "Reload", browserNewTab: "New tab", browserCloseTab: "Close tab", browserUntitledTab: "New tab", browserComplete: "I finished interacting", browserCompleteHelp: "The model is waiting for you to finish this browser step.", currentTime: "Current time", currentTimeDesc: "Provide local time and time zone to the model", locationTool: "Current location", locationToolDesc: "Use browser location and detailed reverse geocoding", multipleChoice: "Multiple choice", multipleChoiceDesc: "Let the model ask selectable questions", artifact: "Artifact", artifactDesc: "Render HTML, CSV, JSON, XML, or Markdown in an interactive viewer", usingTool: "Using a tool…", toolCall: "Tool call", toolResult: "Tool result", submitChoices: "Submit answers", otherChoice: "Or type a direct answer…", choiceNext: "Next", choiceBack: "Previous question", choiceProgress: "Question", choiceWaiting: "Answer the request above to continue", locationPermission: "Waiting for browser location permission…", hostApprovalTitle: "Host action approval", mcpApprovalTitle:"MCP tool approval", repetitionTitle: "Repetitive output detected", repetitionMessage: "The model has produced the same {kind} {count} times in a row in its {segment}.", repetitionInReasoning: "reasoning", repetitionInResponse: "response", repetitionInTool: "tool calls", repetitionWord: "word", repetitionSentence: "sentence", repetitionParagraph: "paragraph", repetitionGroup: "group of paragraphs", repetitionToolCall: "tool call", repetitionToolCalls: "sequence of tool calls", repetitionSample: "Repeated content", repetitionStop: "Stop", repetitionRetry: "Retry", repetitionIgnore: "Ignore", hostApprove: "Allow", hostReject: "Deny", hostRedirect: "Deny and redirect", hostRedirectPlaceholder: "Tell the model what to do instead…", hostRiskLevel: "Risk level",
+    addMenu: "Add", tools: "Tools", internetGroup: "Internet", awarenessGroup: "Ambient awareness", agentGroup: "Agent", interactionGroup: "Interaction", internetSearch: "Internet search", internetSearchDesc: "Let the model search DuckDuckGo", pageVisit: "Visit pages", pageVisitDesc: "Let the model read public web pages", hostComputerTool: "Host computer", hostComputerToolDesc: "Let the model control files, shells, programs, uploads, and the host screen", storageAccess: "Storage access", storageAccessDesc: "Let the model privately access your stored files", storageRead:"Read", storageReadDesc:"Search and load files", storageWrite:"Write", storageWriteDesc:"Create text files and save URL files", storageWriteLimit:"files per session", currentTime: "Current time", currentTimeDesc: "Provide local time and time zone to the model", locationTool: "Current location", locationToolDesc: "Use browser location and detailed reverse geocoding", multipleChoice: "Multiple choice", multipleChoiceDesc: "Let the model ask selectable questions", artifact: "Artifact", artifactDesc: "Render HTML, CSV, JSON, XML, or Markdown in an interactive viewer", usingTool: "Using a tool…", toolCall: "Tool call", toolResult: "Tool result", submitChoices: "Submit answers", otherChoice: "Or type a direct answer…", choiceNext: "Next", choiceBack: "Previous question", choiceProgress: "Question", choiceWaiting: "Answer the request above to continue", locationPermission: "Waiting for browser location permission…", codeRunning: "Running in this browser's sandbox…", hostApprovalTitle: "Host action approval", mcpApprovalTitle:"MCP tool approval", repetitionTitle: "Repetitive output detected", repetitionMessage: "The model has produced the same {kind} {count} times in a row in its {segment}.", repetitionInReasoning: "reasoning", repetitionInResponse: "response", repetitionInTool: "tool calls", repetitionWord: "word", repetitionSentence: "sentence", repetitionParagraph: "paragraph", repetitionGroup: "group of paragraphs", repetitionToolCall: "tool call", repetitionToolCalls: "sequence of tool calls", repetitionSample: "Repeated content", repetitionStop: "Stop", repetitionRetry: "Retry", repetitionIgnore: "Ignore", hostApprove: "Allow", hostReject: "Deny", hostRedirect: "Deny and redirect", hostRedirectPlaceholder: "Tell the model what to do instead…", hostRiskLevel: "Risk level",
     account: "Account", users: "Users", signOut: "Sign out", changePassword: "Change password", currentPassword: "Current password", newPassword: "New password", passwordChanged: "Password changed. Please sign in again.",
-    toolsSettings: "Harness settings", toolsSettingsTitle: "Tool and file limits", toolsSettingsDesc: "Control tool iterations, interactive tools, downloads, PDF processing, and temporary upload cleanup.", maxToolRounds: "Maximum tool rounds", maxBrowserTabs: "Browser tabs per session", maxMultipleChoiceQuestions: "Questions per multiple-choice call", maxAttachments: "Attachments per message", textDownloadLimit: "Text download limit (MB)", textCharacterLimit: "Text characters sent to model", imageDownloadLimit: "Image URL limit (MB)", imageUploadLimit: "Image upload limit (MB)", pdfSizeLimit: "PDF limit (MB)", pdfPageLimit: "PDF pages processed", pdfTextLimit: "PDF characters sent to model", pdfVisionPages: "Scanned PDF vision pages", pdfTimeout: "PDF processing timeout (seconds)", temporaryFileTtl: "Temporary file cleanup (minutes)", orphanTtl: "Unattached upload retention (hours)", toolLoopGroup: "Tool loop", interactiveToolGroup: "Interactive tools", attachmentGroup: "Attachments and downloads", pdfGroup: "PDF processing", cleanupGroup: "Temporary file cleanup", toolsSafetyHelp: "Tool and file limit values are validated against server safety boundaries when saved.",
+    toolsSettings: "Harness settings", toolsSettingsTitle: "Tool and file limits", toolsSettingsDesc: "Control tool iterations, interactive tools, downloads, PDF processing, and temporary upload cleanup.", maxToolRounds: "Maximum tool rounds", maxMultipleChoiceQuestions: "Questions per multiple-choice call", maxAttachments: "Attachments per message", textDownloadLimit: "Text download limit (MB)", textCharacterLimit: "Text characters sent to model", imageDownloadLimit: "Image URL limit (MB)", imageUploadLimit: "Image upload limit (MB)", pdfSizeLimit: "PDF limit (MB)", pdfPageLimit: "PDF pages processed", pdfTextLimit: "PDF characters sent to model", pdfVisionPages: "Scanned PDF vision pages", pdfTimeout: "PDF processing timeout (seconds)", temporaryFileTtl: "Temporary file cleanup (minutes)", orphanTtl: "Unattached upload retention (hours)", toolLoopGroup: "Tool loop", interactiveToolGroup: "Interactive tools", attachmentGroup: "Attachments and downloads", pdfGroup: "PDF processing", cleanupGroup: "Temporary file cleanup", toolsSafetyHelp: "Tool and file limit values are validated against server safety boundaries when saved.",
     userManagement: "User management", userManagementDesc: "Administrators can create accounts, change display names and roles, and delete accounts.", username: "Username", password: "Password", role: "Role", standardUser: "User", administrator: "Administrator", addUser: "Add user", saveDisplayName: "Save user changes", deleteUser: "Delete user", confirmDeleteUser: "Permanently delete this user and all of their data?", userDeleted: "User deleted.", publicModel: "Public custom model", publicModelDesc: "Allow every user to use this custom model.",
     contextWindow: "Context window", contextWindowHelp: "Set a per-model fallback limit. When the API also advertises a limit, the smaller value is used.", aliasContextWindowHelp: "Leave empty to inherit the base model. A value here overrides the base model setting while respecting the server limit.", inheritedContextWindow: "Inherited from base model", apiContextWindow: "API-detected context", effectiveContextWindow: "Effective maximum", contextUsed: "context tokens used", contextUnavailable: "Set this model's context window in Settings.",
     visionSettings: "Image input", visionSettingsDesc: "Limit the image copy sent to this model. Stored originals are never changed.", visionUseOriginal: "Limit image resolution", visionUseOriginalDesc: "Turn on to proportionally reduce images before inference; turn off to use originals.", visionMaxResolution: "Maximum long edge (px)", visionMaxResolutionHelp: "Images are proportionally reduced to this long-edge limit before inference.",
@@ -162,7 +163,7 @@ const translations = {
     temporaryChat: "Temporary chat", saveChat: "Save this chat", savingChat: "Saving…", chatSaved: "Saved to your history.", chatSaveFailed: "This chat could not be saved.",
     returnToRegularChat: "Return to regular chat", temporaryGreeting: "Hello, traveler", temporaryChatHint: "Chats are not saved",
     reasoningNotesTitle: "Reasoning descriptions", reasoningNotesHelp: "Show a short line under each reasoning choice in the chat picker, and word it however you like.", reasoningNotesReset: "Leave a field empty to use the built-in wording.",
-    experimental: "Experimental", experimentalTitle: "Experimental features", experimentalDesc: "Unfinished capabilities. Switch one on to offer it in the chat tool menu.", experimentalBrowser: "Browser tool", experimentalBrowserDesc: "Let the model and you share an isolated headed Chromium session. Open its live split view to click, scroll, type, or complete a human-only step.", experimentalHost: "Host computer tool", experimentalHostDesc: "Superadmin-only control of files, PowerShell/Bash, background programs, temporary uploads, and the current screen. Available only when NeuralNetUI is not running in a container.", experimentalHelp: "While a feature is off, the tool is hidden from the chat menu and refused by the server even if a client asks for it.",
+    experimental: "Experimental", experimentalTitle: "Experimental features", experimentalDesc: "Unfinished capabilities. Switch one on to offer it in the chat tool menu.", experimentalHost: "Host computer tool", experimentalHostDesc: "Superadmin-only control of files, PowerShell/Bash, background programs, temporary uploads, and the current screen. Available only when NeuralNetUI is not running in a container.", experimentalHelp: "While a feature is off, the tool is hidden from the chat menu and refused by the server even if a client asks for it.",
     outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token", promptProcessingTime: "Prompt processing", reasoningTime: "Thinking", toolTime: "Tool use", totalResponseTime: "Whole response", thinkingTimingTitle: "Thinking time", thinkingTimingHelp: "Choose how prompt processing shows up next to the time a model spent thinking.", thinkingIncludesPrompt: "Count prompt processing as thinking time", thinkingIncludesPromptDesc: "While a later prompt stage runs, the thinking time above it keeps rising too, and the finished time includes prompt processing.", thinkingShowsPrompt: "Show prompt processing time alongside", thinkingShowsPromptDesc: "Shows e.g. “Thought for 12 sec (prompt processed for 3 sec)”.",
   },
   ko: {
@@ -196,9 +197,9 @@ const translations = {
     attachImages: "파일 업로드", loadFromStorage: "파일 불러오기", uploadingImages: "파일 준비 및 업로드 중…", removeImage: "첨부 제거", loadEarlier: "이전 메시지 불러오기",
     imagesAttached: "개 파일 첨부", imageChat: "파일 대화", imageUploadFailed: "파일 업로드에 실패했습니다.", maxImages: "설정된 첨부 개수 제한에 도달했습니다.",
     thinking: "생각 중…", compactingNow: "컨텍스트 압축 중…", compactionThought: "압축 모델의 사고", compactionSummary: "맥락으로 유지되는 요약", editResponse: "응답 편집", saveEdit: "저장", thoughtFor: "동안 생각함", useWrapping: "줄 바꿈 사용", copied: "복사됨",
-    addMenu: "추가", tools: "도구", internetGroup: "인터넷", awarenessGroup: "주변 인식", agentGroup: "에이전트", interactionGroup: "상호 작용", internetSearch: "인터넷 검색", internetSearchDesc: "모델이 DuckDuckGo를 검색하도록 허용", pageVisit: "페이지 방문", pageVisitDesc: "모델이 공개 웹 페이지를 읽도록 허용", browserTool: "브라우저", browserToolDesc: "JS 페이지 렌더링, 인터랙션 및 스크린샷 허용", hostComputerTool: "호스트 컴퓨터", hostComputerToolDesc: "모델의 파일·셸·프로그램·업로드·호스트 화면 제어 허용", storageAccess: "저장소 접근", storageAccessDesc: "모델의 개인 저장소 접근 권한", storageRead:"읽기", storageReadDesc:"파일 검색 및 불러오기", storageWrite:"쓰기", storageWriteDesc:"텍스트 파일 생성 및 URL 파일 저장", storageWriteLimit:"세션당 파일", browserView: "브라우저 화면 보기", browserViewTitle: "실시간 브라우저", browserWaiting: "아직 모델이 브라우저 페이지를 열지 않았습니다.", browserHeaded: "화면형 Chromium", browserFallback: "호환 모드", browserAddress: "주소", browserText: "선택한 입력란에 입력", browserSendText: "입력", browserBack: "뒤로", browserForward: "앞으로", browserReload: "새로고침", browserNewTab: "새 탭", browserCloseTab: "탭 닫기", browserUntitledTab: "새 탭", browserComplete: "조작 완료", browserCompleteHelp: "모델이 브라우저 조작 완료를 기다리는 중입니다.", currentTime: "현재 시간", currentTimeDesc: "현지 시간과 시간대를 모델에 제공", locationTool: "현재 위치", locationToolDesc: "브라우저 위치와 상세 역지오코딩 사용", multipleChoice: "다중 선택", multipleChoiceDesc: "모델이 설정된 개수만큼 선택형 질문을 요청", artifact: "아티팩트", artifactDesc: "HTML·CSV·JSON·XML·Markdown을 전용 뷰어로 렌더링", usingTool: "도구 사용 중…", toolCall: "도구 호출", toolResult: "도구 결과", submitChoices: "답변 제출", otherChoice: "또는 직접 답변…", choiceNext: "다음", choiceBack: "이전 질문", choiceProgress: "질문", choiceWaiting: "위 요청에 응답하면 모델이 계속 작업합니다", locationPermission: "브라우저 위치 권한을 기다리는 중…", hostApprovalTitle: "호스트 작업 승인", mcpApprovalTitle:"MCP 도구 승인", repetitionTitle: "반복 출력 감지", repetitionMessage: "모델이 {segment}에서 같은 {kind} {count}번 연속으로 출력하고 있습니다.", repetitionInReasoning: "추론", repetitionInResponse: "응답", repetitionInTool: "도구 호출", repetitionWord: "단어를", repetitionSentence: "문장을", repetitionParagraph: "문단을", repetitionGroup: "문단 묶음을", repetitionToolCall: "도구 호출을", repetitionToolCalls: "도구 호출 묶음을", repetitionSample: "반복된 내용", repetitionStop: "정지하기", repetitionRetry: "다시 시도하기", repetitionIgnore: "무시하기", hostApprove: "허용", hostReject: "거부", hostRedirect: "거부 후 다른 작업 지시", hostRedirectPlaceholder: "대신 수행할 작업을 모델에 알려주세요…", hostRiskLevel: "위험도",
+    addMenu: "추가", tools: "도구", internetGroup: "인터넷", awarenessGroup: "주변 인식", agentGroup: "에이전트", interactionGroup: "상호 작용", internetSearch: "인터넷 검색", internetSearchDesc: "모델이 DuckDuckGo를 검색하도록 허용", pageVisit: "페이지 방문", pageVisitDesc: "모델이 공개 웹 페이지를 읽도록 허용", hostComputerTool: "호스트 컴퓨터", hostComputerToolDesc: "모델의 파일·셸·프로그램·업로드·호스트 화면 제어 허용", storageAccess: "저장소 접근", storageAccessDesc: "모델의 개인 저장소 접근 권한", storageRead:"읽기", storageReadDesc:"파일 검색 및 불러오기", storageWrite:"쓰기", storageWriteDesc:"텍스트 파일 생성 및 URL 파일 저장", storageWriteLimit:"세션당 파일", currentTime: "현재 시간", currentTimeDesc: "현지 시간과 시간대를 모델에 제공", locationTool: "현재 위치", locationToolDesc: "브라우저 위치와 상세 역지오코딩 사용", multipleChoice: "다중 선택", multipleChoiceDesc: "모델이 설정된 개수만큼 선택형 질문을 요청", artifact: "아티팩트", artifactDesc: "HTML·CSV·JSON·XML·Markdown을 전용 뷰어로 렌더링", usingTool: "도구 사용 중…", toolCall: "도구 호출", toolResult: "도구 결과", submitChoices: "답변 제출", otherChoice: "또는 직접 답변…", choiceNext: "다음", choiceBack: "이전 질문", choiceProgress: "질문", choiceWaiting: "위 요청에 응답하면 모델이 계속 작업합니다", locationPermission: "브라우저 위치 권한을 기다리는 중…", codeRunning: "이 브라우저의 샌드박스에서 실행하는 중…", hostApprovalTitle: "호스트 작업 승인", mcpApprovalTitle:"MCP 도구 승인", repetitionTitle: "반복 출력 감지", repetitionMessage: "모델이 {segment}에서 같은 {kind} {count}번 연속으로 출력하고 있습니다.", repetitionInReasoning: "추론", repetitionInResponse: "응답", repetitionInTool: "도구 호출", repetitionWord: "단어를", repetitionSentence: "문장을", repetitionParagraph: "문단을", repetitionGroup: "문단 묶음을", repetitionToolCall: "도구 호출을", repetitionToolCalls: "도구 호출 묶음을", repetitionSample: "반복된 내용", repetitionStop: "정지하기", repetitionRetry: "다시 시도하기", repetitionIgnore: "무시하기", hostApprove: "허용", hostReject: "거부", hostRedirect: "거부 후 다른 작업 지시", hostRedirectPlaceholder: "대신 수행할 작업을 모델에 알려주세요…", hostRiskLevel: "위험도",
     account: "계정", users: "사용자", signOut: "로그아웃", changePassword: "비밀번호 변경", currentPassword: "현재 비밀번호", newPassword: "새 비밀번호", passwordChanged: "비밀번호를 변경했습니다. 다시 로그인해 주세요.",
-    toolsSettings: "하네스 설정", toolsSettingsTitle: "도구 및 파일 제한", toolsSettingsDesc: "도구 반복, 인터랙티브 도구, 다운로드, PDF 처리 및 임시 업로드 정리 기준을 설정합니다.", maxToolRounds: "최대 도구 호출 라운드", maxBrowserTabs: "브라우저 세션당 탭 수", maxMultipleChoiceQuestions: "다중 선택 호출당 질문 수", maxAttachments: "메시지당 첨부 개수", textDownloadLimit: "텍스트 다운로드 제한 (MB)", textCharacterLimit: "모델에 전달할 텍스트 글자 수", imageDownloadLimit: "이미지 URL 제한 (MB)", imageUploadLimit: "이미지 업로드 제한 (MB)", pdfSizeLimit: "PDF 제한 (MB)", pdfPageLimit: "처리할 PDF 페이지 수", pdfTextLimit: "모델에 전달할 PDF 글자 수", pdfVisionPages: "스캔 PDF 비전 페이지 수", pdfTimeout: "PDF 처리 제한 시간 (초)", temporaryFileTtl: "임시 파일 정리 시간 (분)", orphanTtl: "미첨부 업로드 보관 시간", toolLoopGroup: "도구 반복", interactiveToolGroup: "인터랙티브 도구", attachmentGroup: "첨부 및 다운로드", pdfGroup: "PDF 처리", cleanupGroup: "임시 파일 정리", toolsSafetyHelp: "도구 및 파일 제한 값은 저장 시 서버의 안전 범위 안에서 검증됩니다.",
+    toolsSettings: "하네스 설정", toolsSettingsTitle: "도구 및 파일 제한", toolsSettingsDesc: "도구 반복, 인터랙티브 도구, 다운로드, PDF 처리 및 임시 업로드 정리 기준을 설정합니다.", maxToolRounds: "최대 도구 호출 라운드", maxMultipleChoiceQuestions: "다중 선택 호출당 질문 수", maxAttachments: "메시지당 첨부 개수", textDownloadLimit: "텍스트 다운로드 제한 (MB)", textCharacterLimit: "모델에 전달할 텍스트 글자 수", imageDownloadLimit: "이미지 URL 제한 (MB)", imageUploadLimit: "이미지 업로드 제한 (MB)", pdfSizeLimit: "PDF 제한 (MB)", pdfPageLimit: "처리할 PDF 페이지 수", pdfTextLimit: "모델에 전달할 PDF 글자 수", pdfVisionPages: "스캔 PDF 비전 페이지 수", pdfTimeout: "PDF 처리 제한 시간 (초)", temporaryFileTtl: "임시 파일 정리 시간 (분)", orphanTtl: "미첨부 업로드 보관 시간", toolLoopGroup: "도구 반복", interactiveToolGroup: "인터랙티브 도구", attachmentGroup: "첨부 및 다운로드", pdfGroup: "PDF 처리", cleanupGroup: "임시 파일 정리", toolsSafetyHelp: "도구 및 파일 제한 값은 저장 시 서버의 안전 범위 안에서 검증됩니다.",
     userManagement: "사용자 관리", userManagementDesc: "관리자는 계정을 만들고, 다른 사용자의 표시 이름과 권한을 변경하거나 계정을 삭제할 수 있습니다.", username: "사용자 이름", password: "비밀번호", role: "역할", standardUser: "일반 사용자", administrator: "관리자", addUser: "사용자 추가", saveDisplayName: "사용자 변경 저장", deleteUser: "사용자 삭제", confirmDeleteUser: "이 사용자와 모든 데이터를 영구적으로 삭제할까요?", userDeleted: "사용자를 삭제했습니다.", publicModel: "커스텀 모델 공개", publicModelDesc: "모든 사용자가 이 커스텀 모델을 사용할 수 있습니다.",
     contextWindow: "컨텍스트 윈도우", contextWindowHelp: "모델별 대체 한도를 설정합니다. API도 한도를 반환하면 둘 중 작은 값을 사용합니다.", aliasContextWindowHelp: "비워 두면 기반 모델 값을 상속합니다. 값을 입력하면 서버 한도 안에서 기반 모델 설정을 오버라이드합니다.", inheritedContextWindow: "기반 모델에서 상속", apiContextWindow: "API 감지 컨텍스트", effectiveContextWindow: "적용 최대값", contextUsed: "컨텍스트 토큰 사용", contextUnavailable: "설정에서 이 모델의 컨텍스트 윈도우를 지정해 주세요.",
     visionSettings: "이미지 입력", visionSettingsDesc: "이 모델에 전달되는 이미지 사본의 해상도만 제한합니다. 저장된 원본은 변경하지 않습니다.", visionUseOriginal: "이미지 해상도 제한", visionUseOriginalDesc: "켜면 추론 전에 이미지를 비율에 맞춰 축소하고, 끄면 원본을 사용합니다.", visionMaxResolution: "긴 변 최대 해상도 (px)", visionMaxResolutionHelp: "추론 전에 비율을 유지한 채 이 긴 변 한도까지 축소합니다.",
@@ -210,7 +211,7 @@ const translations = {
     temporaryChat: "임시 채팅", saveChat: "이 채팅 저장", savingChat: "저장 중…", chatSaved: "채팅 기록에 저장했습니다.", chatSaveFailed: "채팅을 저장하지 못했습니다.",
     returnToRegularChat: "일반 채팅으로 돌아가기", temporaryGreeting: "안녕하세요, 여행자", temporaryChatHint: "채팅이 저장되지 않습니다",
     reasoningNotesTitle: "추론 강도 설명", reasoningNotesHelp: "채팅의 추론 선택 창에서 각 항목 아래에 짧은 설명을 표시하고, 문구를 직접 바꿉니다.", reasoningNotesReset: "비워 두면 기본 문구를 사용합니다.",
-    experimental: "실험적 기능", experimentalTitle: "실험적 기능", experimentalDesc: "아직 완성되지 않은 기능입니다. 켜면 채팅의 도구 메뉴에 나타납니다.", experimentalBrowser: "브라우저 도구", experimentalBrowserDesc: "모델과 사용자가 격리된 화면형 Chromium 세션을 공유합니다. 실시간 스플릿 뷰에서 클릭, 스크롤, 입력 및 사람만 가능한 단계를 처리할 수 있습니다.", experimentalHost: "호스트 컴퓨터 도구", experimentalHostDesc: "Superadmin만 파일, PowerShell/Bash, 백그라운드 프로그램, 임시 업로드 및 현재 화면을 제어할 수 있습니다. NeuralNetUI가 컨테이너 밖에서 실행될 때만 제공됩니다.", experimentalHelp: "기능이 꺼져 있으면 채팅 메뉴에서 도구가 숨겨지고, 클라이언트가 요청해도 서버가 거부합니다.",
+    experimental: "실험적 기능", experimentalTitle: "실험적 기능", experimentalDesc: "아직 완성되지 않은 기능입니다. 켜면 채팅의 도구 메뉴에 나타납니다.", experimentalHost: "호스트 컴퓨터 도구", experimentalHostDesc: "Superadmin만 파일, PowerShell/Bash, 백그라운드 프로그램, 임시 업로드 및 현재 화면을 제어할 수 있습니다. NeuralNetUI가 컨테이너 밖에서 실행될 때만 제공됩니다.", experimentalHelp: "기능이 꺼져 있으면 채팅 메뉴에서 도구가 숨겨지고, 클라이언트가 요청해도 서버가 거부합니다.",
     outputTokens: "출력 토큰", reasoningTokens: "reasoning", tokensPerSecond: "토큰/초", timeToFirstToken: "첫 토큰 도착 시간", promptProcessingTime: "프롬프트 처리", reasoningTime: "생각", toolTime: "도구 사용", totalResponseTime: "최종 응답까지", thinkingTimingTitle: "생각 시간 표시", thinkingTimingHelp: "모델이 생각한 시간 옆에 프롬프트 처리 시간을 어떻게 보여 줄지 정합니다.", thinkingIncludesPrompt: "생각 시간에 프롬프트 처리 시간 합산해서 보이기", thinkingIncludesPromptDesc: "다음 프롬프트를 처리하는 동안 위의 생각 시간도 함께 늘어나고, 끝난 뒤에도 프롬프트 처리 시간을 더한 값으로 표시합니다.", thinkingShowsPrompt: "프롬프트 처리 시간 같이 보이기", thinkingShowsPromptDesc: "“12초 동안 생각함 (3초 동안 프롬프트 처리함)”처럼 함께 표시하며, 프롬프트를 처리하는 동안 괄호 안의 시간이 늘어납니다.",
   },
 } as const;
@@ -415,10 +416,6 @@ export default function Home() {
   const [draftAttachments, setDraftAttachments] = useState<StoredAttachment[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
   const [toolState, setToolState] = useState<ToolState>(DEFAULT_TOOL_STATE);
-  const [browserViewOpen, setBrowserViewOpen] = useState(false);
-  const browserToolAvailable = config.experimental?.browserTool === true;
-  const browserEnabled = browserToolAvailable && resolveProviderState(toolState, BROWSER_TOOL).enabled;
-  useEffect(() => { if (!browserToolAvailable) setBrowserViewOpen(false); }, [browserToolAvailable]);
   // Built-in tools this account may use, then the account's own MCP connections. The server enforces the same rules.
   const offeredTools = useMemo(() => {
     const environment = { role: config.account?.role, experimental: config.experimental, hostEnvironment: config.hostComputerAvailable === true };
@@ -459,6 +456,7 @@ export default function Home() {
   const selectedModelIdRef = useRef("");
   const pendingConversationIdRef = useRef("");
   const handledLocationCallsRef = useRef(new Set<string>());
+  const handledCodeCallsRef = useRef(new Set<string>());
 
   function replaceQueue(next: QueuedPrompt[]) {
     queuedPromptsRef.current = next;
@@ -719,19 +717,6 @@ export default function Home() {
     }
     return undefined;
   }, [messages]);
-  const pendingBrowserHandoff = useMemo(() => {
-    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-      const events = messages[messageIndex].toolEvents || [];
-      for (let eventIndex = events.length - 1; eventIndex >= 0; eventIndex -= 1) {
-        const event = events[eventIndex];
-        const args = event.arguments && typeof event.arguments === "object" ? event.arguments as Record<string, unknown> : {};
-        if (clientRendererFor(event.name) === "browser-handoff" && event.status === "waiting" && String(args.action || "").toLowerCase() === "request_user") return event;
-      }
-    }
-    return undefined;
-  }, [messages]);
-  useEffect(() => { if (!browserEnabled) setBrowserViewOpen(false); }, [browserEnabled]);
-  useEffect(() => { if (pendingBrowserHandoff) setBrowserViewOpen(true); }, [pendingBrowserHandoff?.id]);
   // Both follow the model: the administrator decides whether reasoning is remembered, and an account's own prompt
   // replaces the composed one where the model allows it.
   const rememberReasoning = (selectedModel?.rememberReasoning ?? selectedAliasBase?.rememberReasoning) === true;
@@ -1076,6 +1061,18 @@ export default function Home() {
     );
   }
 
+  /** Runs a waiting code call in this browser's sandbox and sends the report back; the server never runs it. */
+  function runBrowserCode(conversationId: string, event: ToolEvent) {
+    if (handledCodeCallsRef.current.has(event.id)) return;
+    handledCodeCallsRef.current.add(event.id);
+    const send = (value: unknown) => fetch(`/api/chat/${conversationId}/input`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toolCallId: event.id, value }) }).catch(() => undefined);
+    const request = readCodeRunRequest(event.arguments);
+    if (!request) { void send({ error: "The code request could not be read." }); return; }
+    void runInBrowserSandbox(request)
+      .then(raw => send(normalizeCodeRunResult(raw, request.language)))
+      .catch(caught => send({ error: caught instanceof Error ? caught.message : String(caught) }));
+  }
+
   async function watchChatJob(working: Conversation, branchId: string, silent404 = false): Promise<Conversation | null> {
     abandonRef.current = false;
     const controller = new AbortController(); abortRef.current = controller;
@@ -1109,6 +1106,7 @@ export default function Home() {
               setConversation((current) => current ? { ...current, branches: current.branches.map((item) => item.id === next.branchId ? { ...item, messages: baseMessages } : item) } : current);
               const waitingLocation = next.message.toolEvents?.find((event) => clientRendererFor(event.name) === "location" && event.status === "waiting");
               if (waitingLocation) provideBrowserLocation(next.conversationId, waitingLocation.id);
+              for (const event of next.message.toolEvents || []) if (event.status === "waiting" && clientRendererFor(event.name) === "code-runner") runBrowserCode(next.conversationId, event);
               if (["completed", "stopped", "error"].includes(next.status)) { terminal = next; break; }
             }
             if (terminal) break;
@@ -1424,7 +1422,7 @@ export default function Home() {
   }
   return (
     <ToolMenuContext.Provider value={toolMenu}>
-    <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""} ${browserEnabled && browserViewOpen ? "browser-split-open" : ""}`}>
+    <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""}`}>
       <button className="mobile-menu" aria-label={locale === "ko" ? "메뉴 열기" : "Open menu"} onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
       <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-visible" : ""}`}>
         <section className="side-panel">
@@ -1459,7 +1457,6 @@ export default function Home() {
               ? <button className="surface-action active icon-only" title={c.returnToRegularChat} aria-label={c.returnToRegularChat} onClick={() => setTemporaryMode(false)}><MessageSquareDashed size={16} /></button>
               : <button className="surface-action active" disabled={promoting || conversation?.temporary !== true} title={c.saveChat} aria-label={c.saveChat} onClick={() => void promoteTemporaryChat()}><Save size={16} /><span>{promoting ? c.savingChat : c.saveChat}</span></button>
             : <button className="surface-action icon-only" title={c.temporaryChat} aria-label={c.temporaryChat} onClick={() => newChat(false, true)}><MessageSquareDashed size={16} /></button>}
-          {browserEnabled && <button type="button" className={`surface-action icon-only ${browserViewOpen ? "active" : ""}`} title={c.browserView} aria-label={c.browserView} aria-pressed={browserViewOpen} onClick={() => setBrowserViewOpen((value) => !value)}><Monitor size={16} /></button>}
           {messages.length > 0 && conversation && <button type="button" className={`surface-action icon-only ${activityHidden ? "active" : ""}`} title={activityHidden ? c.showActivity : c.hideActivity} aria-label={activityHidden ? c.showActivity : c.hideActivity} aria-pressed={activityHidden} onClick={() => setHiddenActivityChats((current) => ({ ...current, [conversation.id]: !current[conversation.id] }))}>{activityHidden ? <EyeOff size={16} /> : <Eye size={16} />}</button>}
         </div>
 
@@ -1477,7 +1474,6 @@ export default function Home() {
         </div>
       </section>
 
-      {browserEnabled && browserViewOpen && <BrowserSplitView c={c} conversationId={conversation?.id} pendingHandoff={pendingBrowserHandoff} onComplete={async () => { if (!pendingBrowserHandoff) return false; return submitToolInput(pendingBrowserHandoff.id, { completed: true }); }} onClose={() => setBrowserViewOpen(false)} />}
 
       {searching && <HistorySearch ko={locale === "ko"} onClose={() => setSearching(false)} onSelect={(id, branchId) => { setSearching(false); void loadConversation(id, true, false, branchId); }} />}
       {storageOpen && <StorageManager ko={locale === "ko"} onClose={() => setStorageOpen(false)} onOpenConversation={id=>void loadConversation(id)} onConversationsChanged={()=>void managedChatsChanged()} />}
@@ -1496,103 +1492,6 @@ export default function Home() {
     </main>
     </ToolMenuContext.Provider>
   );
-}
-
-type BrowserSurfaceTab = { id: string; title: string; url: string; label: string; note: string; active: boolean };
-type BrowserSurfaceState = { available: boolean; sessionId?: string; activeTabId?: string; tabs: BrowserSurfaceTab[]; maxTabs: number; url?: string; title?: string; width: number; height: number; headed: boolean };
-
-function BrowserSplitView({ c, conversationId, pendingHandoff, onComplete, onClose }: { c: CopySet; conversationId?: string; pendingHandoff?: ToolEvent; onComplete: () => Promise<boolean>; onClose: () => void }) {
-  const [surface, setSurface] = useState<BrowserSurfaceState>({ available: false, tabs: [], maxTabs: 0, width: 1280, height: 800, headed: true });
-  const [address, setAddress] = useState("");
-  const [textInput, setTextInput] = useState("");
-  const [addressFocused, setAddressFocused] = useState(false);
-  const [frameNonce, setFrameNonce] = useState(0);
-  const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
-  const panelRef = useRef<HTMLElement>(null);
-  const pointerStart = useRef<{ x: number; y: number } | null>(null);
-
-  useEffect(() => {
-    if (!conversationId) { setSurface((current) => ({ ...current, available: false, sessionId: undefined, activeTabId: undefined, tabs: [], url: undefined, title: undefined })); return; }
-    let cancelled = false; let timer = 0;
-    const poll = async () => {
-      try {
-        const response = await fetch(`/api/browser-view?conversationId=${encodeURIComponent(conversationId)}`, { cache: "no-store" });
-        const next = await response.json() as BrowserSurfaceState & { error?: string };
-        if (!response.ok) throw new Error(next.error || "Browser view failed.");
-        if (!cancelled) {
-          setSurface(next);
-          if (next.available) setFrameNonce(Date.now());
-          setNotice("");
-        }
-      } catch (error) { if (!cancelled) setNotice(error instanceof Error ? error.message : "Browser view failed."); }
-      if (!cancelled) timer = window.setTimeout(poll, 400);
-    };
-    void poll();
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [conversationId]);
-
-  useEffect(() => { if (!addressFocused && surface.url) setAddress(surface.url); }, [addressFocused, surface.url]);
-
-  async function act(payload: Record<string, unknown>) {
-    if (!conversationId || !surface.sessionId) return false;
-    setBusy(true); setNotice("");
-    try {
-      const response = await fetch(`/api/browser-view?conversationId=${encodeURIComponent(conversationId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, sessionId: surface.sessionId }) });
-      const next = await response.json() as BrowserSurfaceState & { error?: string };
-      if (!response.ok) throw new Error(next.error || "Browser interaction failed.");
-      setSurface(next); setFrameNonce(Date.now());
-      return true;
-    } catch (error) { setNotice(error instanceof Error ? error.message : "Browser interaction failed."); return false; }
-    finally { setBusy(false); }
-  }
-
-  function browserPoint(event: ReactPointerEvent<HTMLImageElement> | ReactWheelEvent<HTMLImageElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const scale = Math.min(bounds.width / surface.width, bounds.height / surface.height);
-    const renderedWidth = surface.width * scale; const renderedHeight = surface.height * scale;
-    const left = bounds.left + (bounds.width - renderedWidth) / 2; const top = bounds.top + (bounds.height - renderedHeight) / 2;
-    return {
-      x: Math.max(0, Math.min(surface.width, (event.clientX - left) / renderedWidth * surface.width)),
-      y: Math.max(0, Math.min(surface.height, (event.clientY - top) / renderedHeight * surface.height)),
-    };
-  }
-
-  function keyDown(event: KeyboardEvent<HTMLElement>) {
-    if (!surface.available || event.target instanceof HTMLInputElement || ["Shift", "Control", "Alt", "Meta"].includes(event.key)) return;
-    event.preventDefault();
-    const modifiers = [event.altKey && "Alt", event.ctrlKey && "Control", event.metaKey && "Meta", event.shiftKey && "Shift"].filter((item): item is string => Boolean(item));
-    if (event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) void act({ action: "insert_text", text: event.key });
-    else void act({ action: "key", key: event.key, modifiers });
-  }
-
-  const handoffArgs = pendingHandoff?.arguments && typeof pendingHandoff.arguments === "object" ? pendingHandoff.arguments as Record<string, unknown> : {};
-  const tabName = (tab: BrowserSurfaceTab) => tab.label || tab.title || (() => { try { return new URL(tab.url).hostname; } catch { return c.browserUntitledTab; } })();
-  return <aside className="browser-split" aria-label={c.browserViewTitle} tabIndex={0} ref={panelRef} onKeyDown={keyDown}>
-    <header className="browser-split-head"><span><Monitor size={16} /><strong>{c.browserViewTitle}</strong><small>{surface.headed ? c.browserHeaded : c.browserFallback}</small></span><button type="button" title={c.close} aria-label={c.close} onClick={onClose}><X size={17} /></button></header>
-    <div className="browser-tabs" role="tablist" aria-label={c.browserViewTitle}>
-      {surface.tabs.map((tab) => <div className={`browser-tab ${tab.active ? "active" : ""}`} key={tab.id} title={[tab.label && tab.title ? tab.title : "", tab.url, tab.note].filter(Boolean).join("\n")}>
-        <button type="button" role="tab" aria-selected={tab.active} onClick={() => void act({ action: "switch_tab", tabId: tab.id })}><span>{tabName(tab)}</span>{tab.note && <i aria-label={tab.note} />}</button>
-        <button type="button" className="browser-tab-close" title={c.browserCloseTab} aria-label={`${c.browserCloseTab}: ${tabName(tab)}`} onClick={() => void act({ action: "close_tab", tabId: tab.id })}><X size={12} /></button>
-      </div>)}
-      {surface.available && surface.tabs.length < surface.maxTabs && <button type="button" className="browser-new-tab" title={c.browserNewTab} aria-label={c.browserNewTab} onClick={() => void act({ action: "new_tab" })}><Plus size={14} /></button>}
-    </div>
-    <form className="browser-nav" onSubmit={(event) => { event.preventDefault(); void act({ action: "navigate", url: address }); }}>
-      <button type="button" title={c.browserBack} aria-label={c.browserBack} disabled={!surface.available || busy} onClick={() => void act({ action: "back" })}><ChevronLeft size={17} /></button>
-      <button type="button" title={c.browserForward} aria-label={c.browserForward} disabled={!surface.available || busy} onClick={() => void act({ action: "forward" })}><ChevronRight size={17} /></button>
-      <button type="button" title={c.browserReload} aria-label={c.browserReload} disabled={!surface.available || busy} onClick={() => void act({ action: "reload" })}><RefreshCw size={15} /></button>
-      <input aria-label={c.browserAddress} value={address} onFocus={() => setAddressFocused(true)} onBlur={() => setAddressFocused(false)} onChange={(event) => setAddress(event.target.value)} placeholder="https://" disabled={!surface.available} />
-      <button type="submit" aria-label={c.browserAddress} disabled={!surface.available || busy || !address.trim()}><ArrowUp size={16} /></button>
-    </form>
-    <div className="browser-viewport">
-      {surface.available && surface.sessionId && conversationId
-        ? <img src={`/api/browser-view?conversationId=${encodeURIComponent(conversationId)}&frame=1&sessionId=${encodeURIComponent(surface.sessionId)}&v=${frameNonce}`} alt={surface.title || c.browserViewTitle} draggable={false} onPointerDown={(event) => { panelRef.current?.focus(); pointerStart.current = browserPoint(event); event.currentTarget.setPointerCapture?.(event.pointerId); }} onPointerUp={(event) => { const start = pointerStart.current; pointerStart.current = null; if (!start) return; const end = browserPoint(event); if (Math.hypot(end.x - start.x, end.y - start.y) > 6) void act({ action: "drag", ...start, endX: end.x, endY: end.y }); else void act({ action: "click", ...end }); }} onWheel={(event) => { event.preventDefault(); const point = browserPoint(event); void act({ action: "scroll", ...point, deltaX: event.deltaX, deltaY: event.deltaY }); }} />
-        : <div className="browser-empty"><Monitor size={28} /><p>{c.browserWaiting}</p></div>}
-    </div>
-    {notice && <p className="browser-notice" role="status">{notice}</p>}
-    <form className="browser-text-entry" onSubmit={(event) => { event.preventDefault(); const value = textInput; if (!value) return; void act({ action: "insert_text", text: value }).then((sent) => { if (sent) setTextInput(""); }); }}><Keyboard size={16} /><input aria-label={c.browserText} placeholder={c.browserText} value={textInput} onChange={(event) => setTextInput(event.target.value)} disabled={!surface.available} /><button disabled={!surface.available || busy || !textInput}>{c.browserSendText}</button></form>
-    {pendingHandoff && <div className="browser-handoff"><span><strong>{c.browserCompleteHelp}</strong>{typeof handoffArgs.message === "string" && handoffArgs.message.trim() ? <small>{handoffArgs.message}</small> : null}</span><button type="button" disabled={busy} onClick={() => { setBusy(true); void onComplete().finally(() => setBusy(false)); }}><Check size={15} />{c.browserComplete}</button></div>}
-  </aside>;
 }
 
 function AuthScreen({ setup, onAuthenticated }: { setup: boolean; onAuthenticated: () => Promise<void> }) {
@@ -1787,7 +1686,15 @@ function CodeSnippet({ c, children, fadeDurationMs = 0 }: { c: CopySet; children
   </div>;
 }
 
-const MENU_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, monitor: Monitor, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, terminal: HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench };
+const MENU_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, terminal: HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench };
+
+/** A bounded number option. Typing stays free; the value is clamped and saved when the field loses focus or on Enter. */
+function OptionNumber({ field, value, locale, onChange }: { field: Extract<ToolOptionField, { kind: "integer" }>; value: number; locale: Locale; onChange: (value: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const commit = () => { const next = Math.max(field.min, Math.min(field.max, Math.floor(Number(draft)) || field.default)); setDraft(String(next)); if (next !== value) onChange(next); };
+  return <label className="tool-option-limit"><input type="number" min={field.min} max={field.max} value={draft} aria-label={field.label[locale]} onChange={event => setDraft(event.target.value)} onBlur={commit} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); commit(); } }} />{field.pairedWith && <small>{field.label[locale]}</small>}</label>;
+}
 
 /**
  * One tool provider in the composer menu. Built-in tools and installed MCP connections share this row: a switch for the
@@ -1821,9 +1728,11 @@ function ToolProviderEntry({ manifest, c, locale }: { manifest: ToolProviderMani
         const value = options[field.key] === true;
         const paired = manifest.options?.find(other => other.kind === "integer" && other.pairedWith === field.key);
         return <div className="tool-option-row" key={field.key}><span><strong>{field.label[locale]}</strong>{field.description && <small>{field.description[locale]}</small>}</span>
-          {paired?.kind === "integer" ? <label className="tool-option-limit"><input type="number" min={paired.min} max={paired.max} value={Number(options[paired.key])} aria-label={paired.label[locale]} onChange={event => setOption(manifest, paired.key, Number(event.target.value))} /><small>{paired.label[locale]}</small></label> : <span />}
+          {paired?.kind === "integer" ? <OptionNumber field={paired} value={Number(options[paired.key])} locale={locale} onChange={value => setOption(manifest, paired.key, value)} /> : <span />}
           <button type="button" role="switch" aria-label={field.label[locale]} aria-checked={value} className={`toggle ${value ? "on" : ""}`} onClick={() => setOption(manifest, field.key, !value)}><i /></button></div>;
       })}
+      {(manifest.options || []).flatMap(field => field.kind === "integer" && !field.pairedWith ? [field] : []).map(field =>
+        <div className="tool-option-row" key={field.key}><span><strong>{field.label[locale]}</strong><small>{field.min}–{field.max}</small></span><OptionNumber field={field} value={Number(options[field.key])} locale={locale} onChange={value => setOption(manifest, field.key, value)} /><span /></div>)}
       {loading && <p><LoaderCircle className="spin" size={14} />{locale === "ko" ? "도구를 불러오는 중" : "Loading tools"}</p>}
       {error && <p className="error">{error}</p>}
       {listed.map(item => {
@@ -2011,7 +1920,7 @@ function HostApprovalComposer({ c, event, onSubmit }: { c: CopySet; event: ToolE
   </section>;
 }
 
-const EVENT_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Search, link: Link2, monitor: Monitor, clock: Clock3, "map-pin": LocateFixed, "hard-drive": HardDrive, terminal: HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench };
+const EVENT_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Search, link: Link2, braces: Braces, clock: Clock3, "map-pin": LocateFixed, "hard-drive": HardDrive, terminal: HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench };
 
 function ToolEventIcon({ name, size = 15 }: { name: string; size?: number }) {
   const Icon = EVENT_TOOL_ICONS[toolIconFor(name)] || Wrench;
@@ -2033,6 +1942,7 @@ function ToolActivity({ c, locale, event }: { c: CopySet; locale: Locale; event:
     <div className="tool-activity-body">
       <details open><summary>{c.toolCall}</summary><StructuredJson value={event.arguments} /></details>
       {event.status === "waiting" && clientRendererFor(event.name) === "location" && <p className="location-wait"><LoaderCircle className="spin" size={14} />{c.locationPermission}</p>}
+      {event.status === "waiting" && clientRendererFor(event.name) === "code-runner" && <p className="location-wait"><LoaderCircle className="spin" size={14} />{c.codeRunning}</p>}
       {attachment && <AttachmentGrid attachments={[attachment]} />}
       {event.result !== undefined && <details open><summary>{c.toolResult}</summary><StructuredJson value={event.result} /></details>}
     </div>
@@ -2511,13 +2421,9 @@ function AssistantAttachmentGallery({attachments}:{attachments:StoredAttachment[
 
 function ExperimentalSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicConfig; setDraft: React.Dispatch<React.SetStateAction<PublicConfig>> }) {
   const experimental = { ...draft.experimental, openAIProgress: draft.experimental?.openAIProgress ?? false, hostComputerTool: draft.experimental?.hostComputerTool ?? false };
-  const toggle = (key: keyof typeof experimental) => setDraft((current) => ({ ...current, experimental: { ...(current.experimental || { browserTool: false, openAIProgress: false, hostComputerTool: false }), [key]: !current.experimental?.[key] } }));
+  const toggle = (key: keyof typeof experimental) => setDraft((current) => ({ ...current, experimental: { ...(current.experimental || { openAIProgress: false, hostComputerTool: false }), [key]: !current.experimental?.[key] } }));
   return <div className="settings-section">
     <SectionTitle icon={<FlaskConical size={19} />} title={c.experimentalTitle} description={c.experimentalDesc} />
-    <div className="general-setting-card general-toggle-card">
-      <div><strong>{c.experimentalBrowser}</strong><small>{c.experimentalBrowserDesc}</small></div>
-      <button role="switch" aria-checked={experimental.browserTool} aria-label={c.experimentalBrowser} className={`toggle ${experimental.browserTool ? "on" : ""}`} onClick={() => toggle("browserTool")}><i /></button>
-    </div>
     {draft.account?.role === "superadmin" && <div className="general-setting-card general-toggle-card">
       <div><strong>{c.experimentalHost}</strong><small>{c.experimentalHostDesc}{draft.hostComputerAvailable === false ? (draft.preferences.language === "ko" ? " 현재 서버는 컨테이너 환경으로 감지되어 사용할 수 없습니다." : " This server was detected as containerized, so the tool is unavailable.") : ""}</small></div>
       <button role="switch" disabled={draft.hostComputerAvailable === false} aria-checked={experimental.hostComputerTool} aria-label={c.experimentalHost} className={`toggle ${experimental.hostComputerTool ? "on" : ""}`} onClick={() => toggle("hostComputerTool")}><i /></button>
@@ -2538,7 +2444,6 @@ function ToolsSettings({ c, draft, setDraft }: { c: CopySet; draft: PublicConfig
       { key: "maxToolRounds", label: c.maxToolRounds, min: 1, max: 10_000 },
     ] },
     { title: c.interactiveToolGroup, fields: [
-      { key: "maxBrowserTabs", label: c.maxBrowserTabs, min: 1, max: 20 },
       { key: "maxMultipleChoiceQuestions", label: c.maxMultipleChoiceQuestions, min: 1, max: 10 },
     ] },
     { title: c.attachmentGroup, fields: [

@@ -11,7 +11,7 @@ const {db}=await import("./database.ts");
 const {deleteUpload,moveUploadsToTrash,purgeDeletedUploads,readUpload,readUploadModelContent,restoreUpload,saveGeneratedImage,saveHostFile,storagePage,storageSummary}=await import("./uploads.ts");
 const {executeHostComputerTool}=await import("./host-computer-tool.ts");
 const {executeStorageAccessTool}=await import("./storage-tool.ts");
-const toolSettings={maxToolRounds:8,maxBrowserTabs:8,maxMultipleChoiceQuestions:3,maxAttachmentsPerMessage:12,textDownloadLimitMb:1,textCharacterLimit:24_000,imageDownloadLimitMb:10,imageUploadLimitMb:20,pdfSizeLimitMb:25,pdfPageLimit:100,pdfTextCharacterLimit:100_000,pdfVisionPageLimit:6,pdfProcessingTimeoutSeconds:30,temporaryFileTtlMinutes:60,orphanUploadTtlHours:24};
+const toolSettings={maxToolRounds:8,maxMultipleChoiceQuestions:3,maxAttachmentsPerMessage:12,textDownloadLimitMb:1,textCharacterLimit:24_000,imageDownloadLimitMb:10,imageUploadLimitMb:20,pdfSizeLimitMb:25,pdfPageLimit:100,pdfTextCharacterLimit:100_000,pdfVisionPageLimit:6,pdfProcessingTimeoutSeconds:30,temporaryFileTtlMinutes:60,orphanUploadTtlHours:24};
 
 test("user storage quota is enforced atomically and generated images are retained",async()=>{
   const id=crypto.randomUUID(),stamp=new Date().toISOString();
