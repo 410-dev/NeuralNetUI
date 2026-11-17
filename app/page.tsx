@@ -388,7 +388,8 @@ export default function Home() {
   const [contextViewOpen, setContextViewOpen] = useState(false);
   /**
    * Where the composer sat just before the screen switched between the new-chat layout and an open chat,
-   * so the composer in the new layout can glide from there: down on the first send, back up on "new chat".
+   * so the composer in the new layout can glide from there: down on the first send or when a chat is opened
+   * from the new-chat screen, back up on "new chat".
    */
   const composerFlipRef = useRef<{ rect: DOMRect; at: number; toChat: boolean } | null>(null);
   const captureComposer = (toChat: boolean) => {
@@ -400,7 +401,7 @@ export default function Home() {
     const from = composerFlipRef.current;
     if (!from || from.toChat !== chatStarted) return;
     composerFlipRef.current = null;
-    // Only a send or a "new chat" that just switched layouts glides; opening a chat from history docks at once.
+    // Only a switch the user just made glides; a stale capture (slow load, failed send) is dropped.
     if (performance.now() - from.at > 4000 || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const target = document.querySelector<HTMLElement>(chatStarted ? ".conversation-stage > .composer-wrap form.composer" : ".idle-center form.composer");
     if (!target) return;
@@ -968,6 +969,8 @@ export default function Home() {
 
   async function loadConversation(id: string, navigate = true, allowNew = false, selectedBranchId?: string) {
     const abandoned = temporaryIdRef.current;
+    // Opening a chat from the new-chat screen glides the composer down like a first send; URL loads dock at once.
+    if (navigate && !messages.length) captureComposer(true);
     try {
       abandonRef.current = true; abortRef.current?.abort(); clearQueuedPrompts();
       const response = await fetch(`/api/conversations/${id}`); const body = await response.json();
