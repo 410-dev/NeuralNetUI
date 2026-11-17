@@ -1103,6 +1103,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 /* Radio cards make a small set of exclusive modes readable without opening a menu. */
 .option-cards { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .segmented-setting { flex-wrap: wrap; }
+.segmented-setting > .segmented-control { display: grid; width: 100%; margin-top: 14px; }
+.segmented-setting > .segmented-control button { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .segmented-control { display: inline-grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: #ffffff08; }
 .segmented-control button { min-height: 30px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .segmented-control button:hover { color: var(--text); }
