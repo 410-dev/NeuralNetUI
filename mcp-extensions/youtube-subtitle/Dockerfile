@@ -1,6 +1,6 @@
 FROM python:3.13-slim
 
-# YouTube changes often; rebuild with a newer yt-dlp when subtitles stop loading:
+# YouTube changes often; rebuild with a newer yt-dlp when subtitles or downloads stop working:
 #   docker compose build --build-arg YT_DLP_VERSION=<version>
 ARG YT_DLP_VERSION=2026.10.26
 
@@ -8,11 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     YOUTUBE_SUBTITLE_CONFIG=/config/config.json
 
+# ffmpeg merges the best video and audio streams into one file.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt "yt-dlp==${YT_DLP_VERSION}"
-COPY server.py subtitles.py ./
-RUN mkdir -p /config && chmod 777 /config
+# yt-dlp[default] brings yt-dlp-ejs; with deno (requirements.txt) YouTube's full format list is available.
+RUN pip install --no-cache-dir -r requirements.txt "yt-dlp[default]==${YT_DLP_VERSION}"
+COPY server.py subtitles.py downloads.py ./
+RUN mkdir -p /config /downloads && chmod 777 /config /downloads
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

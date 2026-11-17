@@ -1,5 +1,5 @@
 # YouTube subtitle MCP server for NeuralNetUI.
-# First start: `mkdir -p config && docker compose up -d --build`, then copy api_key from config/config.json.
+# First start: `mkdir -p config downloads && chown 1000:1000 config downloads && docker compose up -d --build`, then copy api_key from config/config.json.
 services:
   youtube-subtitle:
     build: .
@@ -13,3 +13,5 @@ services:
       - "${YOUTUBE_SUBTITLE_PORT:-8080}:8080"
     volumes:
       - ./config:/config
+      # Downloaded videos wait here until NeuralNetUI has stored them (removed afterwards, or after download_ttl_minutes).
+      - ./downloads:/downloads

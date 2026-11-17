@@ -6,22 +6,27 @@ Streamable HTTP at /mcp, protected by the API key in config.json (sent as `Autho
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import secrets
 import sys
+import time
+from urllib.parse import quote, unquote
 from pathlib import Path
 from typing import Annotated, Any
 
 import anyio
 import uvicorn
 import yt_dlp
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, MCPServer
+from mcp.types import ResourceLink, TextContent
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field
 
+from downloads import DownloadStore, estimated_size, format_selector
 from subtitles import (
     SubtitleError, choose_track, clock, languages_summary, page, parse_subtitles, pick_format, transcript_text, video_url,
 )
@@ -40,6 +45,12 @@ DEFAULTS: dict[str, Any] = {
     "cookies_file": "",
     # Optional proxy URL for yt-dlp, e.g. when the server's IP is rate-limited by YouTube.
     "proxy": "",
+    # Video downloads: where files wait until NeuralNetUI has stored them, how long at most, and the size limit.
+    "download_dir": "/downloads",
+    "download_ttl_minutes": 120,
+    "max_download_bytes": 8 * 1024 ** 3,
+    # Optional public base URL of this server (e.g. https://yt.example.com) for the links it returns.
+    "public_base_url": "",
 }
 log = logging.getLogger("youtube-subtitle")
 
@@ -142,8 +153,151 @@ def languages_for(url: str) -> str:
 server = MCPServer(
     name="youtube-subtitle",
     version=VERSION,
-    instructions="Fetches the subtitles of a YouTube video as plain text so the assistant can read, quote or summarize it.",
+    instructions=("Fetches the subtitles of a YouTube video as plain text so the assistant can read, quote or summarize it, "
+                  "and downloads a video into the user's private NeuralNetUI storage when asked to."),
 )
+STORE = DownloadStore(CONFIG["download_dir"], CONFIG["download_ttl_minutes"])
+DOWNLOAD_SLOTS = anyio.Semaphore(2)
+
+
+def human_size(size: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+class Reporter:
+    """Progress notifications from the download thread. NeuralNetUI resets its timeout on each one, so the
+    values only ever increase and a heartbeat keeps them coming through silent steps (merging, hashing)."""
+
+    HEARTBEAT_SECONDS = 2  # well under the shortest NeuralNetUI tool timeout (5 s)
+
+    def __init__(self, ctx: Context):
+        self.ctx, self.value, self.sent_at, self.message = ctx, 0.0, 0.0, "Starting"
+        # Set when the caller goes away; the download thread stops at its next progress update.
+        self.cancelled = False
+
+    async def send(self, value: float, total: float | None, message: str) -> None:
+        self.value = max(self.value + 1, value)
+        self.sent_at, self.message = time.monotonic(), message
+        await self.ctx.report_progress(self.value, total, message)
+
+    def from_thread(self, value: float, total: float | None, message: str, force: bool = False) -> None:
+        if self.cancelled:
+            raise yt_dlp.utils.DownloadCancelled("The caller stopped waiting for this download.")
+        if force or time.monotonic() - self.sent_at >= 1:
+            try:
+                anyio.from_thread.run(self.send, value, total, message)
+            except Exception:
+                # The request is gone (cancelled or disconnected); stop the download instead of finishing it unseen.
+                self.cancelled = True
+                raise yt_dlp.utils.DownloadCancelled("The caller stopped waiting for this download.") from None
+
+    async def heartbeat(self) -> None:
+        while True:
+            await anyio.sleep(0.5)
+            if time.monotonic() - self.sent_at >= self.HEARTBEAT_SECONDS:
+                await self.send(self.value + 1, None, self.message)
+
+
+def download_video(url: str, max_height: int | None, reporter: Reporter) -> tuple[str, Path, dict[str, Any], dict[str, Any]]:
+    canonical, _video_id = video_url(url)
+    STORE.cleanup()
+    limit = int(CONFIG.get("max_download_bytes") or DEFAULTS["max_download_bytes"])
+    token, folder = STORE.new_folder()
+    try:
+        def on_progress(status: dict[str, Any]) -> None:
+            if status.get("status") == "downloading":
+                done = float(status.get("downloaded_bytes") or 0)
+                total = status.get("total_bytes") or status.get("total_bytes_estimate")
+                reporter.from_thread(done, float(total) if total else None, f"Downloading {human_size(done)}" + (f" / {human_size(float(total))}" if total else ""))
+            elif status.get("status") == "finished":
+                reporter.from_thread(reporter.value, None, "Download finished, preparing the file", force=True)
+
+        def on_postprocess(status: dict[str, Any]) -> None:
+            if status.get("status") == "started":
+                reporter.from_thread(reporter.value, None, f"{status.get('postprocessor', 'Processing')} running", force=True)
+
+        options = {**ydl_options(), "skip_download": False, "format": format_selector(max_height), "outtmpl": str(folder / "%(title).150B [%(id)s].%(ext)s"),
+                   "writesubtitles": False, "writeautomaticsub": False, "noprogress": True, "max_filesize": limit,
+                   "progress_hooks": [on_progress], "postprocessor_hooks": [on_postprocess]}
+        with yt_dlp.YoutubeDL(options) as ydl:
+            try:
+                info = ydl.extract_info(canonical, download=False) or {}
+            except yt_dlp.utils.DownloadError as error:
+                raise SubtitleError(f"YouTube did not return this video: {str(error).removeprefix('ERROR: ').strip()}") from None
+            expected = estimated_size(info)
+            if expected and expected > limit:
+                raise SubtitleError(f"The video is about {human_size(expected)}, over this server's {human_size(limit)} download limit. Ask for a lower max_height.")
+            if expected and STORE.free_bytes() < expected * 1.2 + 512 * 1024 ** 2:
+                raise SubtitleError("This server does not have enough free disk space for the video right now.")
+            try:
+                info = ydl.process_ie_result(info, download=True) or info
+            except yt_dlp.utils.DownloadCancelled:
+                raise SubtitleError("The download was stopped because the caller stopped waiting.") from None
+            except yt_dlp.utils.DownloadError as error:
+                raise SubtitleError(f"The download failed: {str(error).removeprefix('ERROR: ').strip()}") from None
+        files = [Path(item["filepath"]) for item in info.get("requested_downloads") or [] if item.get("filepath")]
+        file = files[0] if files else None
+        if not file or not file.is_file():
+            raise SubtitleError("The download did not produce a file (it may have been over the size limit).")
+        if file.stat().st_size > limit:
+            raise SubtitleError(f"The file is {human_size(file.stat().st_size)}, over this server's {human_size(limit)} download limit.")
+        reporter.from_thread(reporter.value, None, "Checking the file", force=True)
+        digest = hashlib.sha256()
+        with file.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b""):
+                digest.update(chunk)
+        meta = STORE.remember(token, file, digest.hexdigest())
+        return token, file, meta, info
+    except BaseException:
+        STORE.discard(token)
+        raise
+
+
+@server.tool(
+    description=(
+        "Download a YouTube video and save it to the user's private NeuralNetUI storage. Use it only when the user asks "
+        "for the video file itself. By default it takes the best available video and audio quality, without subtitles. "
+        "Large videos can take several minutes; the reply says where the file was saved."
+    ),
+    structured_output=False,
+)
+async def download_youtube_video(
+    url: Annotated[str, Field(description="YouTube video link (youtube.com/watch, youtu.be, shorts, live) or an 11-character video id.")],
+    ctx: Context,
+    max_height: Annotated[int | None, Field(ge=144, le=4320, description="Optional resolution cap in pixels, e.g. 1080. Leave empty for the best available.")] = None,
+) -> list[TextContent | ResourceLink]:
+    reporter = Reporter(ctx)
+    async with DOWNLOAD_SLOTS:
+        await reporter.send(0, None, "Looking up the video")
+        failure: SubtitleError | None = None
+        async with anyio.create_task_group() as group:
+            group.start_soon(reporter.heartbeat)
+            try:
+                token, file, meta, info = await anyio.to_thread.run_sync(download_video, url, max_height, reporter, abandon_on_cancel=True)
+            except SubtitleError as error:
+                failure = error
+            except BaseException:
+                reporter.cancelled = True
+                raise
+            finally:
+                group.cancel_scope.cancel()
+        if failure:
+            raise ToolError(str(failure)) from None
+    relative = f"files/{token}/{quote(file.name)}"
+    base = str(CONFIG.get("public_base_url") or "").rstrip("/") or "http://localhost"
+    summary = "\n".join([
+        f"Downloaded: {info.get('title') or file.stem}",
+        f"Channel: {info.get('channel') or info.get('uploader') or '(unknown)'}",
+        f"Resolution: {info.get('resolution') or 'audio only'}; format: {info.get('format_id')}; size: {human_size(meta['size'])}",
+        "The file follows as a link that NeuralNetUI saves into the user's private storage.",
+    ])
+    link = ResourceLink(type="resource_link", uri=f"{base}/{relative}", name=file.name, mimeType=meta["mimeType"], size=meta["size"],
+                        _meta={"nnui/saveToStorage": True, "nnui/path": relative, "sha256": meta["sha256"]})
+    return [TextContent(type="text", text=summary), link]
 
 
 @server.tool(
@@ -206,16 +360,44 @@ class ApiKeyGate:
         supplied = authorization[7:].strip() if authorization[:7].lower() == b"bearer " else headers.get(b"x-api-key", b"").strip()
         if not supplied or not secrets.compare_digest(supplied, self.key):
             return await json_response(401, {"error": "A valid API key is required."}, [(b"www-authenticate", b'Bearer realm="youtube-subtitle"')])(send)
+        if scope["path"].startswith("/files/"):
+            return await serve_file(scope, send)
         return await self.app(scope, receive, send)
+
+
+async def serve_file(scope, send) -> None:
+    """GET streams a finished download; DELETE removes it once NeuralNetUI has stored it."""
+    parts = scope["path"].split("/")
+    token = parts[2] if len(parts) > 2 else ""
+    if scope["method"] == "DELETE":
+        return await json_response(200 if STORE.discard(token) else 404, {"deleted": True})(send)
+    if scope["method"] not in ("GET", "HEAD"):
+        return await json_response(405, {"error": "Method not allowed."})(send)
+    STORE.cleanup()
+    found = STORE.find(token)
+    if not found or (len(parts) > 3 and unquote(parts[3]) != found[0].name):
+        return await json_response(404, {"error": "The file is not available (it may have expired)."})(send)
+    file, meta = found
+    disposition = f"attachment; filename*=UTF-8''{quote(file.name)}".encode()
+    await send({"type": "http.response.start", "status": 200, "headers": [
+        (b"content-type", str(meta["mimeType"]).encode()), (b"content-length", str(file.stat().st_size).encode()),
+        (b"content-disposition", disposition), (b"x-content-sha256", str(meta["sha256"]).encode()), (b"cache-control", b"no-store")]})
+    if scope["method"] == "HEAD":
+        return await send({"type": "http.response.body", "body": b""})
+    async with await anyio.open_file(file, "rb") as handle:
+        while chunk := await handle.read(1024 * 1024):
+            await send({"type": "http.response.body", "body": chunk, "more_body": True})
+    await send({"type": "http.response.body", "body": b""})
 
 
 def main() -> None:
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="%(levelname)s %(name)s: %(message)s")
     app = server.streamable_http_app(
         streamable_http_path="/mcp",
-        # Each request stands alone and answers with JSON, which proxies and tunnels pass through without buffering issues.
+        # Each request stands alone. Replies stream as server-sent events so long calls can report progress, which
+        # also keeps NeuralNetUI's timeout from firing while a download is still moving.
         stateless_http=True,
-        json_response=True,
+        json_response=False,
         # Access is controlled by the API key; the Host header differs behind proxies, so it is not checked.
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
         host=str(CONFIG["host"]),
