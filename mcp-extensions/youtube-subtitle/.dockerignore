@@ -1,0 +1,5 @@
+config/
+__pycache__/
+*.pyc
+test_subtitles.py
+README.md

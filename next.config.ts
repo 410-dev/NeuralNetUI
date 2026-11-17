@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
     "/api/backup": ["./node_modules/7zip-bin/index.js", "./node_modules/7zip-bin/package.json", `./node_modules/7zip-bin/${sevenZipBinary}`],
   },
   outputFileTracingExcludes: {
-    "/*": ["./data/**/*", "./installer/**/*"],
+    "/*": ["./data/**/*", "./installer/**/*", "./mcp-extensions/**/*"],
   },
   async headers() {
     return [{
