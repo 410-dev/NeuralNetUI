@@ -6,7 +6,8 @@ import { AuthError } from "./auth";
 import { db } from "./database";
 import type { McpAuthType, McpConnection, McpEntitlement, McpToolInfo, McpToolPolicy } from "./types";
 import type { ModelContentPart } from "./document-processing";
-import { classifyMcpAddress, describeMcpFailure, mcpToolAlias } from "./mcp-utils";
+import { classifyMcpAddress, describeMcpFailure, mcpStorageLink, mcpToolAlias, type McpStorageLink } from "./mcp-utils";
+import { importStreamToStorage } from "./storage-chunk-upload";
 
 const MAX_RESULT_CHARS = 100_000;
 const CONNECTION_TIMEOUT_MS = 20_000;
@@ -198,30 +199,90 @@ export async function mcpConnectionBindings(userId: string, connectionId: string
 
 function bounded(value: string) { return value.length <= MAX_RESULT_CHARS ? value : `${value.slice(0, MAX_RESULT_CHARS)}\n[Result truncated]`; }
 
-export async function executeMcpTool(userId: string, binding: McpToolBinding, args: unknown, signal?: AbortSignal): Promise<{ result: unknown; content?: ModelContentPart[] }> {
+export type McpToolProgress = { stage: "tool" | "storage"; progress: number; total?: number; message?: string; name?: string };
+
+/**
+ * Runs one MCP tool call. The connection's timeout is a limit on silence, not on total time: every progress
+ * notification from the server restarts it, so a long download that keeps reporting is never cut off. Files the
+ * server marks for saving (see mcpStorageLink) are then streamed into the caller's private storage the same way.
+ */
+export async function executeMcpTool(userId: string, binding: McpToolBinding, args: unknown, signal?: AbortSignal, onProgress?: (update: McpToolProgress) => void): Promise<{ result: unknown; content?: ModelContentPart[] }> {
   assertEntitled(userId);
   const row = ownedRow(userId, binding.connectionId);
   if (!row.enabled) throw new AuthError("이 MCP 연결은 비활성화되어 있습니다.", 403);
-  return talkToServer(row.url, signal, async () => {
+  const timeoutMs = (row.tool_timeout_seconds || DEFAULT_MCP_TOOL_TIMEOUT_SECONDS) * 1000;
+  const response = await talkToServer(row.url, signal, async () => {
     const client = await connectedClient(row, signal);
+    const quiet = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const restart = () => { clearTimeout(timer); timer = setTimeout(() => quiet.abort(new Error(`The MCP tool reported nothing for ${row.tool_timeout_seconds || DEFAULT_MCP_TOOL_TIMEOUT_SECONDS} seconds.`)), timeoutMs); };
+    restart();
     try {
-      // Tool execution gets the connection's own budget; the SDK timeout is raised to match so its 60s default cannot cut it short.
-      const timeoutMs = (row.tool_timeout_seconds || DEFAULT_MCP_TOOL_TIMEOUT_SECONDS) * 1000;
-      const response = await client.callTool({ name: binding.toolName, arguments: args && typeof args === "object" ? args as Record<string, unknown> : {} }, { signal: requestSignal(signal, timeoutMs), timeout: timeoutMs, toolDefinition: binding.tool });
-      const content: ModelContentPart[] = [];
-      const summaries: unknown[] = [];
-      for (const part of response.content || []) {
-        if (part.type === "text") { const text = bounded(part.text); content.push({ type: "text", text }); summaries.push({ type: "text", text }); }
-        else if (part.type === "image") { content.push({ type: "image_url", image_url: { url: `data:${part.mimeType};base64,${part.data}` } }); summaries.push({ type: "image", mimeType: part.mimeType, bytes: Math.ceil(part.data.length * .75) }); }
-        else if (part.type === "resource" && "text" in part.resource) { const text = bounded(part.resource.text); content.push({ type: "text", text }); summaries.push({ type: "resource", uri: part.resource.uri, text }); }
-        else summaries.push({ type: part.type });
-      }
-      if (response.structuredContent !== undefined) {
-        const text = bounded(JSON.stringify(response.structuredContent));
-        content.push({ type: "text", text });
-        summaries.push({ type: "structured", text });
-      }
-      return { result: { connection: row.name, tool: binding.toolName, isError: response.isError === true, content: summaries }, ...(content.length ? { content } : {}) };
-    } finally { await client.close().catch(() => undefined); }
+      return await client.callTool({ name: binding.toolName, arguments: args && typeof args === "object" ? args as Record<string, unknown> : {} }, {
+        signal: signal ? AbortSignal.any([signal, quiet.signal]) : quiet.signal,
+        timeout: timeoutMs, resetTimeoutOnProgress: true, toolDefinition: binding.tool,
+        onprogress: progress => { restart(); onProgress?.({ stage: "tool", progress: progress.progress, ...(progress.total !== undefined ? { total: progress.total } : {}), ...(progress.message ? { message: progress.message } : {}) }); },
+      });
+    } catch (error) {
+      if (quiet.signal.aborted && !signal?.aborted) throw new AuthError(`MCP 도구가 ${row.tool_timeout_seconds || DEFAULT_MCP_TOOL_TIMEOUT_SECONDS}초 동안 결과도 진행 상황도 보내지 않아 중단했습니다. 오래 걸리는 도구라면 서버가 진행 상황을 보내도록 하거나 연결의 도구 실행 타임아웃을 늘려 주세요.`, 400);
+      throw error;
+    } finally { clearTimeout(timer); await client.close().catch(() => undefined); }
   });
+  const content: ModelContentPart[] = [];
+  const summaries: unknown[] = [];
+  for (const part of response.content || []) {
+    const link = mcpStorageLink(part, row.url);
+    if (link) {
+      const saved = await saveLinkToStorage(row, userId, link, timeoutMs, signal, onProgress);
+      content.push({ type: "text", text: saved.text }); summaries.push(saved.summary);
+    }
+    else if (part.type === "text") { const text = bounded(part.text); content.push({ type: "text", text }); summaries.push({ type: "text", text }); }
+    else if (part.type === "image") { content.push({ type: "image_url", image_url: { url: `data:${part.mimeType};base64,${part.data}` } }); summaries.push({ type: "image", mimeType: part.mimeType, bytes: Math.ceil(part.data.length * .75) }); }
+    else if (part.type === "resource" && "text" in part.resource) { const text = bounded(part.resource.text); content.push({ type: "text", text }); summaries.push({ type: "resource", uri: part.resource.uri, text }); }
+    else summaries.push({ type: part.type });
+  }
+  if (response.structuredContent !== undefined) {
+    const text = bounded(JSON.stringify(response.structuredContent));
+    content.push({ type: "text", text });
+    summaries.push({ type: "structured", text });
+  }
+  return { result: { connection: row.name, tool: binding.toolName, isError: response.isError === true, content: summaries }, ...(content.length ? { content } : {}) };
+}
+
+function formatBytes(bytes: number) {
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * Streams a server file into the caller's private storage. The transfer has no total time limit; it fails only when
+ * no data arrives for the connection's timeout (at least a minute). A failed transfer leaves nothing in storage. The
+ * server's copy is deleted after a successful save.
+ */
+async function saveLinkToStorage(row: McpRow, userId: string, link: McpStorageLink, toolTimeoutMs: number, signal: AbortSignal | undefined, onProgress?: (update: McpToolProgress) => void) {
+  const headers: Record<string, string> = row.auth_type === "none" || !row.credential ? {} : { authorization: `Bearer ${row.credential}` };
+  try {
+    await assertNetworkTarget(userId, link.url);
+    const response = await fetch(link.url, { headers, redirect: "error", ...(signal ? { signal } : {}) });
+    if (!response.ok || !response.body) { await response.body?.cancel().catch(() => undefined); throw new Error(`The MCP server answered ${response.status} for the file.`); }
+    let reported = 0;
+    const stored = await importStreamToStorage({
+      userId, name: link.name, size: link.size, ...(link.sha256 ? { sha256: link.sha256 } : {}), body: response.body,
+      idleTimeoutMs: Math.max(60_000, toolTimeoutMs), ...(signal ? { signal } : {}),
+      onProgress: received => { const now = Date.now(); if (now - reported < 1000 && received < link.size) return; reported = now; onProgress?.({ stage: "storage", progress: received, total: link.size, name: link.name }); },
+    });
+    void fetch(link.url, { method: "DELETE", headers, redirect: "error" }).catch(() => undefined);
+    const escaped = stored.name.replace(/([\\\]])/g, "\\$1");
+    const markdown = `[${escaped}](${stored.url}?download=1)`;
+    return {
+      text: `Saved "${stored.name}" (${formatBytes(stored.size)}) to the user's private storage. Link for the user: ${markdown}`,
+      summary: { type: "saved_to_storage", id: stored.id, name: stored.name, size: stored.size, mimeType: stored.mimeType, url: stored.url, markdown },
+    };
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      text: `Saving "${link.name}" to the user's private storage failed: ${message} Nothing was kept in storage.`,
+      summary: { type: "storage_save_failed", name: link.name, size: link.size, error: message },
+    };
+  }
 }

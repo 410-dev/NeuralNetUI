@@ -2,7 +2,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { StoredAttachment } from "./types.ts";
 import { dataDir, db } from "./database.ts";
 import { readUpload, saveStagedUpload } from "./uploads.ts";
@@ -59,3 +59,65 @@ export async function completeStorageUpload(id:string,userId:string){
 }
 
 export async function cancelStorageUpload(id:string,userId:string){await readManifest(id,userId);db.prepare("DELETE FROM storage_upload_sessions WHERE id=? AND user_id=?").run(id,userId);await fs.rm(sessionDir(id),{recursive:true,force:true});}
+
+export type StreamImport = {
+  userId: string;
+  name: string;
+  /** Exact size announced by the sender; the transfer must deliver exactly this many bytes. */
+  size: number;
+  /** Optional hex SHA-256 of the whole file, checked before the file is stored. */
+  sha256?: string;
+  body: ReadableStream<Uint8Array>;
+  /** Longest wait for the next piece of data. There is no limit on the total time while data keeps arriving. */
+  idleTimeoutMs: number;
+  signal?: AbortSignal;
+  onProgress?: (received: number, total: number) => void;
+};
+
+function nextChunk<T>(read: Promise<T>, idleTimeoutMs: number, signal: AbortSignal | undefined, onStall: () => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => { onStall(); reject(new Error(`The transfer stalled: no data for ${Math.round(idleTimeoutMs / 1000)} seconds.`)); }, idleTimeoutMs);
+    const abort = () => { clearTimeout(timer); onStall(); reject(signal?.reason instanceof Error ? signal.reason : new DOMException("Stopped", "AbortError")); };
+    if (signal?.aborted) return abort();
+    signal?.addEventListener("abort", abort, { once: true });
+    read.then(value => { clearTimeout(timer); signal?.removeEventListener("abort", abort); resolve(value); },
+      error => { clearTimeout(timer); signal?.removeEventListener("abort", abort); reject(error); });
+  });
+}
+
+/**
+ * Streams a file from another server into the owner's private storage. The size is reserved against the quota first,
+ * the data goes to one staging file on the storage volume, and the file is stored (renamed in) only after the size and
+ * checksum match. Any failure on the way cancels the reservation and removes the staged data, so a broken transfer
+ * never leaves a file in storage.
+ */
+export async function importStreamToStorage(input: StreamImport): Promise<StoredAttachment> {
+  if (!Number.isSafeInteger(input.size) || input.size <= 0) throw new Error("The file size was not announced.");
+  const session = await beginStorageUpload({ name: input.name, size: input.size }, input.userId);
+  const staged = path.join(sessionDir(session.id), "assembled.tmp");
+  try {
+    const reader = input.body.getReader();
+    const file = await fs.open(staged, "wx", 0o600);
+    const hash = createHash("sha256");
+    let received = 0;
+    try {
+      while (true) {
+        const { done, value } = await nextChunk(reader.read(), input.idleTimeoutMs, input.signal, () => { void reader.cancel().catch(() => undefined); });
+        if (done) break;
+        received += value.byteLength;
+        if (received > input.size) throw new Error("The server sent more data than it announced.");
+        hash.update(value);
+        await file.write(value);
+        input.onProgress?.(received, input.size);
+      }
+    } finally { await file.close(); }
+    if (received !== input.size) throw new Error(`The transfer ended early (${received} of ${input.size} bytes).`);
+    if (input.sha256 && hash.digest("hex") !== input.sha256.trim().toLowerCase()) throw new Error("The file checksum does not match.");
+    const stored = await saveStagedUpload(staged, input.name, input.userId, session.id);
+    await fs.rm(sessionDir(session.id), { recursive: true, force: true }).catch(() => undefined);
+    return stored;
+  } catch (error) {
+    await cancelStorageUpload(session.id, input.userId).catch(() => undefined);
+    throw error;
+  }
+}

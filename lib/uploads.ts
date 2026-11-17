@@ -24,6 +24,8 @@ const FILE_MIME_TYPES:Record<string,string>={
   ".docx":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".xlsx":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".pptx":"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".mp4":"video/mp4", ".m4v":"video/mp4", ".webm":"video/webm", ".mkv":"video/x-matroska", ".mov":"video/quicktime",
+  ".m4a":"audio/mp4", ".mp3":"audio/mpeg", ".opus":"audio/ogg", ".ogg":"audio/ogg", ".wav":"audio/wav", ".flac":"audio/flac",
 };
 
 function assertId(id: string) {

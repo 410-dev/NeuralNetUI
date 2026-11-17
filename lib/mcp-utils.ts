@@ -48,3 +48,28 @@ export function describeMcpFailure(error: unknown, endpoint: string): string {
     : `MCP 서버에 연결하지 못했습니다${cause ? ` (${cause})` : ""}`;
   return [`${head}${detail ? `: ${detail}` : "."}`, ...hints].join(" ");
 }
+
+/** A file an MCP server asks NeuralNetUI to save into the caller's private storage. */
+export type McpStorageLink = { url: string; name: string; size: number; sha256?: string };
+
+const STORAGE_LINK_PATH = /^files\/[A-Za-z0-9_-]{16,128}\/[^/?#]{1,1200}$/;
+
+/**
+ * Reads a `resource_link` content part that asks to be saved to storage (`_meta["nnui/saveToStorage"] === true`).
+ * The file is fetched from `_meta["nnui/path"]`, resolved against the connection's own URL, so a tool result can never
+ * point NeuralNetUI at another host. Anything malformed is ignored.
+ */
+export function mcpStorageLink(part: unknown, connectionUrl: string): McpStorageLink | undefined {
+  const source = part && typeof part === "object" ? part as Record<string, unknown> : undefined;
+  if (source?.type !== "resource_link") return undefined;
+  const meta = source._meta && typeof source._meta === "object" ? source._meta as Record<string, unknown> : {};
+  if (meta["nnui/saveToStorage"] !== true || typeof meta["nnui/path"] !== "string" || !STORAGE_LINK_PATH.test(meta["nnui/path"])) return undefined;
+  const size = Number(source.size);
+  if (!Number.isSafeInteger(size) || size <= 0) return undefined;
+  let url: URL;
+  try { url = new URL(meta["nnui/path"], connectionUrl); } catch { return undefined; }
+  if (url.origin !== new URL(connectionUrl).origin) return undefined;
+  const name = typeof source.name === "string" && source.name.trim() ? source.name.trim().slice(0, 240) : decodeURIComponent(meta["nnui/path"].split("/").pop() || "download");
+  const sha256 = typeof meta.sha256 === "string" && /^[a-f0-9]{64}$/i.test(meta.sha256) ? meta.sha256.toLowerCase() : undefined;
+  return { url: url.toString(), name, size, ...(sha256 ? { sha256 } : {}) };
+}

@@ -1,5 +1,5 @@
 import { describeMcpApproval } from "../mcp-approval";
-import { executeMcpTool, listMcpConnections, mcpConnectionBindings, mcpEntitlement, type McpToolBinding } from "../mcp";
+import { executeMcpTool, listMcpConnections, mcpConnectionBindings, mcpEntitlement, type McpToolBinding, type McpToolProgress } from "../mcp";
 import type { McpConnection, McpToolPolicy } from "../types";
 import { requestApproval, type ApprovalPolicy } from "./approval";
 import { mcpManifest } from "./catalog";
@@ -37,7 +37,18 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
     execute(name, args, ctx) {
       const binding = bindings.get(name);
       if (!binding) throw new Error(`MCP tool ${name} is not available.`);
-      return executeMcpTool(ctx.userId, binding, args, ctx.signal);
+      // Long calls (downloads, saves to storage) show their progress on the tool event while they run.
+      let shownAt = 0;
+      const show = (update: McpToolProgress) => {
+        const now = Date.now(); if (now - shownAt < 1000) return; shownAt = now;
+        const ko = ctx.locale === "ko";
+        const amount = update.total ? `${Math.min(100, Math.round(update.progress / update.total * 100))}%` : "";
+        const text = update.stage === "storage"
+          ? (ko ? `개인 저장소에 저장 중 ${amount}` : `Saving to private storage ${amount}`)
+          : update.message || (ko ? `진행 중 ${amount}` : `Working ${amount}`);
+        ctx.updateEvent({ result: { inProgress: true, stage: update.stage, message: text.trim(), ...(update.total ? { progress: update.progress, total: update.total } : {}) } });
+      };
+      return executeMcpTool(ctx.userId, binding, args, ctx.signal, show);
     },
   };
 }

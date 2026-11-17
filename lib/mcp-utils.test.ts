@@ -28,3 +28,14 @@ test("MCP server failures read as one message with the upstream status and a hin
   assert.equal(describeMcpFailure(Object.assign(new Error("Unauthorized"), { name: "UnauthorizedError" }), "https://x.example/mcp"), "MCP 서버가 HTTP 401로 응답했습니다: Unauthorized 인증 방식과 토큰 또는 API 키를 확인하세요.");
   assert.equal(describeMcpFailure(Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } }), "https://x.example/mcp"), "MCP 서버에 연결하지 못했습니다 (ENOTFOUND): fetch failed");
 });
+
+test("only flagged links on the connection's own host become storage imports", async () => {
+  const { mcpStorageLink } = await import("./mcp-utils.ts");
+  const link = (meta: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ type: "resource_link", uri: "https://elsewhere.example/x", name: "clip.webm", size: 1234, _meta: { "nnui/saveToStorage": true, "nnui/path": "files/abcdefghijklmnop0123/clip.webm", ...meta }, ...extra });
+  assert.deepEqual(mcpStorageLink(link({ sha256: "A".repeat(64) }), "https://mcp.example/yt/mcp"), { url: "https://mcp.example/yt/files/abcdefghijklmnop0123/clip.webm", name: "clip.webm", size: 1234, sha256: "a".repeat(64) });
+  assert.equal(mcpStorageLink(link({ "nnui/saveToStorage": false }), "https://mcp.example/mcp"), undefined);
+  assert.equal(mcpStorageLink(link({ "nnui/path": "//evil.example/files/abcdefghijklmnop0123/x" }), "https://mcp.example/mcp"), undefined);
+  assert.equal(mcpStorageLink(link({ "nnui/path": "files/../../etc/passwd" }), "https://mcp.example/mcp"), undefined);
+  assert.equal(mcpStorageLink(link({}, { size: 0 }), "https://mcp.example/mcp"), undefined);
+  assert.equal(mcpStorageLink({ type: "text", text: "hi" }, "https://mcp.example/mcp"), undefined);
+});
