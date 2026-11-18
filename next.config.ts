@@ -19,6 +19,10 @@ const nextConfig: NextConfig = {
     return [{
       source: "/:path*",
       headers: [{ key: "Permissions-Policy", value: "geolocation=(self)" }],
+    }, {
+      // Browsers must always see the latest service worker script.
+      source: "/sw.js",
+      headers: [{ key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }],
     }];
   },
 };
