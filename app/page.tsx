@@ -2625,11 +2625,11 @@ ${c.detectFailedDetail}: ${failure.detail}` : ""}` });
         </nav>
         <div className="settings-content" ref={contentRef}>
           {tab==="general"&&<GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving}/>}
-          {tab==="general"&&draft.managedTools?.youtube&&<YoutubeCookiesSection ko={draft.preferences.language==="ko"}/>}
+          {tab==="general"&&draft.managedTools?.youtube&&<div className="harness-settings"><YoutubeCookiesSection ko={draft.preferences.language==="ko"}/></div>}
           {tab==="appearance"&&<AppearanceSettings c={c} draft={draft} setDraft={setDraft} admin={admin}/>}
           {tab==="connection"&&admin&&<ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} statusNonce={statusNonce} initialServerStates={serverStates} onServerStates={setDraftServerStates}/>}
           {tab==="mcp"&&draft.mcpEntitlement.enabled&&<McpSettings ko={draft.preferences.language==="ko"} connections={draft.mcpConnections} entitlement={draft.mcpEntitlement} onChanged={(connections,entitlement)=>{setDraft(current=>({...current,mcpConnections:connections,mcpEntitlement:entitlement}));onSaved({...initial,mcpConnections:connections,mcpEntitlement:entitlement});}}/>}
-          {tab==="tools"&&admin&&<><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><BrowserHarnessSection draft={draft} setDraft={setDraft}/><YoutubeHarnessSection draft={draft} setDraft={setDraft}/><ToolsSettings c={c} draft={draft} setDraft={setDraft}/><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}
+          {tab==="tools"&&admin&&<><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><div className="harness-settings"><BrowserHarnessSection draft={draft} setDraft={setDraft}/><YoutubeHarnessSection draft={draft} setDraft={setDraft}/></div><ToolsSettings c={c} draft={draft} setDraft={setDraft}/><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}
           {tab==="experimental"&&admin&&<ExperimentalSettings c={c} draft={draft} setDraft={setDraft}/>}
           {tab==="models"&&<ModelSettings c={c} draft={draft} availableModels={availableDraftModels} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account}/>}
           {tab==="reasoning"&&<ReasoningSettings c={c} draft={draft} availableModels={availableDraftModels} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account}/>}

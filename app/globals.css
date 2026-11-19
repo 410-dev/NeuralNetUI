@@ -2072,7 +2072,7 @@ select:focus-visible {
 .compaction-block .compaction-thought { color: var(--dim); }
 .compaction-block .compaction-summary { color: var(--muted); }
 .plan-tools > div { grid-template-columns:39px minmax(0,1fr); }
-.managed-binary-list { display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
+.managed-binary-list { display:flex; flex-direction:column; gap:6px; }
 .managed-binary { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:52px; padding:8px 10px 8px 14px; border-radius:var(--radius-md); background:rgba(255,255,255,.025); border:1px solid transparent; }
 .managed-binary > div:first-child { min-width:0; }
 .managed-binary strong { display:block; color:var(--text); font-size:12.5px; font-weight:560; font-family:var(--font-mono, ui-monospace, monospace); }
