@@ -75,3 +75,11 @@ test("authorization can refuse a call, and model release follows the provider fl
   assert.equal(executed, false);
   assert.deepEqual(await resolved.execute("guarded_tool", { allow: true }, callBits), { result: "ran" });
 });
+
+test("a plan can switch off a built-in tool", async () => {
+  const { toolRequirementsMet, builtinToolProvider } = await import("./catalog.ts");
+  const search = builtinToolProvider("web-search")!;
+  assert.equal(toolRequirementsMet(search, {}), true);
+  assert.equal(toolRequirementsMet(search, { disabledTools: ["web-search"] }), false);
+  assert.equal(toolRequirementsMet({ ...search, origin: "user" }, { disabledTools: ["web-search"] }), true);
+});

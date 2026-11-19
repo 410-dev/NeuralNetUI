@@ -7,7 +7,7 @@ import type { AppConfig, CompactedEditMode, ConnectionConfig, MessageEditMode, C
 import type { AuthUser } from "./auth";
 import { updateUserPreferences } from "./auth";
 import { normalizeRepetitionSettings } from "./repetition";
-import { planModelWeights } from "./plans";
+import { planDisabledToolIds, planModelWeights } from "./plans";
 import { modelAllowedByPlan } from "./plan-usage";
 import { listMcpConnections, mcpEntitlement } from "./mcp";
 import { normalizeToolState, persistableToolState } from "./tools/state.ts";
@@ -54,6 +54,7 @@ const harnessSettingsValuesSchema = z.object({
   maxCompactionResumes: z.number().int().min(0).max(100).default(DEFAULT_HARNESS_SETTINGS.maxCompactionResumes),
   compactThreshold: z.number().int().min(10).max(95),
   compactModelId: z.string().max(500), compactEffort: z.string().max(40), compactPrompt: z.string().trim().min(1).max(32000),
+  compactPromptPosition: z.enum(["before", "after"]).default(DEFAULT_HARNESS_SETTINGS.compactPromptPosition),
   titleEnabled: z.boolean(), titleTiming: z.enum(["before", "after"]), titleModelId: z.string().max(500),
   titleEffort: z.string().max(40), titlePrompt: z.string().trim().min(1).max(32000),
   artifactAutoSaveToStorage: z.boolean().default(DEFAULT_HARNESS_SETTINGS.artifactAutoSaveToStorage),
@@ -152,7 +153,7 @@ export function publicConfig(config: AppConfig, user: AuthUser): PublicConfig {
   const weights = badges ? planModelWeights(user.id) : {};
   const chargeId = (model: ModelConfig) => model.isAlias ? config.models.find(item => !item.isAlias && (item.id === model.sourceModel || item.sourceModel === model.sourceModel))?.id || model.sourceModel : model.id;
   const modelWeights = badges ? Object.fromEntries(config.models.map(model => [model.id, weights[chargeId(model)] || 1]).filter(([, weight]) => weight !== 1)) : undefined;
-  return { ...config, ...(modelWeights ? { modelWeights } : {}), planModelIds:planModels, harnessSettings, experimental: { ...config.experimental, hostComputerTool: superadmin && config.experimental.hostComputerTool }, hostComputerAvailable: superadmin && isHostComputerAvailable(), loginAppearance: normalizeLoginAppearance(config.loginAppearance), profile: { name: user.displayName }, preferences, models: config.models.filter((model) => canUseModel(model, user)&&(exposeAllModels||planAllows(model))).map((model) => ({ ...model, ...hiddenPrompt(model), reasoningPresets: offeredPresets(model, model.reasoningPresets.filter((preset) => visiblePreset(preset, user))) })), connections: config.connections.map((connection) => ({ ...connection, models: connection.models.filter(model=>exposeAllModels||planAllows(model)).map((model) => ({ ...model, ...hiddenPrompt(model), reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), apiKey: "", hasApiKey: Boolean(!connection.clearApiKey && (connection.apiKey || (connection.driver === "openai" && process.env.OPENAI_API_KEY))) })), mcpConnections:listMcpConnections(user.id),mcpEntitlement:mcpEntitlement(user.id), account: { id: user.id, username: user.username, displayName: user.displayName, role: user.role, canAudit:user.canAudit, ...(user.planId ? { planId:user.planId } : {}) } };
+  return { ...config, ...(modelWeights ? { modelWeights } : {}), planModelIds:planModels, planDisabledToolIds:planDisabledToolIds(user.id), harnessSettings, experimental: { ...config.experimental, hostComputerTool: superadmin && config.experimental.hostComputerTool }, hostComputerAvailable: superadmin && isHostComputerAvailable(), loginAppearance: normalizeLoginAppearance(config.loginAppearance), profile: { name: user.displayName }, preferences, models: config.models.filter((model) => canUseModel(model, user)&&(exposeAllModels||planAllows(model))).map((model) => ({ ...model, ...hiddenPrompt(model), reasoningPresets: offeredPresets(model, model.reasoningPresets.filter((preset) => visiblePreset(preset, user))) })), connections: config.connections.map((connection) => ({ ...connection, models: connection.models.filter(model=>exposeAllModels||planAllows(model)).map((model) => ({ ...model, ...hiddenPrompt(model), reasoningPresets: model.reasoningPresets.filter((preset) => visiblePreset(preset, user)) })), apiKey: "", hasApiKey: Boolean(!connection.clearApiKey && (connection.apiKey || (connection.driver === "openai" && process.env.OPENAI_API_KEY))) })), mcpConnections:listMcpConnections(user.id),mcpEntitlement:mcpEntitlement(user.id), account: { id: user.id, username: user.username, displayName: user.displayName, role: user.role, canAudit:user.canAudit, ...(user.planId ? { planId:user.planId } : {}) } };
 }
 
 export async function writeConfigForUser(input: unknown, user: AuthUser): Promise<AppConfig> {

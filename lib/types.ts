@@ -164,6 +164,8 @@ export interface UsagePlan {
   mcpEnabled: boolean;
   maxMcpConnections: number;
   artifactHtmlEnabled: boolean;
+  /** Built-in tool provider ids people on this plan cannot use. */
+  disabledToolIds: string[];
   userCount?: number;
 }
 
@@ -296,6 +298,8 @@ export interface HarnessSettings {
   compactModelId: string;
   compactEffort: string;
   compactPrompt: string;
+  /** Where the compaction prompt goes relative to the conversation when it has no {CHAT_CONTENT} placeholder. */
+  compactPromptPosition: "before" | "after";
   resumePrompt: string;
   maxCompactionResumes: number;
   titleEnabled: boolean;
@@ -468,6 +472,8 @@ export type PublicConfig = Omit<AppConfig, "connections"> & {
   modelWeights?: Record<string, number>;
   /** Runtime-only plan allow-list used by the chat picker, including for administrators. */
   planModelIds: string[];
+  /** Built-in tool provider ids the account's plan switches off. */
+  planDisabledToolIds?: string[];
   /** Runtime-only, user-owned MCP records. Credentials are never included. */
   mcpConnections: McpConnection[];
   mcpEntitlement: McpEntitlement;

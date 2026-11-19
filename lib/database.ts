@@ -532,6 +532,13 @@ function openDatabase() {
       state TEXT NOT NULL, updated_at TEXT NOT NULL);`);
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(27, new Date().toISOString());
   })();
+  const planToolsVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (planToolsVersion.version < 28) connection.transaction(() => {
+    // Built-in tools a plan switches off (JSON array of provider ids). New tools stay allowed until a plan turns them off.
+    const columns = connection.prepare("PRAGMA table_info(plans)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "disabled_tool_ids")) connection.exec("ALTER TABLE plans ADD COLUMN disabled_tool_ids TEXT NOT NULL DEFAULT '[]';");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(28, new Date().toISOString());
+  })();
   return connection;
 }
 

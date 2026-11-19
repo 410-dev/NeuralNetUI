@@ -452,10 +452,10 @@ export default function Home() {
   const [toolState, setToolState] = useState<ToolState>(DEFAULT_TOOL_STATE);
   // Built-in tools this account may use, then the account's own MCP connections. The server enforces the same rules.
   const offeredTools = useMemo(() => {
-    const environment = { role: config.account?.role, experimental: config.experimental, hostEnvironment: config.hostComputerAvailable === true };
+    const environment = { role: config.account?.role, experimental: config.experimental, hostEnvironment: config.hostComputerAvailable === true, disabledTools: config.planDisabledToolIds };
     const connections = config.mcpEntitlement?.enabled ? config.mcpConnections.filter(connection => connection.enabled) : [];
     return [...BUILTIN_TOOL_PROVIDERS.filter(manifest => toolRequirementsMet(manifest, environment)), ...connections.map((connection, index) => mcpManifest(connection, index))];
-  }, [config.account?.role, config.experimental, config.hostComputerAvailable, config.mcpEntitlement?.enabled, config.mcpConnections]);
+  }, [config.account?.role, config.experimental, config.hostComputerAvailable, config.mcpEntitlement?.enabled, config.mcpConnections, config.planDisabledToolIds]);
   const pendingToolsRef = useRef<Record<string, unknown>>({});
   const toolSaveTimerRef = useRef<number | undefined>(undefined);
   /** Tool switches and options are account preferences: apply locally, then save the batched change. */

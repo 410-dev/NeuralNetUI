@@ -2071,3 +2071,4 @@ select:focus-visible {
 
 .compaction-block .compaction-thought { color: var(--dim); }
 .compaction-block .compaction-summary { color: var(--muted); }
+.plan-tools > div { grid-template-columns:39px minmax(0,1fr); }

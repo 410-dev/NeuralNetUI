@@ -1,6 +1,6 @@
 import { progressEvent } from "./inference-progress";
 import { nativeChatResponse, observeLmStudioPrefill } from "./lm-studio-progress";
-import { contextOverflowDetails, DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rollingMessages, contextThresholdReached, usesCompactionThreshold, VISUAL_TOOL_CONTENT_PREFIX } from "./harness";
+import { CONTINUE_AFTER_DROP_PROMPT, contextOverflowDetails, DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rollingMessages, contextThresholdReached, usesCompactionThreshold, VISUAL_TOOL_CONTENT_PREFIX } from "./harness";
 import { contextUsage } from "./context-usage";
 import { harnessCompletion, prepareContext, compactForResume, compactToolContext, dropContextDetails, rollContext, HISTORICAL_SUMMARY_PREFIX, type CompactionRecord, type CompactionUpdate } from "./harness-runtime";
 import { applyContextState, messageBeforeLatestUser, type ContextState } from "./context-state";
@@ -32,7 +32,7 @@ import type { ToolExecution, ToolRequestContext } from "./tools/types";
 import type { ChatWaitPhase, Conversation, MessageStep, ModelConfig, StoredMessage, ToolEvent, ToolSettings, UserRole } from "./types";
 import type { ModelContentPart } from "./document-processing";
 import { promises as fs } from "node:fs";
-import { acquirePlanAdmission, assertPlanAccess, clearLiveTokenUsage, recordTokenUsage, releasePlanAdmission, remainingPlanOutputTokens, setLiveTokenUsage } from "./plans";
+import { acquirePlanAdmission, assertPlanAccess, planDisabledToolIds, clearLiveTokenUsage, recordTokenUsage, releasePlanAdmission, remainingPlanOutputTokens, setLiveTokenUsage } from "./plans";
 import { generateCompatibleImage } from "./image-generation";
 import { createThinkingSplitter, effectiveThinkingTags, normalizeThinkingTags, type ThinkingTag } from "./thinking-tags";
 import { canPersonalizeSystemPrompt, readModelSystemPrompts, readSystemPromptOverrides, resolveSystemPrompt } from "./system-prompt";
@@ -593,6 +593,7 @@ async function run(job: ChatJob) {
       clientContext: job.input.clientContext, config, model, signal: job.controller.signal,
       history: () => [...job.conversation.branches.flatMap(branch => branch.messages), job.message].flatMap(message => message.toolEvents || []),
       services: { complete: (modelId, effort, prompt, input, maxTokens) => harnessCompletion(harnessContext, modelId || job.input.modelId, effort, prompt, input, maxTokens) },
+      disabledTools: planDisabledToolIds(job.userId),
     };
     // Every provider the request switched on and the server allows, fixed for the whole reply.
     const resolvedTools = await resolveTools(toolRequest, requestToolState(job.input.tools), toolSources(), { hostEnvironment: isHostComputerAvailable() });
@@ -712,7 +713,7 @@ async function run(job: ChatJob) {
       try {
         const configuredThreshold = contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined;
         const streamThreshold = configuredThreshold && projectedInput >= configuredThreshold && contextWindow ? Math.floor(contextWindow * .95) : configuredThreshold;
-        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: presetEffortValue(model, preset), sampling } : undefined, progressEnabled, harness.contextMode === "compacting" ? streamThreshold : undefined, projectedInput, chargeModelId, connection.driver === "nnui" ? { eventsUrl: nnuiEventsEndpoint(connection.baseUrl), sessionId, model: model.sourceModel } : undefined, connection.driver === "lmstudio");
+        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: presetEffortValue(model, preset), sampling } : undefined, progressEnabled, usesCompactionThreshold(harness) ? streamThreshold : undefined, projectedInput, chargeModelId, connection.driver === "nnui" ? { eventsUrl: nnuiEventsEndpoint(connection.baseUrl), sessionId, model: model.sourceModel } : undefined, connection.driver === "lmstudio");
       } catch (error) {
         const overflow = contextOverflowDetails(error);
         if (!overflow) throw error;
@@ -762,12 +763,30 @@ async function run(job: ChatJob) {
         job.controller.signal.throwIfAborted();
         releaseModel?.(); releaseModel = undefined;
         if (++compactionResumes > harness.maxCompactionResumes) throw compactionError();
-        // Incomplete tool arguments are historical data only; never execute them.
-        messages.push({ role: "assistant", content: result.content, reasoning_content: result.reasoning,
-          ...(result.calls.length ? { tool_calls: result.calls } : {}) });
-        messages = await compactForResume(harnessContext, messages, originalUser, recordCompaction, record => updateCompaction(job, record));
+        // The partial answer as plain text, followed by a request to go on from where it stopped.
+        const partial = result.content.trim() ? [{ role: "assistant", content: result.content }, { role: "user", content: CONTINUE_AFTER_DROP_PROMPT }] : [];
+        let handled = false;
+        if (harness.dropDetailsFirst) {
+          // Drop Details first, without a model call: earlier tool calls, results and reasoning go and the newest
+          // finished tool exchange stays. The base method runs only if that is still over the threshold.
+          messages = dropContextDetails(messages, undefined, recordCompaction);
+          const withPartial = [...messages, ...partial];
+          if (!contextThresholdReached(estimateTokens(withPartial) + estimateTokens(tools), contextWindow, harness.compactThreshold)) { messages = withPartial; handled = true; }
+        }
+        if (!handled && harness.contextMode === "compacting") {
+          // Incomplete tool arguments are historical data only; never execute them.
+          messages.push({ role: "assistant", content: result.content, reasoning_content: result.reasoning,
+            ...(result.calls.length ? { tool_calls: result.calls } : {}) });
+          messages = await compactForResume(harnessContext, messages, originalUser, recordCompaction, record => updateCompaction(job, record));
+        } else if (!handled) {
+          // Rolling: the oldest turns go until the partial answer and the request to continue fit.
+          const withPartial = [...messages, ...partial];
+          if (!contextWindow) messages = withPartial;
+          else try { messages = rollContext(withPartial, Math.floor(contextWindow * harness.compactThreshold / 100) - estimateTokens(tools), Math.floor(contextWindow * .95) - estimateTokens(tools), recordCompaction); }
+          catch { throw overflowError({ contextWindow }); }
+        }
         measuredInput = 0; measuredEstimate = undefined;
-        if (contextThresholdReached(estimateTokens(messages) + estimateTokens(tools), contextWindow, harness.compactThreshold)) throw compactionError();
+        if (contextThresholdReached(estimateTokens(messages) + estimateTokens(tools), contextWindow, harness.compactThreshold) && harness.contextMode === "compacting") throw compactionError();
         releaseModel = await acquireModel();
         turn -= 1; // Compaction retries do not consume the tool execution budget.
         continue;

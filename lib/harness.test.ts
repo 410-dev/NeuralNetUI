@@ -84,3 +84,10 @@ test("token counts read short in transcript labels", async () => {
   const { formatTokenCount } = await import("./harness.ts");
   assert.deepEqual([999, 1000, 1250, 9_960, 50_400, 1_400_000].map(formatTokenCount), ["999", "1k", "1.3k", "10k", "50k", "1.4M"]);
 });
+
+test("compaction prompt goes after the conversation by default and honors {CHAT_CONTENT}", async () => {
+  const { compactionMessages } = await import("./harness.ts");
+  assert.deepEqual(compactionMessages("Summarize.", "CHAT"), [{ role: "user", content: "CHAT\n\nSummarize." }]);
+  assert.deepEqual(compactionMessages("Summarize.", "CHAT", "before"), [{ role: "system", content: "Summarize." }, { role: "user", content: "CHAT" }]);
+  assert.deepEqual(compactionMessages("A {CHAT_CONTENT} B $&", "x$'y", "before"), [{ role: "user", content: "A x$'y B $&" }]);
+});

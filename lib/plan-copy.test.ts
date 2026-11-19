@@ -4,7 +4,7 @@ import { planCopy } from "./plan-copy.ts";
 import type { UsagePlan } from "./types.ts";
 
 test("a plan copy preserves settings but owns new identity and token windows",()=>{
-  const source:UsagePlan={id:"original",name:"Pro",storageQuotaBytes:1024**3,trashQuotaBytes:2*1024**3,servedModelIds:["model"],modelWeights:{model:1.75},mcpEnabled:true,maxMcpConnections:3,artifactHtmlEnabled:false,tokenLimits:[{id:"limit-1",durationSeconds:3600,tokenLimit:100,tokenScope:"both"}],userCount:4};
+  const source:UsagePlan={id:"original",name:"Pro",storageQuotaBytes:1024**3,trashQuotaBytes:2*1024**3,servedModelIds:["model"],modelWeights:{model:1.75},mcpEnabled:true,maxMcpConnections:3,artifactHtmlEnabled:false,disabledToolIds:[],tokenLimits:[{id:"limit-1",durationSeconds:3600,tokenLimit:100,tokenScope:"both"}],userCount:4};
   const copy=planCopy(source,["Pro","Pro (Copy)"],"en");
   assert.equal(copy.name,"Pro (Copy 2)");
   assert.equal(copy.id,"");

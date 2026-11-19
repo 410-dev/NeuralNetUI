@@ -161,9 +161,12 @@ export interface ToolEnvironment {
   experimental?: { hostComputerTool?: boolean };
   /** True when the host is not a container. */
   hostEnvironment?: boolean;
+  /** Built-in provider ids the account's plan switches off. */
+  disabledTools?: readonly string[];
 }
 
-export function toolRequirementsMet(manifest: Pick<ToolProviderManifest, "requires">, environment: ToolEnvironment) {
+export function toolRequirementsMet(manifest: Pick<ToolProviderManifest, "requires"> & Partial<Pick<ToolProviderManifest, "id" | "origin">>, environment: ToolEnvironment) {
+  if (manifest.origin === "builtin" && manifest.id && environment.disabledTools?.includes(manifest.id)) return false;
   const requires = manifest.requires;
   if (!requires) return true;
   if (requires.experimental && environment.experimental?.[requires.experimental] !== true) return false;

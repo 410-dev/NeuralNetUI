@@ -39,6 +39,8 @@ export interface ToolRequestContext {
   /** Tool events already recorded in this conversation, including the reply being written. */
   history(): ToolEvent[];
   services: ToolServices;
+  /** Built-in provider ids the account's plan switches off. */
+  disabledTools?: readonly string[];
 }
 
 /** The request context plus this provider's own switch values. */

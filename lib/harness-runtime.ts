@@ -1,4 +1,4 @@
-import { DEFAULT_HARNESS_SETTINGS, dropDetails, dropDetailsBeforeLatestTools, estimateTokens, projectedInputTokens, rollingMessages, resumePrompt } from "./harness";
+import { DEFAULT_HARNESS_SETTINGS, compactionMessages, dropDetails, dropDetailsBeforeLatestTools, estimateTokens, projectedInputTokens, rollingMessages, resumePrompt } from "./harness";
 import { canUseModel } from "./config";
 import { connectionForModel, chatHeaders, connectionRoot, chatEndpoint } from "./connection-drivers";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
@@ -56,7 +56,7 @@ async function readHarnessStream(response: Response, onUpdate: (result: HarnessR
   return { text: text.trim(), reasoning: reasoning.trim(),...(inputTokens===undefined?{}:{inputTokens}),...(outputTokens===undefined?{}:{outputTokens}) };
 }
 
-export async function harnessCompletion(ctx: Context, id: string, effortValue: string, prompt: string, content: string, maxTokens: number, onUpdate?: (result: HarnessResult) => void): Promise<HarnessResult> {
+export async function harnessCompletion(ctx: Context, id: string, effortValue: string, prompt: string, content: string, maxTokens: number, onUpdate?: (result: HarnessResult) => void, kind?: "compaction"): Promise<HarnessResult> {
   const model = taskModel(ctx, id);
   const chargeModelId=model.isAlias?(ctx.config.models.find(item=>!item.isAlias&&(item.id===model.sourceModel||item.sourceModel===model.sourceModel))?.id||model.sourceModel):model.id;
   const configured = connectionForModel(ctx.config.connections, model);
@@ -76,7 +76,9 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
   const release = await modelResidency.acquire({ server, model: model.sourceModel, limit,
     policy: peers.some(c => c.modelWaitPolicy === "serial") ? "serial" : "capacity", signal, onPhase: ctx.onPhase,
     adapter: ctx.config.preferences.onDemand || limit || connection.driver === "lmstudio" || connection.driver === "nnui" ? createResidencyAdapter(connection, headers, model.contextWindowTokens, ctx.onPhase) : undefined }).catch(error => { if (timeout) clearTimeout(timeout); route.release(); throw error; });
-  const isCompaction = prompt === (ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS).compactPrompt;
+  const harnessSettings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
+  const isCompaction = kind === "compaction" || prompt === harnessSettings.compactPrompt;
+  const requestMessages = isCompaction ? compactionMessages(prompt, content, harnessSettings.compactPromptPosition) : [{role:"system", content:prompt}, {role:"user", content}];
   const pollController = new AbortController();
   const stopPoll = () => pollController.abort();
   try {
@@ -91,7 +93,7 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
     const sampling = resolveSampling({ served, alias: model.isAlias ? model : undefined, modelId: model.id, personal: readPersonalSampling(readUserPreferences(ctx.userId).modelSamplingParams), userEditable: ctx.config.samplingUserEditable === true });
     const effort = reasoningEffort(model, { id: "harness", name: "Harness", kind: "builtin", effort: effortValue === "off" && model.reasoningEfforts?.includes("none") ? "none" : effortValue });
     const response = await fetch(chatEndpoint(connection.driver, connection.baseUrl), { method: "POST", headers, signal,
-      body: JSON.stringify({ model: model.sourceModel, stream: Boolean(onUpdate), ...(onUpdate ? { stream_options: { include_usage: true } } : {}), messages: [{role:"system", content:prompt}, {role:"user", content}], max_tokens:maxTokens, ...samplingRequestFields(sampling), ...(effort ? {reasoning_effort:effort} : {}) }) });
+      body: JSON.stringify({ model: model.sourceModel, stream: Boolean(onUpdate), ...(onUpdate ? { stream_options: { include_usage: true } } : {}), messages: requestMessages, max_tokens:maxTokens, ...samplingRequestFields(sampling), ...(effort ? {reasoning_effort:effort} : {}) }) });
     if (!response.ok) throw new Error(`Harness generation failed (${response.status}).`);
     if (onUpdate){const streamed=await readHarnessStream(response,onUpdate,() => { stopPoll(); startTimeout(); ctx.onPhase(isCompaction ? "compacting-context" : "preparing-response"); }, effectiveThinkingTags(normalizeThinkingTags(model.thinkingTags)), model.thinkingTagsCross === true);recordTokenUsage(ctx.userId,chargeModelId,streamed.inputTokens||0,streamed.outputTokens||0);route.record(streamed.inputTokens,streamed.outputTokens);return streamed;}
     const result = await response.json();
@@ -218,7 +220,7 @@ export async function summarizeContext(ctx: Context, data: unknown, onUpdate?: (
       JSON.stringify({summary, fragment}), output, onUpdate ? partial => onUpdate({
         summary: partial.text || summary,
         reasoning: [reasoning, partial.reasoning].filter(Boolean).join("\n\n"),
-      }) : undefined);
+      }) : undefined, "compaction");
     summary = result.text;
     if (result.reasoning) reasoning = reasoning ? `${reasoning}\n\n${result.reasoning}` : result.reasoning;
     offset += low;

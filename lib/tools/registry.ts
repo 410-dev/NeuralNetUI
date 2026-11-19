@@ -28,7 +28,7 @@ export function specFromModelTool(definition: Record<string, unknown>): ToolSpec
 }
 
 function environmentOf(ctx: ToolRequestContext, hostEnvironment: boolean) {
-  return { role: ctx.role, experimental: ctx.config.experimental, hostEnvironment };
+  return { role: ctx.role, experimental: ctx.config.experimental, hostEnvironment, disabledTools: ctx.disabledTools };
 }
 
 function declared(provider: ToolProvider, spec: ToolSpec) {
