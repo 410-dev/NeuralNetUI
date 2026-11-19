@@ -66,7 +66,7 @@ try {
     reasoningPresets: [{ id: "beta13-template", name: "QA 템플릿", kind: "custom", effort: "", systemPrompt: "저장된 추가 프롬프트입니다.", systemPromptMode: "append" }],
   };
   config.connections = [{ id: "qa", name: "QA", driver: "openai", baseUrl: "http://127.0.0.1:9/v1", apiKey: "", models: [model] }];
-  config.models = [model]; config.preferences.language = "ko"; config.experimental.hostComputerTool = true;
+  config.models = [model]; config.preferences.language = "ko";
   config.harnessSettings.titleEnabled = false;
   await json("/api/config", "PUT", config);
 

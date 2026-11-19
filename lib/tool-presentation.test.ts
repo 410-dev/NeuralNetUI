@@ -8,7 +8,7 @@ test("known tool names are localized and unknown names remain readable", () => {
   assert.equal(getToolDisplayName("visit_page", "en"), "Page visit");
   assert.equal(getToolDisplayName("browser", "ko"), "브라우저", "retired tools keep their name in old chats");
   assert.equal(getToolDisplayName("run_python", "en"), "Python");
-  assert.equal(getToolDisplayName("host_computer", "ko"), "호스트 컴퓨터");
+  assert.equal(getToolDisplayName("host_computer", "ko"), "호스트 컴퓨터", "the removed host computer tool keeps its name in old chats");
   assert.equal(getToolDisplayName("custom_data_lookup", "en"), "Custom data lookup");
   assert.equal(getToolDisplayName("mcp_a1b2c3d4_search_docs", "en"), "MCP search docs");
 });

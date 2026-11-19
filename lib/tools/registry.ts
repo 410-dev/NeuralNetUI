@@ -27,8 +27,8 @@ export function specFromModelTool(definition: Record<string, unknown>): ToolSpec
   return { name: String(fn.name || ""), description: String(fn.description || ""), inputSchema: fn.parameters || { type: "object", properties: {} } };
 }
 
-function environmentOf(ctx: ToolRequestContext, hostEnvironment: boolean) {
-  return { role: ctx.role, experimental: ctx.config.experimental, hostEnvironment, disabledTools: ctx.disabledTools, managedTools: ctx.managedTools };
+function environmentOf(ctx: ToolRequestContext) {
+  return { role: ctx.role, disabledTools: ctx.disabledTools, managedTools: ctx.managedTools };
 }
 
 function declared(provider: ToolProvider, spec: ToolSpec) {
@@ -42,9 +42,9 @@ function declared(provider: ToolProvider, spec: ToolSpec) {
  * whole reply. A name the model invents, or one belonging to a switched-off provider, is not in the map and
  * therefore cannot run. Function name collisions keep the first provider and drop the later one.
  */
-export async function resolveTools(request: ToolRequestContext, state: ToolState, sources: ToolProviderSource[], options: { hostEnvironment: boolean }): Promise<ResolvedTools> {
+export async function resolveTools(request: ToolRequestContext, state: ToolState, sources: ToolProviderSource[]): Promise<ResolvedTools> {
   const providers = (await Promise.all(sources.map(source => source.providers(request, state)))).flat();
-  const environment = environmentOf(request, options.hostEnvironment);
+  const environment = environmentOf(request);
   const offered = await Promise.all(providers.map(async provider => {
     const settings = resolveProviderState(state, provider.manifest);
     if (!settings.enabled || !toolRequirementsMet(provider.manifest, environment)) return undefined;

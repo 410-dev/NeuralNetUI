@@ -6,6 +6,7 @@ export type ToolGroupState = "active" | "completed" | "error";
 /** Tools that no longer ship, so calls saved in older chats keep a readable name. */
 const RETIRED_TOOL_NAMES: Record<string, Record<Locale, string>> = {
   browser: { en: "Browser", ko: "브라우저" },
+  host_computer: { en: "Host computer", ko: "호스트 컴퓨터" },
 };
 
 export function getToolDisplayName(name: string, locale: Locale) {

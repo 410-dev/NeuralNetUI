@@ -24,7 +24,6 @@ import { createResidencyAdapter } from "./residency-adapter";
 import { nnuiEventProgress, startNnuiEventObserver } from "./nnui-driver";
 import { modelResidency } from "./residency-runtime";
 import { progressFetch, SERVER_RESPONSE_TIMEOUT_MS, withSlowProgress } from "./chat-progress";
-import { isHostComputerAvailable } from "./host-environment";
 import { resolveTools, toolSources } from "./tools";
 import { managedToolsInstalled } from "./managed-tools";
 import { streamingPhaseFor } from "./tools/catalog";
@@ -598,7 +597,7 @@ async function run(job: ChatJob) {
       managedTools: managedToolsInstalled(),
     };
     // Every provider the request switched on and the server allows, fixed for the whole reply.
-    const resolvedTools = await resolveTools(toolRequest, requestToolState(job.input.tools), toolSources(), { hostEnvironment: isHostComputerAvailable() });
+    const resolvedTools = await resolveTools(toolRequest, requestToolState(job.input.tools), toolSources());
     for (const dropped of resolvedTools.rejected) console.warn(`Tool ${dropped.name} from ${dropped.provider} was not offered: ${dropped.reason}.`);
     const tools = resolvedTools.definitions;
     const firstResponse = !job.conversation.branches.some(b => b.messages.some(m => m.role === "assistant" && m.content));
@@ -812,7 +811,7 @@ async function run(job: ChatJob) {
       const visualToolContent: ModelContentPart[] = [];
       for (const call of result.calls) {
         addToolEvent(job, call); let execution: ToolExecution;
-        // Some providers wait for approval or run their own model call (host computer risk checks). Do not hold
+        // Some providers wait for approval or run their own model call (their own model calls). Do not hold
         // this chat's residency lease through either (a serial residency policy would self-deadlock).
         if (resolvedTools.releasesModel(call.function.name)) { releaseModel?.(); releaseModel = undefined; }
         try { execution = await resolvedTools.execute(call.function.name, parseArguments(call.function.arguments), { callId: call.id, rawArguments: call.function.arguments, updateEvent: patch => updateToolEvent(job, call.id, patch), waitForUser: () => waitForBrowser(job, call), setWaitPhase: phase => setWaitPhase(job, phase) }); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }

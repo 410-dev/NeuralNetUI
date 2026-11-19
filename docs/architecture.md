@@ -47,7 +47,7 @@
 | `lib/mcp.ts` / `mcp-utils.ts` | 사용자별 MCP CRUD, Streamable HTTP 실행, 도구 네임스페이스, 네트워크 경계 |
 | `lib/code-runner-client.ts` | 코드 실행 도구의 브라우저 샌드박스(격리 iframe + Worker, Pyodide) |
 | `lib/storage-tool.ts` / `uploads.ts` / `storage-chunk-upload.ts` | 개인 저장소와 업로드 |
-| `lib/host-computer-tool.ts` / `host-permissions.ts` | 호스트 컴퓨터 도구와 권한 매트릭스 |
+| `lib/obscura.ts` / `lib/youtube.ts` | Obscura 브라우저 세션 프록시, 유튜브(yt-dlp) 도구 |
 | `lib/document-processing.ts` | 문서 분류, 텍스트 디코딩, PDF 처리 |
 | `lib/transcript.ts` | 메시지 단계 기록과 구버전 레이아웃 복원 |
 | `lib/appearance.ts` / `greetings.ts` | 표시 전용 환경설정 |

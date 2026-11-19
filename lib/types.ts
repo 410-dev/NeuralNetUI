@@ -1,7 +1,6 @@
 import type { ToolState } from "./tools/state.ts";
 import type { PersonalSampling, SamplingParams } from "./sampling-params.ts";
 import type { GreetingOverrides } from "./greetings.ts";
-import type { HostTrustedPermissions } from "./host-permissions.ts";
 import type { RepetitionSettings } from "./repetition.ts";
 
 export type ReasoningKind = "builtin" | "custom";
@@ -309,14 +308,6 @@ export interface HarnessSettings {
   titlePrompt: string;
   /** Automatically keep artifact-tool output in the creator's private storage. */
   artifactAutoSaveToStorage: boolean;
-  /** Confirmation policy for the Superadmin-only host computer tool. */
-  hostTrustMode: "full" | "partial" | "none";
-  /** Per-operation automatic approval choices. Used only in partial trust mode. */
-  hostTrustedPermissions: HostTrustedPermissions;
-  /** Optional isolated model used to classify and explain shell commands. */
-  hostCommandModelId: string;
-  hostCommandEffort: string;
-  hostCommandAnalysisPrompt: string;
   /** Per-kind switches and consecutive-copy thresholds for flagging a response that repeats itself. */
   repetitionDetection: RepetitionSettings;
   /** Obscura browser: screenshots and PDF export (render), and fingerprint/tracker protection (stealth). */
@@ -335,7 +326,6 @@ export interface HarnessSettings {
 /** Opt-in features an administrator must switch on before anyone can use them. */
 export interface ExperimentalFeatures {
   openAIProgress?: boolean;
-  hostComputerTool: boolean;
 }
 
 export interface ToolSettings {
@@ -477,8 +467,6 @@ export type PublicConnectionConfig = Omit<ConnectionConfig, "apiKey"> & { apiKey
 export type PublicConfig = Omit<AppConfig, "connections"> & {
   connections: PublicConnectionConfig[];
   account?: AccountInfo;
-  /** Runtime capability, computed by the server and never persisted. */
-  hostComputerAvailable?: boolean;
   /** Present while weight badges are enabled: the account's plan weights other than 1, keyed by picker model id. */
   modelWeights?: Record<string, number>;
   /** Runtime-only plan allow-list used by the chat picker, including for administrators. */

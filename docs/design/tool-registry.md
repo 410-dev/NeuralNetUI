@@ -38,7 +38,7 @@ lib/tools/
   index.ts        toolSources(), disposeConversationTools()
 ```
 
-`web-tools.ts`, `storage-tool.ts`, `host-computer-tool.ts`, `mcp.ts`의 실행 로직은 그대로이고, `builtin.ts`와 `mcp-source.ts`는 얇은 어댑터입니다.
+`web-tools.ts`, `storage-tool.ts`, `obscura.ts`, `youtube.ts`, `mcp.ts`의 실행 로직은 그대로이고, `builtin.ts`와 `mcp-source.ts`는 얇은 어댑터입니다.
 
 ## 4. 공급자 계약
 
@@ -108,11 +108,11 @@ interface ToolState {
 | `session_ask` | 대화마다 한 번 확인, 12시간 또는 대화 삭제까지 기억 |
 | `blocked` | 실행 안 함 |
 
-승인 기억은 `globalThis`에 있어 모든 라우트 번들이 같은 값을 봅니다. MCP는 연결별 도구 정책을 그대로 넘깁니다. 호스트 컴퓨터는 신뢰 모드 · 권한 매트릭스 · 위험도 평가를 자기 `authorize`에서 계산하고, 확인이 필요할 때만 사용자 응답을 기다립니다 (허용 · 거부 · 다른 작업 지시).
+승인 기억은 `globalThis`에 있어 모든 라우트 번들이 같은 값을 봅니다. MCP는 연결별 도구 정책을 그대로 넘깁니다.
 
 ## 8. 수명 주기
 
-대화를 지우는 모든 경로(단건 · 일괄 · 조건 삭제 · 저장소 파일과 함께 삭제)는 `disposeConversationTools(userId, ids)`를 부릅니다. 이 함수는 세션 승인을 지우고 각 공급자의 `disposeConversation`을 호출합니다. 호스트 컴퓨터 상태가 여기서 정리되며, 여러 번 불러도 안전합니다.
+대화를 지우는 모든 경로(단건 · 일괄 · 조건 삭제 · 저장소 파일과 함께 삭제)는 `disposeConversationTools(userId, ids)`를 부릅니다. 이 함수는 세션 승인을 지우고 각 공급자의 `disposeConversation`을 호출합니다. 브라우저 세션과 프로필이 여기서 정리되며, 여러 번 불러도 안전합니다.
 
 ## 9. 클라이언트에서 실행되는 공급자: 코드 실행
 

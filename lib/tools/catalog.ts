@@ -13,7 +13,7 @@ export type ToolOrigin = "builtin" | "workspace" | "user";
 export type ToolCategory = "internet" | "awareness" | "agent" | "interaction";
 /** Menu section: the fixed built-in categories, then the installed tiers. */
 export type ToolSection = ToolCategory | "workspace" | "mcp";
-export type ToolIcon = "search" | "link" | "braces" | "clock" | "map-pin" | "hard-drive" | "terminal" | "list-checks" | "code" | "cable" | "wrench" | "globe" | "video";
+export type ToolIcon = "search" | "link" | "braces" | "clock" | "map-pin" | "hard-drive" | "list-checks" | "code" | "cable" | "wrench" | "globe" | "video";
 export type Localized = Record<Locale, string>;
 
 export type ToolOptionField =
@@ -27,10 +27,7 @@ export interface ToolFunctionManifest { name: string; label: Localized; descript
 
 /** Conditions the server enforces before a provider is offered. The browser reads them only to hide rows. */
 export interface ToolRequirements {
-  experimental?: "hostComputerTool";
   role?: "superadmin";
-  /** Needs a host that is not a container. */
-  hostEnvironment?: boolean;
   /** Needs an executable an administrator installs in Harness settings. */
   managed?: "browser" | "youtube";
 }
@@ -134,12 +131,6 @@ export const BUILTIN_TOOL_PROVIDERS: readonly ToolProviderManifest[] = [
     clientRenderer: "code-runner",
   },
   {
-    id: "host-computer", origin: "builtin", section: "agent", order: 40, icon: "terminal", defaultEnabled: false,
-    label: text("Host computer", "호스트 컴퓨터"), description: text("Let the model control files, shells, programs, uploads, and the host screen", "모델의 파일·셸·프로그램·업로드·호스트 화면 제어 허용"),
-    functions: [{ name: "host_computer", label: text("Host computer", "호스트 컴퓨터"), description: text("Files, processes, shells and screenshots on this server's computer", "이 서버 컴퓨터의 파일·프로세스·셸·화면") }],
-    requires: { experimental: "hostComputerTool", role: "superadmin", hostEnvironment: true },
-  },
-  {
     id: "multiple-choice", origin: "builtin", section: "interaction", order: 10, icon: "list-checks", defaultEnabled: true,
     label: text("Multiple choice", "다중 선택"), description: text("Let the model ask selectable questions", "모델이 설정된 개수만큼 선택형 질문을 요청"),
     functions: [{ name: "ask_multiple_choice", label: text("Multiple choice", "다중 선택"), description: text("Shows selectable questions above the composer", "입력창 위에 선택형 질문 표시") }],
@@ -179,9 +170,6 @@ export function mcpManifest(connection: { id: string; name: string; description?
 
 export interface ToolEnvironment {
   role?: string;
-  experimental?: { hostComputerTool?: boolean };
-  /** True when the host is not a container. */
-  hostEnvironment?: boolean;
   /** Built-in provider ids the account's plan switches off. */
   disabledTools?: readonly string[];
   /** Executables installed in Harness settings. */
@@ -192,9 +180,7 @@ export function toolRequirementsMet(manifest: Pick<ToolProviderManifest, "requir
   if (manifest.origin === "builtin" && manifest.id && environment.disabledTools?.includes(manifest.id)) return false;
   const requires = manifest.requires;
   if (!requires) return true;
-  if (requires.experimental && environment.experimental?.[requires.experimental] !== true) return false;
   if (requires.role && environment.role !== requires.role) return false;
-  if (requires.hostEnvironment && environment.hostEnvironment !== true) return false;
   if (requires.managed && environment.managedTools?.[requires.managed] !== true) return false;
   return true;
 }
@@ -211,13 +197,9 @@ export function functionLabel(name: string, locale: Locale) {
   return builtinProviderForFunction(name)?.functions.find(fn => fn.name === name)?.label[locale];
 }
 
-/**
- * Which approval card a waiting call needs, read from what the server recorded on it rather than from the tool's
- * name: host computer calls carry a risk assessment, installed providers carry an approval request.
- */
-export function pendingApprovalKind(event: { arguments?: unknown }): "host" | "mcp" | undefined {
+/** Which approval card a waiting call needs, read from what the server recorded on it: installed providers carry an approval request. */
+export function pendingApprovalKind(event: { arguments?: unknown }): "mcp" | undefined {
   const args = event.arguments && typeof event.arguments === "object" ? event.arguments as Record<string, unknown> : {};
   if (args._mcpApproval && typeof args._mcpApproval === "object") return "mcp";
-  if (args.authorization && typeof args.authorization === "object") return "host";
   return undefined;
 }

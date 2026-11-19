@@ -13,7 +13,7 @@
 | **다중 서버 라우팅** | OpenAI API·LM Studio·NNUI Server 드라이버, 연결 우선순위, 서버별 모델 설정 |
 | **브랜치 대화** | 메시지 편집·재생성이 기존 경로를 보존한 새 브랜치를 만들고 `< m / n >`으로 전환 |
 | **Reasoning 제어** | 내장 effort와 커스텀 템플릿, 서버 능력 자동 감지, 추론 스트리밍 표시 |
-| **도구** | 인터넷 검색, 페이지 방문, 브라우저 샌드박스 코드 실행(JavaScript·Python), 저장소 접근, 선택형 질문, 사용자 등록 MCP, 호스트 컴퓨터 |
+| **도구** | 인터넷 검색, 페이지 방문, 브라우저 샌드박스 코드 실행(JavaScript·Python), 저장소 접근, 선택형 질문, 헤드리스 브라우저(Obscura), 유튜브, 사용자 등록 MCP |
 | **컨텍스트 관리** | 롤링 또는 자동 압축과 재개, 실시간 사용량 도넛, 응답 길이 상한 |
 | **개인 저장소** | 계정별 할당량, 아티팩트·생성 이미지 자동 저장, 청크 업로드, 휴지통과 보존 기간, 참조 보호 |
 | **이미지 생성** | OpenAI Compatible Images API의 base64 응답 수신, GPT Image 2 자동 감지, 생성 결과의 채팅·개인 저장소 연동 |
@@ -84,7 +84,7 @@ MSI는 Node.js, Python, Windows 서비스, 트레이 앱을 함께 설치하고 
 | [대화](docs/features/chat.md) | 브랜치, 첨부, 렌더링, 검색, 내보내기 |
 | [모델과 연결](docs/features/models.md) | 드라이버, 커스텀 모델, 상주 관리 |
 | [Reasoning](docs/features/reasoning.md) | 프리셋, 능력 감지, 표시 |
-| [도구](docs/features/tools.md) | 검색, 브라우저, 저장소 접근, MCP, 호스트 컴퓨터 |
+| [도구](docs/features/tools.md) | 검색, 브라우저, 유튜브, 저장소 접근, MCP |
 | [개인 저장소](docs/features/storage.md) | 업로드, 할당량, 휴지통 |
 | [하네스와 컨텍스트](docs/features/harness.md) | 압축, 재개, 제목 생성, 한도 |
 | [사용자와 권한](docs/features/users.md) | 역할, 감사, 격리 |

@@ -19,7 +19,7 @@ NeuralNetUI의 설치, 설정, 기능, 운영 문서를 모아둔 곳입니다. 
 | [대화](features/chat.md) | 브랜치, 편집·재생성, 첨부, 렌더링, 검색, 내보내기 |
 | [모델과 연결](features/models.md) | 드라이버, 모델 감지, 커스텀 모델, 온디맨드 로드, 상주 관리 |
 | [Reasoning](features/reasoning.md) | 내장/커스텀 프리셋, 능력 감지, 추론 표시 |
-| [도구](features/tools.md) | 인터넷 검색, 페이지 방문, 브라우저, 저장소 접근, 선택형 질문, 호스트 컴퓨터 |
+| [도구](features/tools.md) | 인터넷 검색, 페이지 방문, 브라우저, 저장소 접근, 선택형 질문, 유튜브 |
 | [개인 저장소](features/storage.md) | 업로드, 할당량, 휴지통, 참조 보호 |
 | [하네스와 컨텍스트](features/harness.md) | 롤링/압축, 재개, 제목 생성, 도구·파일 한도 |
 | [사용자와 권한](features/users.md) | 역할, 감사, 데이터 격리, 워크스페이스 기본값 |

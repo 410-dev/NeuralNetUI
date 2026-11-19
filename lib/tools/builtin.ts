@@ -1,6 +1,5 @@
 import { DEFAULT_HARNESS_SETTINGS } from "../harness";
 import { currentTime, executeWebTool, reverseGeocode, toolDefinitions } from "../web-tools";
-import { closeHostComputerSession, deterministicHostAssessment, executeHostComputerTool, hostActionRequiresApproval, hostComputerToolDefinition, isShellHostAction, type HostRiskAssessment } from "../host-computer-tool";
 import { executeStorageAccessTool, storageAccessToolDefinition } from "../storage-tool";
 import { saveArtifactFile } from "../uploads";
 import { callObscuraTool, configureObscura, disposeObscuraConversation, downloadWithObscura, formatBytes, obscuraTools, saveObscuraBytes, type ObscuraSettings } from "../obscura";
@@ -10,7 +9,7 @@ import type { ArtifactKind, ToolEvent } from "../types";
 import { builtinToolProvider } from "./catalog";
 import { CODE_FUNCTIONS, MAX_CODE_CHARS, normalizeCodeRunResult } from "./code-runner";
 import { specFromModelTool } from "./registry";
-import type { ToolCallContext, ToolContext, ToolProvider, ToolProviderSource, ToolSpec } from "./types";
+import type { ToolContext, ToolProvider, ToolProviderSource, ToolSpec } from "./types";
 import type { ModelContentPart } from "../document-processing";
 
 /**
@@ -28,8 +27,6 @@ const manifest = (id: string) => {
 function webSpecs(ctx: ToolContext, switches: Parameters<typeof toolDefinitions>[0]): ToolSpec[] {
   return toolDefinitions(switches, ctx.config.toolSettings).map(specFromModelTool);
 }
-
-const ownerKey = (ctx: Pick<ToolContext, "userId" | "conversationId">) => `${ctx.userId}:${ctx.conversationId}`;
 
 const webSearch: ToolProvider = {
   manifest: manifest("web-search"),
@@ -82,53 +79,6 @@ const storage: ToolProvider = {
     return permissions.read || permissions.write ? [specFromModelTool(storageAccessToolDefinition(permissions))] : [];
   },
   execute: (_name, args, ctx) => executeStorageAccessTool(args, ctx.userId, ctx.config.toolSettings, storagePermissions(ctx), ctx.model, ctx.signal),
-};
-
-function parseHostAssessment(text: string): HostRiskAssessment {
-  const candidate = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const parsed = JSON.parse(candidate) as Record<string, unknown>;
-  const riskLevel = Math.floor(Number(parsed.riskLevel)); const explanation = String(parsed.explanation || "").trim();
-  if (![1, 2, 3, 4, 5].includes(riskLevel) || !explanation) throw new Error("The command assessor returned an invalid result.");
-  return { riskLevel: riskLevel as HostRiskAssessment["riskLevel"], explanation };
-}
-
-/** Shell commands are rated by an isolated model call that sees only the command; anything it cannot rate is level 5. */
-async function assessShell(args: Record<string, unknown>, ctx: ToolCallContext): Promise<HostRiskAssessment> {
-  const harness = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
-  const ko = ctx.locale === "ko";
-  try {
-    const request = JSON.stringify({ language: ko ? "Korean" : "English", shell: args.shell, command: args.command, cwd: args.cwd || null });
-    const result = await ctx.services.complete(harness.hostCommandModelId, harness.hostCommandEffort, harness.hostCommandAnalysisPrompt, request, 700);
-    return parseHostAssessment(result.text);
-  } catch {
-    ctx.signal.throwIfAborted();
-    const command = String(args.command || ""), shell = String(args.shell || "shell");
-    return { riskLevel: 5, explanation: ko
-      ? `명령어 “${command}”의 독립 위험도 분석에 실패하여 가장 높은 5단계로 분류했습니다. 실행 시 지정된 ${shell} 셸이 이 명령 전체를 처리합니다.`
-      : `Independent analysis failed, so command “${command}” was assigned the highest risk level 5. The selected ${shell} shell will process the complete command if approved.` };
-  }
-}
-
-const hostComputer: ToolProvider = {
-  manifest: manifest("host-computer"),
-  releasesModelWhileRunning: true,
-  tools: () => [specFromModelTool(hostComputerToolDefinition())],
-  async authorize(_name, args, ctx) {
-    if (ctx.role !== "superadmin") throw new Error("The host computer tool is restricted to Superadmin.");
-    const harness = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
-    const assessment = isShellHostAction(args) ? await assessShell(args, ctx) : deterministicHostAssessment(args, ctx.locale);
-    ctx.setWaitPhase(undefined);
-    ctx.updateEvent({ arguments: { ...args, authorization: assessment } });
-    if (!hostActionRequiresApproval(harness, args, assessment.riskLevel)) return { approved: true };
-    const response = await ctx.waitForUser();
-    const value = response && typeof response === "object" ? response as Record<string, unknown> : {};
-    const decision = String(value.decision || "reject");
-    if (decision === "approve") return { approved: true };
-    const instruction = decision === "redirect" ? String(value.instruction || "").trim() : "";
-    return { approved: false, result: { executed: false, rejected: true, decision: decision === "redirect" ? "redirect" : "reject", ...(instruction ? { instruction } : {}) } };
-  },
-  execute: (_name, args, ctx) => executeHostComputerTool(ownerKey(ctx), args, ctx.userId, ctx.config.toolSettings, ctx.model, ctx.signal),
-  disposeConversation: (userId, conversationId) => { closeHostComputerSession(`${userId}:${conversationId}`); },
 };
 
 function codeSpecs(timeoutSeconds: number): ToolSpec[] {
@@ -312,6 +262,6 @@ const youtube: ToolProvider = {
 };
 
 /** In catalog order, which is also the order the model sees them. */
-export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, browser, youtube, time, location, storage, codeRunner, hostComputer, multipleChoice, artifact];
+export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, browser, youtube, time, location, storage, codeRunner, multipleChoice, artifact];
 
 export const builtinSource: ToolProviderSource = { id: "builtin", providers: () => [...BUILTIN_PROVIDERS] };
