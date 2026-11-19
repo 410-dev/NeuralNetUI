@@ -12,4 +12,3 @@ installer/output
 .wix
 *.log
 tsconfig.tsbuildinfo
-mcp-extensions

@@ -91,3 +91,36 @@ test("compaction prompt goes after the conversation by default and honors {CHAT_
   assert.deepEqual(compactionMessages("Summarize.", "CHAT", "before"), [{ role: "system", content: "Summarize." }, { role: "user", content: "CHAT" }]);
   assert.deepEqual(compactionMessages("A {CHAT_CONTENT} B $&", "x$'y", "before"), [{ role: "user", content: "A x$'y B $&" }]);
 });
+
+test("executable headers are matched against the host", async () => {
+  const { executableTarget, targetMatchesHost } = await import("./managed-binaries.ts");
+  const elf = Buffer.alloc(64); elf.writeUInt32BE(0x7f454c46, 0); elf[4] = 2; elf[5] = 1; elf.writeUInt16LE(0x3e, 18);
+  assert.deepEqual(executableTarget(elf), { os: "linux", archs: ["x64"] });
+  assert.equal(targetMatchesHost(executableTarget(elf), { os: "linux", arch: "x64" }), true);
+  assert.equal(targetMatchesHost(executableTarget(elf), { os: "linux", arch: "arm64" }), false);
+  elf.writeUInt16LE(0xb7, 18);
+  assert.deepEqual(executableTarget(elf), { os: "linux", archs: ["arm64"] });
+  const macho = Buffer.alloc(32); macho.writeUInt32LE(0xfeedfacf, 0); macho.writeInt32LE(0x0100000c, 4);
+  assert.deepEqual(executableTarget(macho), { os: "darwin", archs: ["arm64"] });
+  const pe = Buffer.alloc(0x100); pe.write("MZ", 0, "latin1"); pe.writeUInt32LE(0x80, 0x3c); pe.write("PE\0\0", 0x80, "latin1"); pe.writeUInt16LE(0x8664, 0x84);
+  assert.deepEqual(executableTarget(pe), { os: "win32", archs: ["x64"] });
+  assert.equal(executableTarget(Buffer.from("#!/bin/sh\necho hi\n")), undefined);
+});
+
+test("YouTube links, subtitle tracks and paging", async () => {
+  const yt = await import("./youtube-subtitles.ts");
+  assert.equal(yt.videoUrl("https://youtu.be/dQw4w9WgXcQ?t=3").id, "dQw4w9WgXcQ");
+  assert.equal(yt.videoUrl("youtube.com/shorts/dQw4w9WgXcQ").id, "dQw4w9WgXcQ");
+  assert.throws(() => yt.videoUrl("https://example.com/watch?v=dQw4w9WgXcQ"));
+  assert.throws(() => yt.videoUrl("https://www.youtube.com/playlist?list=PL123"));
+  const info = { language: "ko", subtitles: { en: [{ ext: "vtt", url: "u1" }] }, automatic_captions: { "ko-orig": [{ ext: "json3", url: "u2" }], en: [{ ext: "json3", url: "u3" }] } };
+  assert.equal(yt.chooseTrack(info, "", ["ko", "en"]).language, "en");
+  assert.deepEqual({ ...yt.chooseTrack({ ...info, subtitles: {} }, "", ["ko"]), formats: undefined }, { language: "ko", kind: "auto", translated: false, formats: undefined });
+  const cues = yt.parseSubtitles(JSON.stringify({ events: [{ tStartMs: 0, segs: [{ utf8: "Hello &amp; welcome" }] }, { tStartMs: 1000, segs: [{ utf8: "world" }] }, { tStartMs: 9000, segs: [{ utf8: "Later" }] }] }), "json3");
+  assert.equal(yt.transcriptText(cues, true), "[0:00] Hello & welcome world\n\n[0:09] Later");
+  const vtt = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nOne\n\n00:00:02.000 --> 00:00:03.000\nOne\nTwo\n";
+  assert.deepEqual(yt.parseSubtitles(vtt, "vtt").map(cue => cue[1]), ["One", "Two"]);
+  const first = yt.page("alpha beta gamma delta", 0, 12);
+  assert.equal(first.text, "alpha beta");
+  assert.equal(yt.page("alpha beta gamma delta", first.next!, 100).text, " gamma delta");
+});

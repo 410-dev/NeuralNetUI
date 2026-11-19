@@ -3,11 +3,15 @@ import { currentTime, executeWebTool, reverseGeocode, toolDefinitions } from "..
 import { closeHostComputerSession, deterministicHostAssessment, executeHostComputerTool, hostActionRequiresApproval, hostComputerToolDefinition, isShellHostAction, type HostRiskAssessment } from "../host-computer-tool";
 import { executeStorageAccessTool, storageAccessToolDefinition } from "../storage-tool";
 import { saveArtifactFile } from "../uploads";
+import { callObscuraTool, configureObscura, disposeObscuraConversation, downloadWithObscura, formatBytes, obscuraTools, saveObscuraBytes, type ObscuraSettings } from "../obscura";
+import { downloadYoutubeVideo, youtubeLanguages, youtubeSubtitles, type YoutubeSettings } from "../youtube";
+import type { HarnessSettings } from "../types";
 import type { ArtifactKind, ToolEvent } from "../types";
 import { builtinToolProvider } from "./catalog";
 import { CODE_FUNCTIONS, MAX_CODE_CHARS, normalizeCodeRunResult } from "./code-runner";
 import { specFromModelTool } from "./registry";
 import type { ToolCallContext, ToolContext, ToolProvider, ToolProviderSource, ToolSpec } from "./types";
+import type { ModelContentPart } from "../document-processing";
 
 /**
  * NeuralNetUI's own tools as providers. Each one is a thin adapter over the module that already implements the
@@ -194,7 +198,120 @@ const artifact: ToolProvider = {
   },
 };
 
+const BROWSER_TEXT_LIMIT = 40_000;
+const RENDER_FUNCTIONS = new Set(["browser_screenshot", "browser_pdf"]);
+const BROWSER_DOWNLOAD = "browser_download_file";
+
+function browserSettings(ctx: Pick<ToolContext, "config">): ObscuraSettings {
+  const harness: HarnessSettings = { ...DEFAULT_HARNESS_SETTINGS, ...(ctx.config.harnessSettings || {}) };
+  const settings = { render: harness.browserRender, stealth: harness.browserStealth, idleMinutes: harness.browserIdleMinutes, maxSessions: harness.browserMaxSessions };
+  configureObscura(settings);
+  return settings;
+}
+
+const boundedText = (text: string) => text.length <= BROWSER_TEXT_LIMIT ? text : `${text.slice(0, BROWSER_TEXT_LIMIT)}\n[Truncated: ${text.length - BROWSER_TEXT_LIMIT} more characters. Use browser_markdown or browser_search on a narrower part of the page.]`;
+
+/**
+ * The headless browser: Obscura's own MCP tools, passed through a per-conversation session broker (lib/obscura.ts),
+ * plus a download function that saves files into the account's private storage. With render off, screenshots and PDF
+ * export are not offered.
+ */
+const browser: ToolProvider = {
+  manifest: manifest("browser"),
+  async tools(ctx) {
+    const settings = browserSettings(ctx);
+    const listed = await obscuraTools(ctx.userId, ctx.conversationId);
+    const specs: ToolSpec[] = listed
+      .filter(tool => tool.name.startsWith("browser_") && tool.name !== BROWSER_DOWNLOAD && (settings.render || !RENDER_FUNCTIONS.has(tool.name)))
+      .map(tool => ({ name: tool.name, description: `[Browser] ${tool.description || tool.name}`, inputSchema: tool.inputSchema || { type: "object", properties: {} } }));
+    specs.push({ name: BROWSER_DOWNLOAD, description: "[Browser] Download a file from an HTTP(S) URL with the browser's cookies and save it to the user's private storage. Use it when the user wants a file (a PDF, an archive, an image or any document) rather than reading a page. Files larger than the space left in private storage are refused.", inputSchema: {
+      type: "object", additionalProperties: false, required: ["url"],
+      properties: { url: { type: "string", description: "Absolute HTTP(S) URL of the file" }, filename: { type: "string", description: "Optional file name to store it under, with its extension" } },
+    } });
+    return specs;
+  },
+  async execute(name, args, ctx) {
+    const settings = browserSettings(ctx);
+    if (name === BROWSER_DOWNLOAD) {
+      const url = String(args.url || "").trim();
+      if (!url) throw new Error("A URL is required.");
+      const ko = ctx.locale === "ko";
+      const saved = await downloadWithObscura({ userId: ctx.userId, conversationId: ctx.conversationId, url, name: typeof args.filename === "string" ? args.filename : undefined, signal: ctx.signal, settings,
+        onProgress: bytes => ctx.updateEvent({ result: { inProgress: true, message: ko ? `내려받는 중 ${formatBytes(bytes)}` : `Downloading ${formatBytes(bytes)}` } }) });
+      const text = `Saved "${saved.name}" (${formatBytes(saved.size)}) to the user's private storage. Link for the user: ${saved.markdown}`;
+      return { result: { type: "saved_to_storage", ...saved }, content: [{ type: "text", text }] };
+    }
+    if (!settings.render && RENDER_FUNCTIONS.has(name)) throw new Error("Screenshots and PDF export are turned off for the browser.");
+    const response = await callObscuraTool(ctx.userId, ctx.conversationId, name, args, ctx.signal);
+    const content: ModelContentPart[] = [];
+    const summaries: unknown[] = [];
+    for (const part of response.content || []) {
+      if (part.type === "text") { const text = boundedText(String(part.text || "")); content.push({ type: "text", text }); summaries.push({ type: "text", text: text.slice(0, 4000) }); }
+      else if (part.type === "image" && typeof part.data === "string") {
+        content.push({ type: "image_url", image_url: { url: `data:${part.mimeType || "image/png"};base64,${part.data}` } });
+        summaries.push({ type: "image", mimeType: part.mimeType, bytes: Math.ceil(part.data.length * .75) });
+      } else if (part.type === "resource" && part.resource && typeof part.resource === "object") {
+        const resource = part.resource as { uri?: string; mimeType?: string; text?: string; blob?: string };
+        if (typeof resource.blob === "string") {
+          // Files the browser hands back (PDF export) go straight into private storage, like downloads.
+          const extension = resource.mimeType === "application/pdf" ? ".pdf" : "";
+          try {
+            const saved = await saveObscuraBytes(ctx.userId, Buffer.from(resource.blob, "base64"), `page-${new Date().toISOString().replace(/[:.]/g, "-")}${extension}`);
+            const text = `Saved "${saved.name}" (${formatBytes(saved.size)}) to the user's private storage. Link for the user: ${saved.markdown}`;
+            content.push({ type: "text", text }); summaries.push({ type: "saved_to_storage", ...saved });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            content.push({ type: "text", text: `The file could not be saved to private storage: ${message}` }); summaries.push({ type: "storage_save_failed", error: message });
+          }
+        } else if (typeof resource.text === "string") { const text = boundedText(resource.text); content.push({ type: "text", text }); summaries.push({ type: "resource", uri: resource.uri, text: text.slice(0, 4000) }); }
+      }
+    }
+    if (response.structuredContent !== undefined && !content.length) { const text = boundedText(JSON.stringify(response.structuredContent)); content.push({ type: "text", text }); summaries.push({ type: "structured", text: text.slice(0, 4000) }); }
+    return { result: { tool: name, isError: response.isError === true, content: summaries }, ...(content.length ? { content } : {}) };
+  },
+  disposeConversation: (userId, conversationId) => disposeObscuraConversation(userId, conversationId),
+};
+
+function youtubeSettings(ctx: Pick<ToolContext, "config">): YoutubeSettings {
+  const harness: HarnessSettings = { ...DEFAULT_HARNESS_SETTINGS, ...(ctx.config.harnessSettings || {}) };
+  return { maxChars: harness.youtubeMaxChars, preferredLanguages: harness.youtubePreferredLanguages, maxDownloadMb: harness.youtubeMaxDownloadMb };
+}
+
+const YOUTUBE_URL = { type: "string", description: "YouTube video link (youtube.com/watch, youtu.be, shorts, live) or an 11-character video id." };
+
+/** YouTube through the harness's yt-dlp (lib/youtube.ts). Downloads go into the account's private storage. */
+const youtube: ToolProvider = {
+  manifest: manifest("youtube"),
+  // Downloads can take minutes; the chat's model slot is not held meanwhile.
+  releasesModelWhileRunning: true,
+  tools: () => [
+    { name: "get_youtube_subtitles", description: "Get the subtitles of one YouTube video as plain text, with its title, channel and length. Use it when the user shares a YouTube link and wants a summary, quotes or answers about the video. Uploaded subtitles are preferred, then automatic captions in the spoken language. Long transcripts come in pages: when the reply says to call again with an offset, do so before summarizing the whole video.", inputSchema: {
+      type: "object", additionalProperties: false, required: ["url"], properties: {
+        url: YOUTUBE_URL,
+        language: { type: "string", description: "Optional language code such as \"ko\" or \"en\". Leave empty to pick the best available track." },
+        include_timestamps: { type: "boolean", description: "Start each paragraph with its time, e.g. [3:05], for questions about when something is said." },
+        offset: { type: "integer", minimum: 0, description: "Character offset of the next page of a long transcript, exactly as given in the previous reply." },
+      } } },
+    { name: "list_youtube_subtitles", description: "List the subtitle languages a YouTube video offers: uploaded subtitles and automatic captions.", inputSchema: { type: "object", additionalProperties: false, required: ["url"], properties: { url: YOUTUBE_URL } } },
+    { name: "download_youtube_video", description: "Download a YouTube video and save it to the user's private storage. Use it only when the user asks for the video file itself. By default it takes the best available video and audio quality, without subtitles. Large videos can take several minutes; the reply says where the file was saved.", inputSchema: {
+      type: "object", additionalProperties: false, required: ["url"], properties: { url: YOUTUBE_URL, max_height: { type: "integer", minimum: 144, maximum: 4320, description: "Optional resolution cap in pixels, e.g. 1080. Leave empty for the best available." } } } },
+  ],
+  async execute(name, args, ctx) {
+    const settings = youtubeSettings(ctx);
+    const url = String(args.url || "");
+    const text = name === "get_youtube_subtitles"
+      ? await youtubeSubtitles({ userId: ctx.userId, url, language: typeof args.language === "string" ? args.language : "", timestamps: args.include_timestamps === true, offset: Number(args.offset) || 0, settings, signal: ctx.signal })
+      : name === "list_youtube_subtitles" ? await youtubeLanguages({ userId: ctx.userId, url, signal: ctx.signal }) : undefined;
+    if (text !== undefined) return { result: { tool: name, text: text.slice(0, 4000) }, content: [{ type: "text", text }] };
+    if (name !== "download_youtube_video") throw new Error(`Unknown YouTube function ${name}.`);
+    const maxHeight = Number(args.max_height);
+    const downloaded = await downloadYoutubeVideo({ userId: ctx.userId, url, settings, signal: ctx.signal, ...(Number.isFinite(maxHeight) && maxHeight > 0 ? { maxHeight: Math.floor(maxHeight) } : {}),
+      onProgress: (message, progress, total) => ctx.updateEvent({ result: { inProgress: true, message, ...(total ? { progress, total } : {}) } }) });
+    return { result: { type: "saved_to_storage", ...downloaded.saved }, content: [{ type: "text", text: downloaded.text }] };
+  },
+};
+
 /** In catalog order, which is also the order the model sees them. */
-export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, time, location, storage, codeRunner, hostComputer, multipleChoice, artifact];
+export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, browser, youtube, time, location, storage, codeRunner, hostComputer, multipleChoice, artifact];
 
 export const builtinSource: ToolProviderSource = { id: "builtin", providers: () => [...BUILTIN_PROVIDERS] };

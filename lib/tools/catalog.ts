@@ -13,7 +13,7 @@ export type ToolOrigin = "builtin" | "workspace" | "user";
 export type ToolCategory = "internet" | "awareness" | "agent" | "interaction";
 /** Menu section: the fixed built-in categories, then the installed tiers. */
 export type ToolSection = ToolCategory | "workspace" | "mcp";
-export type ToolIcon = "search" | "link" | "braces" | "clock" | "map-pin" | "hard-drive" | "terminal" | "list-checks" | "code" | "cable" | "wrench";
+export type ToolIcon = "search" | "link" | "braces" | "clock" | "map-pin" | "hard-drive" | "terminal" | "list-checks" | "code" | "cable" | "wrench" | "globe" | "video";
 export type Localized = Record<Locale, string>;
 
 export type ToolOptionField =
@@ -31,6 +31,8 @@ export interface ToolRequirements {
   role?: "superadmin";
   /** Needs a host that is not a container. */
   hostEnvironment?: boolean;
+  /** Needs an executable an administrator installs in Harness settings. */
+  managed?: "browser" | "youtube";
 }
 
 export interface ToolProviderManifest {
@@ -82,6 +84,23 @@ export const BUILTIN_TOOL_PROVIDERS: readonly ToolProviderManifest[] = [
     id: "page-visit", origin: "builtin", section: "internet", order: 20, icon: "link", defaultEnabled: false,
     label: text("Visit pages", "페이지 방문"), description: text("Let the model read public web pages", "모델이 공개 웹 페이지를 읽도록 허용"),
     functions: [{ name: "visit_page", label: text("Page visit", "페이지 방문"), description: text("Reads the title and text of a public HTTP(S) page", "공개 HTTP(S) 페이지의 제목과 본문 읽기") }],
+  },
+  {
+    id: "browser", origin: "builtin", section: "internet", order: 30, icon: "globe", defaultEnabled: false,
+    label: text("Browser", "브라우저"), description: text("Let the model browse, click and fill pages in a headless browser", "모델이 헤드리스 브라우저로 페이지를 탐색·클릭·입력하도록 허용"),
+    // Obscura's MCP tools are passed through under their own browser_ names, so the list is not fixed here.
+    functions: [], functionPrefix: "browser_",
+    requires: { managed: "browser" },
+  },
+  {
+    id: "youtube", origin: "builtin", section: "internet", order: 40, icon: "video", defaultEnabled: false,
+    label: text("YouTube", "유튜브"), description: text("Read video subtitles and save videos to private storage", "영상 자막을 읽고 영상을 개인 저장소에 저장"),
+    functions: [
+      { name: "get_youtube_subtitles", label: text("Subtitles", "자막 가져오기"), description: text("Title, channel and the full transcript as text", "제목·채널과 자막 전문을 텍스트로"), },
+      { name: "list_youtube_subtitles", label: text("Subtitle languages", "자막 언어 목록"), description: text("Uploaded subtitles and automatic captions", "업로드 자막과 자동 자막 언어"), },
+      { name: "download_youtube_video", label: text("Download video", "영상 다운로드"), description: text("Saves the video file to private storage", "영상 파일을 개인 저장소에 저장"), },
+    ],
+    requires: { managed: "youtube" },
   },
   {
     id: "current-time", origin: "builtin", section: "awareness", order: 10, icon: "clock", defaultEnabled: true,
@@ -139,8 +158,10 @@ const builtinByFunction = new Map(BUILTIN_TOOL_PROVIDERS.flatMap(manifest => man
 
 export function builtinToolProvider(id: string) { return builtinById.get(id); }
 
-/** The built-in provider that owns a function name, if any. Installed providers are looked up by prefix instead. */
-export function builtinProviderForFunction(name: string) { return builtinByFunction.get(name); }
+/** The built-in provider that owns a function name, if any, by its fixed names or its name prefix. */
+export function builtinProviderForFunction(name: string) {
+  return builtinByFunction.get(name) ?? BUILTIN_TOOL_PROVIDERS.find(manifest => manifest.functionPrefix && name.startsWith(manifest.functionPrefix));
+}
 
 export const MCP_PROVIDER_PREFIX = "mcp:";
 export const mcpProviderId = (connectionId: string) => `${MCP_PROVIDER_PREFIX}${connectionId}`;
@@ -163,6 +184,8 @@ export interface ToolEnvironment {
   hostEnvironment?: boolean;
   /** Built-in provider ids the account's plan switches off. */
   disabledTools?: readonly string[];
+  /** Executables installed in Harness settings. */
+  managedTools?: { browser?: boolean; youtube?: boolean };
 }
 
 export function toolRequirementsMet(manifest: Pick<ToolProviderManifest, "requires"> & Partial<Pick<ToolProviderManifest, "id" | "origin">>, environment: ToolEnvironment) {
@@ -172,6 +195,7 @@ export function toolRequirementsMet(manifest: Pick<ToolProviderManifest, "requir
   if (requires.experimental && environment.experimental?.[requires.experimental] !== true) return false;
   if (requires.role && environment.role !== requires.role) return false;
   if (requires.hostEnvironment && environment.hostEnvironment !== true) return false;
+  if (requires.managed && environment.managedTools?.[requires.managed] !== true) return false;
   return true;
 }
 

@@ -319,6 +319,17 @@ export interface HarnessSettings {
   hostCommandAnalysisPrompt: string;
   /** Per-kind switches and consecutive-copy thresholds for flagging a response that repeats itself. */
   repetitionDetection: RepetitionSettings;
+  /** Obscura browser: screenshots and PDF export (render), and fingerprint/tracker protection (stealth). */
+  browserRender: boolean;
+  browserStealth: boolean;
+  /** Minutes without use before a conversation's browser process is stopped to reclaim memory. */
+  browserIdleMinutes: number;
+  /** Browser processes that may run at the same time on this server. */
+  browserMaxSessions: number;
+  /** YouTube tool: characters of transcript per call, subtitle language order, and the per-video download cap. */
+  youtubeMaxChars: number;
+  youtubePreferredLanguages: string[];
+  youtubeMaxDownloadMb: number;
 }
 
 /** Opt-in features an administrator must switch on before anyone can use them. */
@@ -474,6 +485,8 @@ export type PublicConfig = Omit<AppConfig, "connections"> & {
   planModelIds: string[];
   /** Built-in tool provider ids the account's plan switches off. */
   planDisabledToolIds?: string[];
+  /** Executables installed in Harness settings that tools depend on. */
+  managedTools?: { browser?: boolean; youtube?: boolean };
   /** Runtime-only, user-owned MCP records. Credentials are never included. */
   mcpConnections: McpConnection[];
   mcpEntitlement: McpEntitlement;

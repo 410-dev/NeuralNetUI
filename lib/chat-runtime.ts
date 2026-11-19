@@ -26,6 +26,7 @@ import { modelResidency } from "./residency-runtime";
 import { progressFetch, SERVER_RESPONSE_TIMEOUT_MS, withSlowProgress } from "./chat-progress";
 import { isHostComputerAvailable } from "./host-environment";
 import { resolveTools, toolSources } from "./tools";
+import { managedToolsInstalled } from "./managed-tools";
 import { streamingPhaseFor } from "./tools/catalog";
 import { requestToolState, type ToolState } from "./tools/state";
 import type { ToolExecution, ToolRequestContext } from "./tools/types";
@@ -594,6 +595,7 @@ async function run(job: ChatJob) {
       history: () => [...job.conversation.branches.flatMap(branch => branch.messages), job.message].flatMap(message => message.toolEvents || []),
       services: { complete: (modelId, effort, prompt, input, maxTokens) => harnessCompletion(harnessContext, modelId || job.input.modelId, effort, prompt, input, maxTokens) },
       disabledTools: planDisabledToolIds(job.userId),
+      managedTools: managedToolsInstalled(),
     };
     // Every provider the request switched on and the server allows, fixed for the whole reply.
     const resolvedTools = await resolveTools(toolRequest, requestToolState(job.input.tools), toolSources(), { hostEnvironment: isHostComputerAvailable() });

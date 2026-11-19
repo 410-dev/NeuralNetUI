@@ -127,6 +127,15 @@ function assertQuotaPreflight(userId:string,size:number,reservationId?:string){
   if(used+pending+size>quota.quota)throw new Error(`Storage quota exceeded (${used+pending+size} / ${quota.quota} bytes).`);
 }
 
+/** Bytes the account can still add to private storage, counting uploads that are still in progress. */
+export function remainingStorageBytes(userId:string){
+  const quota=db.prepare("SELECT storage_quota_bytes AS quota FROM users WHERE id = ?").get(userId) as {quota:number}|undefined;
+  if(!quota)return 0;
+  const used=(db.prepare("SELECT COALESCE(SUM(size), 0) AS bytes FROM uploads WHERE user_id = ? AND deleted_at IS NULL").get(userId) as {bytes:number}).bytes;
+  const pending=(db.prepare("SELECT COALESCE(SUM(size),0) AS bytes FROM storage_upload_sessions WHERE user_id=? AND completed_upload_id IS NULL").get(userId) as {bytes:number}).bytes;
+  return Math.max(0,quota.quota-used-pending);
+}
+
 function storedFileMimeType(header:Buffer,name:string){
   const raster=sniffRasterMimeType(header);if(raster)return raster;
   if(header.subarray(0,5).toString("ascii")==="%PDF-")return "application/pdf";

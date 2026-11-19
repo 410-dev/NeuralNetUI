@@ -41,6 +41,8 @@ export interface ToolRequestContext {
   services: ToolServices;
   /** Built-in provider ids the account's plan switches off. */
   disabledTools?: readonly string[];
+  /** Executables installed in Harness settings. */
+  managedTools?: { browser?: boolean; youtube?: boolean };
 }
 
 /** The request context plus this provider's own switch values. */

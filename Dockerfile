@@ -26,7 +26,8 @@ ENV NODE_ENV=production \
     NEURAL_CHAT_DATA_DIR=/app/data \
     NEURAL_CHAT_PYTHON=python3
 
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip fonts-noto-cjk \
+# ffmpeg merges the video and audio streams the built-in YouTube tool downloads.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip fonts-noto-cjk ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder --chown=node:node /app/.next/standalone ./

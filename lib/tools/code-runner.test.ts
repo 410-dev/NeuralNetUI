@@ -35,5 +35,8 @@ test("the code runner is an agent tool that starts switched off with a bounded t
   assert.equal(manifest.section, "agent");
   assert.deepEqual(manifest.functions.map(fn => fn.name), ["run_javascript", "run_python"]);
   assert.deepEqual(resolveProviderState(DEFAULT_TOOL_STATE, manifest), { enabled: false, options: { timeoutSeconds: 30 }, functions: undefined });
-  assert.equal(builtinToolProvider("browser"), undefined);
+  // "browser" is the Obscura headless browser now, not the removed Chromium agent tool.
+  const browser = builtinToolProvider("browser")!;
+  assert.equal(browser.section, "internet");
+  assert.deepEqual(browser.requires, { managed: "browser" });
 });

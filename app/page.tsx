@@ -2,6 +2,7 @@
 
 import { contextUsage, type ContextUsage } from "../lib/context-usage";
 import { HarnessSettingsPanel, StorageSettingsPanel } from "./harness-settings";
+import { BrowserHarnessSection, YoutubeCookiesSection, YoutubeHarnessSection } from "./managed-tools-settings";
 import { TextDialog } from "./text-dialog";
 import { useMessageDialog } from "./message-dialog";
 import { HistorySearch } from "./history-search";
@@ -45,7 +46,7 @@ import {
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
   Braces, Layers, LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Power, Upload, HardDrive, ShieldAlert,
   Palette, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Repeat2, Settings, Type, Zap, FlaskConical, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge, Cable, Code2, Unlock,
-  RotateCcw } from "lucide-react";
+  RotateCcw, Video } from "lucide-react";
 import { Children, cloneElement, createContext, CSSProperties, FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -452,10 +453,10 @@ export default function Home() {
   const [toolState, setToolState] = useState<ToolState>(DEFAULT_TOOL_STATE);
   // Built-in tools this account may use, then the account's own MCP connections. The server enforces the same rules.
   const offeredTools = useMemo(() => {
-    const environment = { role: config.account?.role, experimental: config.experimental, hostEnvironment: config.hostComputerAvailable === true, disabledTools: config.planDisabledToolIds };
+    const environment = { role: config.account?.role, experimental: config.experimental, hostEnvironment: config.hostComputerAvailable === true, disabledTools: config.planDisabledToolIds, managedTools: config.managedTools };
     const connections = config.mcpEntitlement?.enabled ? config.mcpConnections.filter(connection => connection.enabled) : [];
     return [...BUILTIN_TOOL_PROVIDERS.filter(manifest => toolRequirementsMet(manifest, environment)), ...connections.map((connection, index) => mcpManifest(connection, index))];
-  }, [config.account?.role, config.experimental, config.hostComputerAvailable, config.mcpEntitlement?.enabled, config.mcpConnections, config.planDisabledToolIds]);
+  }, [config.account?.role, config.experimental, config.hostComputerAvailable, config.mcpEntitlement?.enabled, config.mcpConnections, config.planDisabledToolIds, config.managedTools]);
   const pendingToolsRef = useRef<Record<string, unknown>>({});
   const toolSaveTimerRef = useRef<number | undefined>(undefined);
   /** Tool switches and options are account preferences: apply locally, then save the batched change. */
@@ -1878,7 +1879,7 @@ function CodeSnippet({ c, children, fadeDurationMs = 0 }: { c: CopySet; children
   </div>;
 }
 
-const MENU_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, terminal: HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench };
+const MENU_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, terminal: HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video };
 
 /** A bounded number option. Typing stays free; the value is clamped and saved when the field loses focus or on Enter. */
 function OptionNumber({ field, value, locale, onChange }: { field: Extract<ToolOptionField, { kind: "integer" }>; value: number; locale: Locale; onChange: (value: number) => void }) {
@@ -2112,7 +2113,7 @@ function HostApprovalComposer({ c, event, onSubmit }: { c: CopySet; event: ToolE
   </section>;
 }
 
-const EVENT_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Search, link: Link2, braces: Braces, clock: Clock3, "map-pin": LocateFixed, "hard-drive": HardDrive, terminal: HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench };
+const EVENT_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Search, link: Link2, braces: Braces, clock: Clock3, "map-pin": LocateFixed, "hard-drive": HardDrive, terminal: HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video };
 
 function ToolEventIcon({ name, size = 15 }: { name: string; size?: number }) {
   const Icon = EVENT_TOOL_ICONS[toolIconFor(name)] || Wrench;
@@ -2624,10 +2625,11 @@ ${c.detectFailedDetail}: ${failure.detail}` : ""}` });
         </nav>
         <div className="settings-content" ref={contentRef}>
           {tab==="general"&&<GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving}/>}
+          {tab==="general"&&draft.managedTools?.youtube&&<YoutubeCookiesSection ko={draft.preferences.language==="ko"}/>}
           {tab==="appearance"&&<AppearanceSettings c={c} draft={draft} setDraft={setDraft} admin={admin}/>}
           {tab==="connection"&&admin&&<ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} statusNonce={statusNonce} initialServerStates={serverStates} onServerStates={setDraftServerStates}/>}
           {tab==="mcp"&&draft.mcpEntitlement.enabled&&<McpSettings ko={draft.preferences.language==="ko"} connections={draft.mcpConnections} entitlement={draft.mcpEntitlement} onChanged={(connections,entitlement)=>{setDraft(current=>({...current,mcpConnections:connections,mcpEntitlement:entitlement}));onSaved({...initial,mcpConnections:connections,mcpEntitlement:entitlement});}}/>}
-          {tab==="tools"&&admin&&<><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><ToolsSettings c={c} draft={draft} setDraft={setDraft}/><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}
+          {tab==="tools"&&admin&&<><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><BrowserHarnessSection draft={draft} setDraft={setDraft}/><YoutubeHarnessSection draft={draft} setDraft={setDraft}/><ToolsSettings c={c} draft={draft} setDraft={setDraft}/><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}
           {tab==="experimental"&&admin&&<ExperimentalSettings c={c} draft={draft} setDraft={setDraft}/>}
           {tab==="models"&&<ModelSettings c={c} draft={draft} availableModels={availableDraftModels} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account}/>}
           {tab==="reasoning"&&<ReasoningSettings c={c} draft={draft} availableModels={availableDraftModels} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account}/>}
