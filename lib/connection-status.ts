@@ -1,4 +1,4 @@
-import { connectionHeaders, modelsEndpoint } from "./connection-drivers.ts";
+import { connectionHeaders, envApiKey, modelsEndpoint } from "./connection-drivers.ts";
 import { ConnectionError, httpFailure, invalidShapeFailure, listingModels, readListingJson, serverAnswered, transportFailure } from "./connection-errors.ts";
 import { TRANSPORT_RETRY_DELAYS_MS } from "./transport-retry.ts";
 import type { ConnectionConfig, ConnectionDriver } from "./types.ts";
@@ -68,9 +68,9 @@ type StatusTarget = Pick<ConnectionConfig, "id" | "driver" | "baseUrl" | "backup
 export async function connectionStates(connections: StatusTarget[], envKey = "", fetcher: typeof fetch = fetch, retryDelaysMs: readonly number[] = TRANSPORT_RETRY_DELAYS_MS): Promise<Record<string, ConnectionState>> {
   const entries = await Promise.all(connections.map(async (connection): Promise<[string, ConnectionState]> => {
     if (connection.disabled) return [connection.id, "disabled"];
-    const headers = connectionHeaders(connection, connection.driver === "openai" ? envKey : "");
+    const headers = connectionHeaders(connection, connection.driver === "openai" ? envKey : envApiKey(connection.driver));
     const urls = [connection.baseUrl, ...(connection.backupUrls || []).map(url => url.trim()).filter(Boolean)];
-    const checks = [...new Set(urls)].map(baseUrl => connectionProbe(`${connection.id}\0${connection.driver}\0${baseUrl}\0${headers.Authorization || ""}`, { driver: connection.driver, baseUrl, headers }, 5_000, fetcher, retryDelaysMs));
+    const checks = [...new Set(urls)].map(baseUrl => connectionProbe(`${connection.id}\0${connection.driver}\0${baseUrl}\0${headers.Authorization || headers["x-api-key"] || ""}`, { driver: connection.driver, baseUrl, headers }, 5_000, fetcher, retryDelaysMs));
     if (checks.length === 1) return [connection.id, await checks[0]];
     // A backup that answers should not wait for a primary still working through its retry schedule.
     const state = await new Promise<ProbeResult>(resolve => {

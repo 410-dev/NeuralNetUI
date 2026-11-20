@@ -11,6 +11,7 @@
 | 아이콘 | `lucide-react` |
 | 이미지 처리 | `sharp` |
 | LM Studio | `@lmstudio/sdk` |
+| Anthropic | `@anthropic-ai/sdk` (Chat Completions ↔ Messages API 변환: `lib/anthropic-bridge.ts`) |
 | NNUI Server | OpenAI 호환 HTTP와 인증된 SSE 이벤트 스트림 |
 | 보조 런타임 | Python (`ddgs` 검색, PDF 처리) |
 

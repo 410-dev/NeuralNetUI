@@ -1,18 +1,19 @@
-import { connectionRoot, modelsEndpoint } from "./connection-drivers.ts";
+import { connectionHeaders, connectionRoot, modelsEndpoint } from "./connection-drivers.ts";
 import { ConnectionError, httpFailure, invalidShapeFailure, listingModels, readListingJson, transportFailure } from "./connection-errors.ts";
 import type { ConnectionDriver } from "./types.ts";
 import { samplingFromServer, type SamplingParams } from "./sampling-params.ts";
 
 /** Enrich compatible endpoints with native LM Studio metadata when available. Failures throw a classified `ConnectionError`. */
 export async function discoverModelRecords(driver: ConnectionDriver, baseUrl: string, apiKey: string, fetcher: typeof fetch = fetch): Promise<Array<Record<string, unknown>>> {
-  const request: RequestInit = { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {}, signal: AbortSignal.timeout(10_000), cache: "no-store" as const };
+  const { "Content-Type": _type, ...headers } = connectionHeaders({ driver, apiKey });
+  const request: RequestInit = { headers, signal: AbortSignal.timeout(10_000), cache: "no-store" as const };
   let response: Response;
   try { response = await fetcher(modelsEndpoint(driver, baseUrl), request); }
   catch (error) { throw new ConnectionError(transportFailure(error)); }
   if (!response.ok) { await response.body?.cancel().catch(() => undefined); throw new ConnectionError(httpFailure(response.status, response.statusText)); }
   const raw = listingModels(driver, await readListingJson(response));
   if (!raw) throw new ConnectionError(invalidShapeFailure(driver));
-  const records = (raw as Array<Record<string, unknown> | null>).filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && (item.id || item.key) && (driver !== "lmstudio" || item.type === "llm")));
+  const records = (raw as Array<Record<string, unknown> | null>).filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && (item.id || item.key) && (driver !== "lmstudio" || item.type === "llm") && (driver !== "google" || !/embedding|imagen|veo|aqa/i.test(String(item.id)))));
   if (driver !== "openai") return records;
   try {
     const native = await fetcher(`${connectionRoot(baseUrl)}/api/v1/models`, { ...request, signal: AbortSignal.timeout(3_000) });

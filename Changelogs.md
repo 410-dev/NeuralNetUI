@@ -2,6 +2,14 @@
 
 NeuralNetUI의 릴리스별 변경 사항입니다. 설치와 사용 방법은 [README](README.md)와 [문서](docs/README.md)를 참고하세요.
 
+## Release 1.0-rc1
+
+- **Temperature 추론 파라미터**: `추론 파라미터 설정`에 Temperature(0–2)를 추가했습니다. 다른 파라미터와 같이 모델·추론 강도별, 전역·개인 값으로 정할 수 있고, 비워 두면 서버 기본값을 씁니다. llama.cpp `/props`와 LM Studio가 알려 주는 기본 Temperature도 감지합니다.
+- **Google Gemini 드라이버**: `설정 > 연결`의 드라이버에 **Google Gemini**를 추가했습니다. Gemini API의 OpenAI 호환 엔드포인트(`https://generativelanguage.googleapis.com/v1beta/openai`)를 쓰며, 모델 목록에서 임베딩·미디어 모델은 건너뜁니다. Temperature·Top P만 전달하고 이전 생각 기록은 보내지 않으며, 추론 강도는 none·low·medium·high로 맞춥니다. 키가 비어 있으면 `GEMINI_API_KEY`(또는 `GOOGLE_API_KEY`)를 씁니다.
+- **Anthropic Claude 드라이버**: 드라이버에 **Anthropic Claude**를 추가했습니다. 공식 `@anthropic-ai/sdk`로 Messages API를 호출하고, 앱의 Chat Completions 요청·스트림과 양방향으로 변환합니다(텍스트, 이미지, 도구 호출, 요약된 생각, 토큰 사용량). 추론 강도는 적응형 사고의 `output_config.effort`로 전달하고, 최신 Claude 모델이 거부하는 Temperature 등 샘플링 값은 보내지 않습니다. 모델 목록은 Models API에서 이름과 컨텍스트 길이까지 읽습니다. 키가 비어 있으면 `ANTHROPIC_API_KEY`를 씁니다.
+- 호스팅 드라이버(Google·Anthropic)에는 모델 로드·언로드·상주 관리와 LM Studio 진행률 조회를 시도하지 않습니다.
+- 버전 이름: `Release 1.0-rc1` (`package.json`은 `1.0.0-rc1`).
+
 ## 내장 브라우저와 유튜브 (3.0.0 rc14 beta 34)
 
 - **컨텍스트 압축 프롬프트 위치**: 압축 프롬프트가 기본적으로 대화 내용 **뒤**에 붙습니다(이전에는 시스템 프롬프트로 앞에 붙었습니다). `설정 > 도구 > 컨텍스트 처리`의 **압축 프롬프트 위치**에서 앞으로 되돌릴 수 있고, 프롬프트에 `{CHAT_CONTENT}`를 쓰면 그 자리에 대화 내용이 들어갑니다.

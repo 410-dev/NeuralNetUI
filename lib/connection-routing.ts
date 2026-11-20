@@ -1,4 +1,4 @@
-import { connectionHeaders } from "./connection-drivers.ts";
+import { connectionHeaders, envApiKey } from "./connection-drivers.ts";
 import { probeConnection, type ProbeResult } from "./connection-status.ts";
 import type { ConnectionConfig } from "./types.ts";
 
@@ -85,7 +85,7 @@ export async function routeConnection<T extends ConnectionConfig>(connection: T,
   const endpoints = connectionEndpoints(connection);
   let index = 0;
   if (endpoints.length > 1) {
-    const headers = connectionHeaders(connection, connection.driver === "openai" ? envKey : "");
+    const headers = connectionHeaders(connection, connection.driver === "openai" ? envKey : envApiKey(connection.driver));
     const states = await Promise.all(endpoints.map(url => probeEndpoint(connection, url, headers, fetcher, options.maxAgeMs ?? 5_000, options.timeoutMs ?? 3_000)));
     // Chosen and marked busy in the same tick, so requests starting together spread across idle addresses.
     index = chooseEndpoint(states, endpoints.map(loadOf));

@@ -6,7 +6,7 @@ import type { RepetitionSettings } from "./repetition.ts";
 export type ReasoningKind = "builtin" | "custom";
 export type SystemPromptMode = "replace" | "prepend" | "append";
 export type Locale = "en" | "ko";
-export type ConnectionDriver = "openai" | "lmstudio" | "nnui";
+export type ConnectionDriver = "openai" | "lmstudio" | "nnui" | "google" | "anthropic";
 export type McpAuthType = "oauth" | "api_key" | "none";
 export type McpToolPolicy = "blocked" | "always_ask" | "session_ask" | "always_allow";
 export type ArtifactKind = "html" | "csv" | "json" | "xml" | "markdown";

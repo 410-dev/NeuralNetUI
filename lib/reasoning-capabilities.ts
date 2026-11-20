@@ -7,6 +7,11 @@ export function reasoningOptionName(value: string) {
   return value === "off" || value === "none" ? "Fast" : value === "on" ? "Thinking" : value === "xhigh" ? "Extra High" : value.replaceAll("_", " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
+/** Claude models from before adaptive thinking and effort (Claude 3.x, the 4.0–4.5 family) take neither parameter. */
+export function legacyAnthropicModel(model: string) {
+  return /claude-3|claude-(?:opus|sonnet|haiku)-4(?:-[015])?(?:$|-\d{8}|@)/i.test(model);
+}
+
 /** Native options are authoritative. Family fallbacks apply only without metadata. */
 export function inferReasoning(record: Record<string, unknown>, id: string, driver: ConnectionDriver) {
   const capabilities = record.capabilities && typeof record.capabilities === "object" ? record.capabilities as Record<string, unknown> : {};
@@ -18,6 +23,8 @@ export function inferReasoning(record: Record<string, unknown>, id: string, driv
     if (Array.isArray(advertised)) options = advertised.filter((v): v is string => typeof v === "string" && supportedOptions.has(v));
     else if (/qwen[ -]?3\.8/i.test(id)) options = ["off", "low", "medium", "xhigh", "on"];
     else if (/(gemma[ -]?4|qwen[ -]?3(?:\.\d+)?)/i.test(id)) options = ["off", "on"];
+    else if (driver === "anthropic") options = /^claude-/i.test(id) && !legacyAnthropicModel(id) ? ["low", "medium", "high", "xhigh", "max"] : [];
+    else if (driver === "google") options = /gemini-(?:2\.5|[3-9])/i.test(id) ? ["none", "low", "medium", "high"] : [];
     else if (driver !== "lmstudio" && /(?:^|\/)(?:o[134](?:-|$)|gpt-5)/i.test(id)) options = ["low", "medium", "high"];
   }
   return { reasoningSupported: options.length > 0, reasoningEfforts: [...new Set(options)] };

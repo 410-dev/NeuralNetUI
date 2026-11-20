@@ -10,7 +10,7 @@
 
 | 기능 | 요약 |
 | --- | --- |
-| **다중 서버 라우팅** | OpenAI API·LM Studio·NNUI Server 드라이버, 연결 우선순위, 서버별 모델 설정 |
+| **다중 서버 라우팅** | OpenAI API·LM Studio·NNUI Server·Google Gemini·Anthropic Claude 드라이버, 연결 우선순위, 서버별 모델 설정 |
 | **브랜치 대화** | 메시지 편집·재생성이 기존 경로를 보존한 새 브랜치를 만들고 `< m / n >`으로 전환 |
 | **Reasoning 제어** | 내장 effort와 커스텀 템플릿, 서버 능력 자동 감지, 추론 스트리밍 표시 |
 | **도구** | 인터넷 검색, 페이지 방문, 브라우저 샌드박스 코드 실행(JavaScript·Python), 저장소 접근, 선택형 질문, 헤드리스 브라우저(Obscura), 유튜브, 사용자 등록 MCP |

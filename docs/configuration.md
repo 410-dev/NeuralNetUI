@@ -50,6 +50,8 @@ node scripts/start-server.mjs --check
 | `NEURAL_CHAT_PYTHON` | 자동 탐지 | 검색·PDF 처리에 사용할 Python 실행 파일 |
 | `NEURAL_CHAT_WINDOWS_SERVICE` | — | Windows 서비스로 실행 중임을 알리는 내부 표시 |
 | `OPENAI_API_KEY` | — | OpenAI 드라이버 연결에 저장된 키가 없을 때의 대체 키 |
+| `GEMINI_API_KEY` (또는 `GOOGLE_API_KEY`) | — | Google 드라이버 연결에 저장된 키가 없을 때의 대체 키 |
+| `ANTHROPIC_API_KEY` | — | Anthropic 드라이버 연결에 저장된 키가 없을 때의 대체 키 |
 
 `.env.example`을 복사해 `.env`로 쓸 수 있습니다.
 

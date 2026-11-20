@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { authErrorResponse, requireAdmin } from "@/lib/auth";
 import { readConfig } from "@/lib/config";
 import { inferenceEndpoint, loadedModelIdentifier } from "@/lib/inference-control";
-import { connectionForModel, connectionHeaders, lmStudioEndpoint, modelsEndpoint, nnuiModelEndpoint } from "@/lib/connection-drivers";
+import { connectionForModel, connectionHeaders, envApiKey, isCloudDriver, lmStudioEndpoint, modelsEndpoint, nnuiModelEndpoint } from "@/lib/connection-drivers";
 import { aliasBaseModel } from "@/lib/alias-base-model";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,9 @@ export async function POST(request: Request) {
     if (!model) return NextResponse.json({ ok: true, alreadyUnloaded: true });
     const connection = connectionForModel(config.connections, model);
     if (!connection) throw new Error("The model connection is unavailable.");
-    const headers = { Accept: "application/json", ...connectionHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "") };
+    // Hosted providers keep nothing loaded on our behalf.
+    if (isCloudDriver(connection.driver)) return NextResponse.json({ ok: true, alreadyUnloaded: true });
+    const headers = { Accept: "application/json", ...connectionHeaders(connection, envApiKey(connection.driver)) };
     if (connection.driver === "nnui") {
       const response = await fetch(nnuiModelEndpoint(connection.baseUrl, model.sourceModel, "unload"), { method: "POST", headers, signal: AbortSignal.timeout(300_000), cache: "no-store" });
       const detail = await response.text();

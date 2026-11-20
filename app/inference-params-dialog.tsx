@@ -33,7 +33,7 @@ const toParams = (strings: Strings) => normalizeSamplingParams(Object.fromEntrie
 const pick = (...values: Array<number | undefined>) => values.find(value => value !== undefined);
 
 /**
- * Edits the inference parameters a model's requests carry: Top K, repeat and presence penalties, Top P and Min P.
+ * Edits the inference parameters a model's requests carry: Temperature, Top K, repeat and presence penalties, Top P and Min P.
  * Administrators set the workspace values for the model and each reasoning template, and decide whether accounts may
  * keep their own; accounts then set personal values that are never shared. A blank field always means "inherit",
  * ending at the model server's own default. Administrators also edit the served model's thinking tags here.
@@ -105,12 +105,14 @@ export function InferenceParamsDialog({ ko, model, served, presets, privileged, 
   }
 
   const labels: Record<SamplingKey, [string, string]> = ko ? {
+    temperature: ["Temperature", "출력의 무작위성을 정합니다. 낮을수록 일관되고, 높을수록 다양합니다. (0–2)"],
     topK: ["Top K 샘플링", "확률이 높은 K개 토큰 중에서만 고릅니다. 낮을수록 보수적입니다."],
     repeatPenalty: ["반복 페널티", "이미 나온 토큰의 확률을 낮춥니다. 1은 페널티 없음입니다."],
     presencePenalty: ["존재 페널티", "한 번이라도 나온 토큰에 페널티를 줘 새 표현을 유도합니다. 0은 없음입니다."],
     topP: ["Top P 샘플링", "누적 확률이 P에 이를 때까지의 토큰만 고려합니다."],
     minP: ["Min P 샘플링", "가장 높은 토큰 확률 대비 이 비율보다 낮은 토큰을 제외합니다."],
   } : {
+    temperature: ["Temperature", "How random the output is. Lower is more consistent, higher is more varied. (0–2)"],
     topK: ["Top K sampling", "Pick only among the K most likely tokens. Lower is more conservative."],
     repeatPenalty: ["Repeat penalty", "Lowers the chance of tokens already used. 1 means no penalty."],
     presencePenalty: ["Presence penalty", "Penalises any token that has appeared, nudging toward new wording. 0 means none."],

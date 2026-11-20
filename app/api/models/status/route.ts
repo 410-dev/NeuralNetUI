@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       try { new URL(baseUrl); } catch { return id ? [{ id, driver: "openai" as ConnectionDriver, baseUrl: "", apiKey: "", invalid: true }] : []; }
       const saved = config.connections.find(connection => connection.id === id);
       const clearApiKey = draft.clearApiKey === true;
-      const driver = draft.driver === "lmstudio" || draft.driver === "nnui" ? draft.driver : "openai";
+      const driver = ["lmstudio", "nnui", "google", "anthropic"].includes(String(draft.driver)) ? draft.driver : "openai";
       const backupUrls = (Array.isArray(draft.backupUrls) ? draft.backupUrls : []).slice(0, 16).map(url => String(url || "").trim()).filter(url => { try { new URL(url); return true; } catch { return false; } });
       return [{ id, driver: driver as ConnectionDriver, baseUrl, backupUrls, apiKey: clearApiKey ? "" : String(draft.apiKey || saved?.apiKey || ""), clearApiKey, disabled: draft.disabled === true, invalid: false }];
     });

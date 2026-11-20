@@ -17,7 +17,9 @@ import { aliasBaseModel, aliasWithBaseModel } from "./alias-base-model";
 import { readConversation, writeConversation, renameConversation } from "./conversations";
 import { detectTextRepetition, detectToolCallRepetition, normalizeRepetitionSettings, toolArgumentText, type RepetitionFinding, type RepetitionSettings } from "./repetition.ts";
 import { readUpload, readUploadModelContent, saveGeneratedImage } from "./uploads";
-import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, nnuiEventsEndpoint } from "./connection-drivers";
+import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, envApiKey, isCloudDriver, nnuiEventsEndpoint } from "./connection-drivers";
+import { chatFetcher, providerRequestBody } from "./provider-requests.ts";
+import type { ConnectionDriver } from "./types";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
 import { readPersonalSampling, resolveSampling, samplingRequestFields, type SamplingParams } from "./sampling-params";
 import { createResidencyAdapter } from "./residency-adapter";
@@ -373,10 +375,11 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     const nativeResponse = native ? await nativeChatResponse({ baseUrl: native.baseUrl, authorization: headers.Authorization, model: String(body.model), messages: body.messages as UpstreamMessage[], effort: native.effort, sampling: native.sampling, maxTokens: body.max_tokens as number | undefined, tools: body.tools as Parameters<typeof nativeChatResponse>[0]["tools"], signal, onInferenceStart: startStatusPoll }) : undefined;
     const httpBody = nativeResponse ? body : await materializeImageFiles(body);
     if (!nativeResponse) startStatusPoll();
+    const driver = (typeof body._driver === "string" ? body._driver : "openai") as ConnectionDriver;
     response = nativeResponse || await progressFetch(String(body._endpoint), {
       method: "POST", headers, signal,
-      body: JSON.stringify(Object.fromEntries(Object.entries(httpBody).filter(([key]) => key !== "_endpoint")), (key, value) => key === "_neural_context_tokens" ? undefined : value),
-    }, setResponsePhase, "preparing-response", fetch, SERVER_RESPONSE_TIMEOUT_MS, prefillTimerController.signal);
+      body: JSON.stringify(providerRequestBody(driver, Object.fromEntries(Object.entries(httpBody).filter(([key]) => key !== "_endpoint" && key !== "_driver"))), (key, value) => key === "_neural_context_tokens" ? undefined : value),
+    }, setResponsePhase, "preparing-response", chatFetcher(driver), SERVER_RESPONSE_TIMEOUT_MS, prefillTimerController.signal);
     if (!response.ok) throw new Error((await response.text()) || `Model server responded with ${response.status}`);
     if (!response.body) throw new Error("The model server returned no response stream.");
   } catch (error) { stopStatusPoll(); eventController.abort(); void events?.done; throw error; }
@@ -638,8 +641,9 @@ async function run(job: ChatJob) {
     let measuredEstimate = measuredInput > 0 ? estimateTokens(messages) + estimateTokens(tools) : undefined;
     job.message.contextTokens = estimateTokens(messages); broadcast(job, true);
     const sessionId = job.input.conversationId;
-    const headers = chatHeaders(connection, connection.driver === "openai" ? process.env.OPENAI_API_KEY : "", sessionId);
-    const progressEnabled = connection.driver === "lmstudio" || connection.driver === "nnui" || config.experimental?.openAIProgress === true;
+    const headers = chatHeaders(connection, envApiKey(connection.driver), sessionId);
+    const cloud = isCloudDriver(connection.driver);
+    const progressEnabled = connection.driver === "lmstudio" || connection.driver === "nnui" || (!cloud && config.experimental?.openAIProgress === true);
     let nativeServer = connection.driver === "lmstudio";
     if (!nativeServer && progressEnabled) {
       try {
@@ -653,7 +657,8 @@ async function run(job: ChatJob) {
     const limit = limits.length ? Math.min(...limits) : 0;
     const policy = sameServer.some(item => item.modelWaitPolicy === "serial") ? "serial" : "capacity";
     const managedServer = nativeServer || connection.driver === "nnui";
-    const adapter = config.preferences.onDemand || limit > 0 || managedServer ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase), fetch, managedServer && progressEnabled ? progress => setWaitProgress(job, "loading-model", progress) : undefined) : undefined;
+    // Hosted providers have nothing to load or unload; only the local servers get a residency adapter.
+    const adapter = !cloud && (config.preferences.onDemand || limit > 0 || managedServer) ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase), fetch, managedServer && progressEnabled ? progress => setWaitProgress(job, "loading-model", progress) : undefined) : undefined;
     const acquireModel = () => modelResidency.acquire({ server: serverKey, model: model.sourceModel, limit, policy, adapter, signal: job.controller.signal, onPhase: phase => setWaitPhase(job, phase) });
     releaseModel = await acquireModel();
     let compactionResumes = 0;
@@ -709,7 +714,7 @@ async function run(job: ChatJob) {
       // 0 from the configured side means "no cap"; only an exhausted plan allowance stops the request.
       if(planOutputLimit!==undefined&&planOutputLimit<=0)throw new Error("토큰 출력 한도에 도달했습니다.");
       if (!releaseModel) releaseModel = await acquireModel();
-      const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), model: model.sourceModel, messages, ...(outputLimit ? { max_tokens: outputLimit } : {}), stream: true, stream_options: { include_usage: true }, ...samplingRequestFields(sampling), ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
+      const body: Record<string, unknown> = { _endpoint: chatEndpoint(connection.driver, connection.baseUrl), _driver: connection.driver, model: model.sourceModel, messages, ...(outputLimit ? { max_tokens: outputLimit } : {}), stream: true, stream_options: { include_usage: true }, ...samplingRequestFields(sampling, connection.driver), ...(effort ? { reasoning_effort: effort } : {}), ...(tools.length ? { tools, tool_choice: "auto" } : {}) };
       let result: Awaited<ReturnType<typeof streamTurn>>;
       try {
         const configuredThreshold = contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined;

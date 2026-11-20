@@ -2,11 +2,14 @@
  * Inference (sampling) parameters a model request can carry. Every field is optional: a missing value is never
  * sent, so the model server applies its own default.
  */
-export const SAMPLING_KEYS = ["topK", "repeatPenalty", "presencePenalty", "topP", "minP"] as const;
+import type { ConnectionDriver } from "./types.ts";
+
+export const SAMPLING_KEYS = ["temperature", "topK", "repeatPenalty", "presencePenalty", "topP", "minP"] as const;
 export type SamplingKey = typeof SAMPLING_KEYS[number];
 export type SamplingParams = Partial<Record<SamplingKey, number>>;
 
 export const SAMPLING_LIMITS: Record<SamplingKey, { min: number; max: number; step: number; integer?: boolean }> = {
+  temperature: { min: 0, max: 2, step: 0.01 },
   topK: { min: 0, max: 1000, step: 1, integer: true },
   repeatPenalty: { min: 0, max: 5, step: 0.01 },
   presencePenalty: { min: -2, max: 2, step: 0.01 },
@@ -15,7 +18,7 @@ export const SAMPLING_LIMITS: Record<SamplingKey, { min: number; max: number; st
 };
 
 /** Field names on OpenAI-compatible chat requests, as LM Studio, llama.cpp and vLLM read them. */
-export const SAMPLING_API_FIELDS: Record<SamplingKey, string> = { topK: "top_k", repeatPenalty: "repeat_penalty", presencePenalty: "presence_penalty", topP: "top_p", minP: "min_p" };
+export const SAMPLING_API_FIELDS: Record<SamplingKey, string> = { temperature: "temperature", topK: "top_k", repeatPenalty: "repeat_penalty", presencePenalty: "presence_penalty", topP: "top_p", minP: "min_p" };
 
 /** A personal layer, kept in an account's preferences: per model, then per reasoning template of that model. */
 export type PersonalSampling = Record<string, { base?: SamplingParams; presets?: Record<string, SamplingParams> }>;
@@ -67,13 +70,24 @@ export function resolveSampling(input: { served?: { samplingParams?: SamplingPar
   return result;
 }
 
-export function samplingRequestFields(params: SamplingParams): Record<string, number> {
-  return Object.fromEntries(SAMPLING_KEYS.filter(key => params[key] !== undefined).map(key => [SAMPLING_API_FIELDS[key], params[key]!]));
+/**
+ * Which parameters each driver forwards. Gemini's OpenAI endpoint takes temperature and top_p only; current Claude
+ * models reject every sampling parameter, so Anthropic connections forward none. Local servers take them all.
+ */
+export const DRIVER_SAMPLING_KEYS: Partial<Record<ConnectionDriver, readonly SamplingKey[]>> = {
+  google: ["temperature", "topP"],
+  anthropic: [],
+};
+
+export function samplingRequestFields(params: SamplingParams, driver?: ConnectionDriver): Record<string, number> {
+  const allowed = driver ? DRIVER_SAMPLING_KEYS[driver] ?? SAMPLING_KEYS : SAMPLING_KEYS;
+  return Object.fromEntries(allowed.filter(key => params[key] !== undefined).map(key => [SAMPLING_API_FIELDS[key], params[key]!]));
 }
 
 /** LM Studio SDK prediction options for the same values. */
 export function samplingSdkConfig(params: SamplingParams) {
   return {
+    ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
     ...(params.topK !== undefined ? { topKSampling: params.topK } : {}),
     ...(params.topP !== undefined ? { topPSampling: params.topP } : {}),
     ...(params.minP !== undefined ? { minPSampling: params.minP } : {}),
@@ -91,6 +105,7 @@ export function samplingFromServer(value: unknown): SamplingParams | undefined {
   const record = value as Record<string, unknown>;
   const off = (raw: unknown, disabled: number) => raw === false ? disabled : raw;
   return normalizeSamplingParams({
+    temperature: record.temperature,
     topK: record.top_k ?? record.topKSampling,
     topP: record.top_p ?? record.topPSampling,
     minP: record.min_p ?? off(record.minPSampling, 0),

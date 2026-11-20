@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { canUseModel, inferModel, readConfig, writeConfig } from "@/lib/config";
 import { baseModelForAlias, inferApiContextWindowTokens } from "@/lib/model-context";
-import { connectionForModel, modelsEndpoint } from "@/lib/connection-drivers";
+import { connectionForModel, connectionHeaders, envApiKey, modelsEndpoint } from "@/lib/connection-drivers";
 import { aliasBaseModel } from "@/lib/alias-base-model";
 
 export const runtime = "nodejs";
@@ -25,9 +25,9 @@ export async function POST(request: Request) {
 
     const connection = connectionForModel(config.connections, base);
     if (!connection) return NextResponse.json({ error: "모델 연결을 찾을 수 없습니다." }, { status: 404 });
-    const apiKey = connection.clearApiKey ? "" : connection.apiKey || (connection.driver === "openai" ? process.env.OPENAI_API_KEY : "") || "";
+    const apiKey = connection.clearApiKey ? "" : connection.apiKey || envApiKey(connection.driver) || "";
     const response = await fetch(modelsEndpoint(connection.driver, connection.baseUrl), {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      headers: connectionHeaders({ driver: connection.driver, apiKey }),
       signal: AbortSignal.timeout(10_000),
       cache: "no-store",
     });

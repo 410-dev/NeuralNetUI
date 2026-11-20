@@ -1,6 +1,6 @@
 {
   "name": "neural-chat-ui",
-  "version": "3.0.0-rc14-b34",
+  "version": "1.0.0-rc1",
   "type": "module",
   "private": true,
   "engines": {
@@ -13,6 +13,7 @@
     "start": "node scripts/start-server.mjs start"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.11.0",
     "@lmstudio/sdk": "^2.0.0",
     "@modelcontextprotocol/client": "^2.0.0",
     "@types/better-sqlite3": "^9.6.0",
