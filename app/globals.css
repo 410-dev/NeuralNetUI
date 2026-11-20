@@ -752,11 +752,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .general-toggle-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .general-toggle-card > div { min-width: 0; }
 .general-toggle-card > button { flex: 0 0 auto; }
-.youtube-cookie-card { display: flex; flex-direction: column; gap: 12px; }
-.youtube-cookie-card > div:first-child strong { display: flex; align-items: center; gap: 7px; line-height: 1.3; }
-.youtube-cookie-card > div:first-child strong svg { flex-shrink: 0; color: var(--dim); }
-.youtube-cookie-card .managed-binary { min-height: 48px; }
-.youtube-cookie-note { margin: 0; color: var(--dim); font-size: 10px; line-height: 1.5; }
+.organization-mode-card { margin-bottom: 14px; }
+.harness-advanced.youtube-cookies h4 { display: flex; align-items: center; gap: 7px; }
+.harness-advanced.youtube-cookies h4 svg { flex-shrink: 0; color: var(--dim); }
 .app-version-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .app-version-card > b { color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; letter-spacing: .03em; }
 .language-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px; }

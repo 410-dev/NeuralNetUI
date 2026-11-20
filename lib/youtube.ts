@@ -89,17 +89,19 @@ export async function updateYtDlp(signal?: AbortSignal): Promise<YtDlpStatus> {
 export async function removeYtDlp() { await fs.unlink(ytDlpPath).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }); }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Personal cookies
+// Server-wide cookies, managed with yt-dlp in Harness settings
 
-const cookiesPath = (userId: string) => path.join(cookiesDir, `${userId.replace(/[^A-Za-z0-9_-]/g, "_")}.txt`);
+const sharedCookiesPath = path.join(cookiesDir, "shared.txt");
+/** Earlier releases kept one file per account; such a file is still used when no server-wide file is set. */
+const personalCookiesPath = (userId: string) => path.join(cookiesDir, `${userId.replace(/[^A-Za-z0-9_-]/g, "_")}.txt`);
 
-export async function youtubeCookiesStatus(userId: string) {
-  try { const stats = await fs.stat(cookiesPath(userId)); return { present: true, updatedAt: stats.mtime.toISOString(), size: stats.size }; }
+export async function youtubeCookiesStatus() {
+  try { const stats = await fs.stat(sharedCookiesPath); return { present: true, updatedAt: stats.mtime.toISOString(), size: stats.size }; }
   catch { return { present: false }; }
 }
 
-/** Stores the account's cookies.txt (Netscape format, as exported by browser extensions). */
-export async function saveYoutubeCookies(userId: string, text: string) {
+/** Stores the server's cookies.txt (Netscape format, as exported by browser extensions). */
+export async function saveYoutubeCookies(text: string) {
   const content = text.replace(/^﻿/, "");
   if (Buffer.byteLength(content) > MAX_COOKIES_BYTES) throw new Error("The cookie file is larger than 1 MB.");
   const lines = content.split(/\r?\n/).filter(line => line.trim() && !line.startsWith("#") || line.startsWith("#HttpOnly_"));
@@ -107,14 +109,14 @@ export async function saveYoutubeCookies(userId: string, text: string) {
   if (!valid.length) throw new Error("This is not a Netscape cookies.txt file. Export the cookies of youtube.com in the Netscape format.");
   if (!valid.some(line => /(^|\.)youtube\.com\t|(^|\.)google\.com\t/i.test(line.replace(/^#HttpOnly_/, "")))) throw new Error("The file has no youtube.com or google.com cookies.");
   await fs.mkdir(cookiesDir, { recursive: true, mode: 0o700 });
-  const target = cookiesPath(userId), temporary = `${target}.${randomUUID()}.tmp`;
+  const target = sharedCookiesPath, temporary = `${target}.${randomUUID()}.tmp`;
   const normalized = content.startsWith("# Netscape HTTP Cookie File") || content.startsWith("# HTTP Cookie File") ? content : `# Netscape HTTP Cookie File\n${content}`;
   await fs.writeFile(temporary, normalized, { mode: 0o600, flag: "wx" });
   await fs.rename(temporary, target);
-  return youtubeCookiesStatus(userId);
+  return youtubeCookiesStatus();
 }
 
-export async function deleteYoutubeCookies(userId: string) { await fs.unlink(cookiesPath(userId)).catch(() => undefined); }
+export async function deleteYoutubeCookies() { await fs.unlink(sharedCookiesPath).catch(() => undefined); }
 
 // ---------------------------------------------------------------------------------------------------------------
 // Running yt-dlp
@@ -129,9 +131,10 @@ async function baseArgs(userId: string, work: string) {
   const args = ["--no-playlist", "--no-warnings", "--ignore-config", "--no-cache-dir", "--socket-timeout", "20", "--retries", "2",
     // YouTube's player needs a JavaScript runtime for the full format list; Node is always here.
     "--js-runtimes", `node:${process.execPath}`];
-  if (await fileExists(cookiesPath(userId))) {
+  const cookies = await fileExists(sharedCookiesPath) ? sharedCookiesPath : await fileExists(personalCookiesPath(userId)) ? personalCookiesPath(userId) : undefined;
+  if (cookies) {
     const copy = path.join(work, "cookies.txt");
-    await fs.copyFile(cookiesPath(userId), copy); await fs.chmod(copy, 0o600).catch(() => undefined);
+    await fs.copyFile(cookies, copy); await fs.chmod(copy, 0o600).catch(() => undefined);
     args.push("--cookies", copy);
   }
   return args;

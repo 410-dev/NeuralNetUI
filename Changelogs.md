@@ -4,6 +4,8 @@ NeuralNetUI의 릴리스별 변경 사항입니다. 설치와 사용 방법은 [
 
 ## Release 1.0-rc1
 
+- **조직 모드**: `설정 > 사용자`에 **조직 모드 활성화**를 추가했습니다(서버 전체 설정 `organizationMode`, 기본 꺼짐). 켜면 메인·채팅 화면 입력창 아래 "응답이 부정확할 수 있습니다…" 다음 줄에 "소속 조직 관리자가 볼 수 있습니다."가 표시되며, 임시 채팅에서는 표시하지 않습니다. 조직용 배포 기능을 붙일 자리로 둡니다.
+- **유튜브 쿠키를 하네스로 이동**: 일반 설정의 계정별 유튜브 쿠키를 `설정 > 하네스 설정 > 유튜브 (yt-dlp)` 안의 **쿠키** 블록(관리자)으로 옮기고 서버 전체 쿠키로 바꿨습니다(`/api/harness/yt-dlp/cookies`, 감사 기록). 이전에 계정별로 올린 쿠키는 서버 전체 쿠키가 없을 때 그 계정에만 계속 쓰입니다.
 - **Temperature 추론 파라미터**: `추론 파라미터 설정`에 Temperature(0–2)를 추가했습니다. 다른 파라미터와 같이 모델·추론 강도별, 전역·개인 값으로 정할 수 있고, 비워 두면 서버 기본값을 씁니다. llama.cpp `/props`와 LM Studio가 알려 주는 기본 Temperature도 감지합니다.
 - **Google Gemini 드라이버**: `설정 > 연결`의 드라이버에 **Google Gemini**를 추가했습니다. Gemini API의 OpenAI 호환 엔드포인트(`https://generativelanguage.googleapis.com/v1beta/openai`)를 쓰며, 모델 목록에서 임베딩·미디어 모델은 건너뜁니다. Temperature·Top P만 전달하고 이전 생각 기록은 보내지 않으며, 추론 강도는 none·low·medium·high로 맞춥니다. 키가 비어 있으면 `GEMINI_API_KEY`(또는 `GOOGLE_API_KEY`)를 씁니다.
 - **Anthropic Claude 드라이버**: 드라이버에 **Anthropic Claude**를 추가했습니다. 공식 `@anthropic-ai/sdk`로 Messages API를 호출하고, 앱의 Chat Completions 요청·스트림과 양방향으로 변환합니다(텍스트, 이미지, 도구 호출, 요약된 생각, 토큰 사용량). 추론 강도는 적응형 사고의 `output_config.effort`로 전달하고, 최신 Claude 모델이 거부하는 Temperature 등 샘플링 값은 보내지 않습니다. 모델 목록은 Models API에서 이름과 컨텍스트 길이까지 읽습니다. 키가 비어 있으면 `ANTHROPIC_API_KEY`를 씁니다.

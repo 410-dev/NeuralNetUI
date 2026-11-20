@@ -133,34 +133,35 @@ export function YoutubeHarnessSection({ draft, setDraft }: { draft: PublicConfig
       <NumberField label={ko ? "영상 하나의 최대 크기(MB)" : "Maximum video size (MB)"} help={ko ? "개인 저장소에 남은 공간이 더 작으면 그 값이 한도입니다." : "When less space is left in private storage, that is the limit."} value={h.youtubeMaxDownloadMb} min={1} max={1024 * 1024} onChange={youtubeMaxDownloadMb => patch({ youtubeMaxDownloadMb })} />
       <label className="field"><span>{ko ? "선호 자막 언어" : "Preferred subtitle languages"}</span><input value={languages} onChange={event => setLanguages(event.target.value)} onBlur={() => { const list = languages.split(/[\s,]+/).map(item => item.trim()).filter(Boolean).slice(0, 20); patch({ youtubePreferredLanguages: list }); setLanguages(list.join(", ")); }} placeholder="ko, en" /><small>{ko ? "영상 원어 자막이 없을 때 이 순서로 고릅니다." : "Used in this order when the spoken language has no subtitles."}</small></label>
     </div></div>
+    {status?.installed && <YoutubeCookies ko={ko} />}
     {notice && <p className="settings-notice" role="status">{notice}</p>}
   </section>;
 }
 
-/** Settings > General: the account's own YouTube cookies, for videos that need a signed-in viewer. */
-export function YoutubeCookiesSection({ ko }: { ko: boolean }) {
+/** Inside the yt-dlp section: the server's YouTube cookies, for videos that need a signed-in viewer. */
+function YoutubeCookies({ ko }: { ko: boolean }) {
   const [status, setStatus] = useState<CookieStatus>();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const input = useRef<HTMLInputElement>(null);
-  useEffect(() => { void fetch("/api/preferences/youtube-cookies", { cache: "no-store" }).then(readJson<CookieStatus>).then(setStatus).catch(() => undefined); }, []);
+  useEffect(() => { void fetch("/api/harness/yt-dlp/cookies", { cache: "no-store" }).then(readJson<CookieStatus>).then(setStatus).catch(() => undefined); }, []);
   async function upload(file: File) {
     setBusy(true); setNotice("");
-    try { setStatus(await readJson<CookieStatus>(await fetch("/api/preferences/youtube-cookies", { method: "PUT", headers: { "Content-Type": "text/plain" }, body: await file.text() }))); setNotice(ko ? "쿠키를 저장했습니다." : "Cookies saved."); }
+    try { setStatus(await readJson<CookieStatus>(await fetch("/api/harness/yt-dlp/cookies", { method: "PUT", headers: { "Content-Type": "text/plain" }, body: await file.text() }))); setNotice(ko ? "쿠키를 저장했습니다." : "Cookies saved."); }
     catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); if (input.current) input.current.value = ""; }
   }
   async function remove() {
     setBusy(true); setNotice("");
-    try { setStatus(await readJson<CookieStatus>(await fetch("/api/preferences/youtube-cookies", { method: "DELETE" }))); setNotice(ko ? "쿠키를 지웠습니다." : "Cookies removed."); }
+    try { setStatus(await readJson<CookieStatus>(await fetch("/api/harness/yt-dlp/cookies", { method: "DELETE" }))); setNotice(ko ? "쿠키를 지웠습니다." : "Cookies removed."); }
     catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   }
-  // A card in the General settings list, laid out like the cards around it.
-  return <div className="general-setting-card youtube-cookie-card">
-    <div><strong><Cookie size={14} aria-hidden="true" />{ko ? "유튜브 쿠키" : "YouTube cookies"}</strong><small>{ko
-      ? "로그인해야 볼 수 있는 영상이나 \"봇이 아님을 확인\" 오류가 날 때 필요합니다. 브라우저 확장으로 youtube.com 쿠키를 Netscape 형식(cookies.txt)으로 내보내 올립니다. 이 계정의 유튜브 도구에만 쓰입니다."
-      : "Needed for videos that require signing in, or when YouTube asks to confirm you are not a bot. Export the youtube.com cookies in the Netscape format (cookies.txt) with a browser extension and upload them. Only this account's YouTube tool uses them."}</small></div>
+  return <div className="harness-advanced youtube-cookies">
+    <h4><Cookie size={14} aria-hidden="true" />{ko ? "쿠키" : "Cookies"}</h4>
+    <p className="settings-help">{ko
+      ? "로그인해야 볼 수 있는 영상이나 \"봇이 아님을 확인\" 오류가 날 때 필요합니다. 브라우저 확장으로 youtube.com 쿠키를 Netscape 형식(cookies.txt)으로 내보내 올립니다. 서버 전체의 유튜브 도구가 이 쿠키를 씁니다."
+      : "Needed for videos that require signing in, or when YouTube asks to confirm you are not a bot. Export the youtube.com cookies in the Netscape format (cookies.txt) with a browser extension and upload them. The YouTube tool uses them for every account on this server."}</p>
     <div className="managed-binary-list"><div className={`managed-binary ${status?.present ? "ok" : "missing"}`}>
       <div><strong>cookies.txt</strong><small>{status?.present ? <><Check size={12} />{ko ? "저장됨" : "Saved"} · {sizeText(status.size)} · {dateText(status.updatedAt, ko)}</> : (ko ? "없음" : "None")}</small></div>
       <div className="managed-binary-actions">
@@ -169,7 +170,7 @@ export function YoutubeCookiesSection({ ko }: { ko: boolean }) {
         {status?.present && <button type="button" className="subtle-action danger" disabled={busy} aria-label={ko ? "쿠키 삭제" : "Remove cookies"} onClick={() => void remove()}><Trash2 size={15} /></button>}
       </div>
     </div></div>
-    <p className="youtube-cookie-note">{ko ? "쿠키는 로그인 정보와 같습니다. 서버에 이 계정 전용 파일로 보관되며 다시 내려받을 수 없습니다." : "Cookies are as sensitive as a login. They are kept on the server as a file only this account's tool uses, and cannot be downloaded again."}</p>
-    {notice && <p className="youtube-cookie-note" role="status">{notice}</p>}
+    <p className="settings-help">{ko ? "쿠키는 로그인 정보와 같습니다. 서버에만 보관되며 다시 내려받을 수 없습니다. 개인 계정 대신 이 용도로 만든 계정의 쿠키를 쓰세요." : "Cookies are as sensitive as a login. They stay on the server and cannot be downloaded again. Use cookies from an account made for this purpose rather than a personal one."}</p>
+    {notice && <p className="settings-notice" role="status">{notice}</p>}
   </div>;
 }

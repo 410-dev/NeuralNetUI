@@ -269,6 +269,11 @@ export interface AppConfig {
   loginAppearance: LoginAppearance;
   /** Workspace-wide: every account sees its plan's model weight badges in the chat picker. */
   showModelWeights: boolean;
+  /**
+   * Workspace-wide: the service is deployed for an organization. For now it adds a notice under the composer that
+   * the organization's administrators can see conversations (not in temporary chats).
+   */
+  organizationMode: boolean;
   /** Workspace-wide: show connection/server names below models in the chat picker. */
   showModelConnectionNames: boolean;
   /** Workspace-wide: standard accounts may set their own inference parameters per model and template. */
