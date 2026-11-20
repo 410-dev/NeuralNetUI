@@ -18,7 +18,6 @@ export function isCloudDriver(driver: ConnectionDriver) {
 export const DRIVER_DEFAULT_URLS: Record<ConnectionDriver, string> = {
   openai: "http://localhost:8888/v1",
   lmstudio: "http://localhost:1234",
-  nnui: "http://127.0.0.1:11435",
   google: "https://generativelanguage.googleapis.com/v1beta/openai",
   anthropic: "https://api.anthropic.com/v1",
 };
@@ -36,13 +35,12 @@ export function modelsEndpoint(driver: ConnectionDriver, baseUrl: string) {
   const base = baseUrl.replace(/\/$/, "");
   if (driver === "anthropic") return `${base}/models?limit=1000`;
   if (driver === "lmstudio") return `${connectionRoot(baseUrl)}/api/v1/models`;
-  if (driver === "nnui") return `${connectionRoot(baseUrl)}/v1/models`;
   return `${base}/models`;
 }
 
 export function chatEndpoint(driver: ConnectionDriver, baseUrl: string) {
   const base = baseUrl.replace(/\/$/, "");
-  return driver === "lmstudio" || driver === "nnui" ? `${connectionRoot(baseUrl)}/v1/chat/completions` : `${base}/chat/completions`;
+  return driver === "lmstudio" ? `${connectionRoot(baseUrl)}/v1/chat/completions` : `${base}/chat/completions`;
 }
 
 export function imageGenerationEndpoint(baseUrl: string) {
@@ -57,26 +55,14 @@ export function lmStudioEndpoint(baseUrl: string, action: "load" | "unload") {
   return `${connectionRoot(baseUrl)}/api/v1/models/${action}`;
 }
 
-export function nnuiModelEndpoint(baseUrl: string, model: string, action: "load" | "unload") {
-  return `${connectionRoot(baseUrl)}/api/models/${encodeURIComponent(model)}/${action}`;
-}
-
-export function nnuiStatusEndpoint(baseUrl: string) {
-  return `${connectionRoot(baseUrl)}/api/models/status`;
-}
-
-export function nnuiEventsEndpoint(baseUrl: string) {
-  return `${connectionRoot(baseUrl)}/api/events`;
-}
-
 export function connectionHeaders(connection: Pick<ConnectionConfig, "apiKey" | "clearApiKey"> & { driver?: ConnectionDriver }, fallbackKey = ""): Record<string, string> {
   const apiKey = connection.clearApiKey ? "" : connection.apiKey || fallbackKey;
   if (connection.driver === "anthropic") return { "Content-Type": "application/json", "anthropic-version": "2023-06-01", ...(apiKey ? { "x-api-key": apiKey } : {}) };
   return { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) };
 }
 
-export function chatHeaders(connection: Pick<ConnectionConfig, "driver" | "apiKey" | "clearApiKey">, fallbackKey = "", sessionId?: string): Record<string, string> {
-  return { ...connectionHeaders(connection, fallbackKey), ...(connection.driver === "nnui" && sessionId ? { "X-Llama-NNUI-Session-Id": sessionId } : {}) };
+export function chatHeaders(connection: Pick<ConnectionConfig, "driver" | "apiKey" | "clearApiKey">, fallbackKey = "", _sessionId?: string): Record<string, string> {
+  return connectionHeaders(connection, fallbackKey);
 }
 
 export function resolveConnectionModels(connections: ConnectionConfig[], aliases: ModelConfig[] = [], preferredOrder: string[] = []) {

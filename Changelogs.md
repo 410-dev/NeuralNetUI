@@ -8,6 +8,9 @@ NeuralNetUI의 릴리스별 변경 사항입니다. 설치와 사용 방법은 [
 - **Google Gemini 드라이버**: `설정 > 연결`의 드라이버에 **Google Gemini**를 추가했습니다. Gemini API의 OpenAI 호환 엔드포인트(`https://generativelanguage.googleapis.com/v1beta/openai`)를 쓰며, 모델 목록에서 임베딩·미디어 모델은 건너뜁니다. Temperature·Top P만 전달하고 이전 생각 기록은 보내지 않으며, 추론 강도는 none·low·medium·high로 맞춥니다. 키가 비어 있으면 `GEMINI_API_KEY`(또는 `GOOGLE_API_KEY`)를 씁니다.
 - **Anthropic Claude 드라이버**: 드라이버에 **Anthropic Claude**를 추가했습니다. 공식 `@anthropic-ai/sdk`로 Messages API를 호출하고, 앱의 Chat Completions 요청·스트림과 양방향으로 변환합니다(텍스트, 이미지, 도구 호출, 요약된 생각, 토큰 사용량). 추론 강도는 적응형 사고의 `output_config.effort`로 전달하고, 최신 Claude 모델이 거부하는 Temperature 등 샘플링 값은 보내지 않습니다. 모델 목록은 Models API에서 이름과 컨텍스트 길이까지 읽습니다. 키가 비어 있으면 `ANTHROPIC_API_KEY`를 씁니다.
 - 호스팅 드라이버(Google·Anthropic)에는 모델 로드·언로드·상주 관리와 LM Studio 진행률 조회를 시도하지 않습니다.
+- **NNUI Server 드라이버 제거**: 드라이버 목록과 관련 코드(모델 상태·로드·언로드 API, 이벤트 진행률, 세션 헤더)를 모두 지웠습니다. 저장된 NNUI 연결은 읽을 때 같은 서버의 `/v1`을 쓰는 OpenAI API 연결로 자동 변환됩니다.
+- **실험적 기능 제거**: `설정 > 실험적 기능` 탭과 OpenAI 호환 연결 진행률 스위치를 없앴습니다. 진행률은 LM Studio 연결에서만 표시되며, 저장된 값은 읽을 때 버려집니다.
+- **유튜브 쿠키 위치 수정**: 일반 설정 아래에 따로 넓게 펼쳐져 아이콘·제목·안내문이 어긋나던 유튜브 쿠키 섹션을 일반 설정 목록 안의 카드로 옮겨 다른 카드와 폭·여백을 맞췄습니다.
 - 버전 이름: `Release 1.0-rc1` (`package.json`은 `1.0.0-rc1`).
 
 ## 내장 브라우저와 유튜브 (3.0.0 rc14 beta 34)

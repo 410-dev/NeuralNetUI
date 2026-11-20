@@ -24,7 +24,6 @@ const DETAILS: Partial<Record<CapabilityId, Partial<Record<ConnectionDriver, [st
   discovery: {
     openai: ["Standard model list, enriched when the host also exposes LM Studio metadata", "표준 모델 목록. 같은 서버가 LM Studio 정보를 제공하면 함께 사용합니다"],
     lmstudio: ["Native inventory with reasoning capabilities and loaded instances", "추론 capability와 로드된 인스턴스까지 포함한 네이티브 목록"],
-    nnui: ["Registered models from the NNUI control plane, including unloaded models", "NNUI 제어면에 등록된 모델을 언로드 상태까지 포함해 감지합니다"],
     google: ["Gemini models from the OpenAI-compatible model list (embedding and media models are skipped)", "OpenAI 호환 목록에서 Gemini 모델을 감지합니다 (임베딩·미디어 모델 제외)"],
     anthropic: ["Claude models with names and context windows from the Models API", "Models API에서 Claude 모델의 이름과 컨텍스트 길이까지 감지합니다"],
   },
@@ -33,22 +32,17 @@ const DETAILS: Partial<Record<CapabilityId, Partial<Record<ConnectionDriver, [st
     anthropic: ["Hosted service; there is nothing to load or unload", "호스팅 서비스라 로드·언로드할 대상이 없습니다"],
     openai: ["Probes LM Studio management, otherwise falls back to /api/inference", "LM Studio 관리 API를 먼저 시도하고, 없으면 /api/inference로 대체합니다"],
     lmstudio: ["Native load and unload endpoints", "네이티브 로드·언로드 엔드포인트"],
-    nnui: ["Native status, load, unload and active-request-aware residency", "네이티브 상태·로드·언로드 API와 활성 요청 기반 상주 관리를 사용합니다"],
   },
   progress: {
-    openai: ["Only on hosts verified as LM Studio, and only while the experimental switch is on", "LM Studio로 확인된 서버에서만, 실험적 기능 스위치를 켠 경우에만 표시됩니다"],
     lmstudio: ["SDK percentages for supported requests; other requests can show polled model-level prompt processing without a percentage", "지원되는 요청은 SDK 퍼센트를 표시합니다. 추론 강도 단계나 이전 생각 기록으로 폴백해도 모델 상태 조회가 가능하면 퍼센트 없이 프롬프트 처리 상태를 표시합니다"],
-    nnui: ["Load and prompt-prefill events are read from the authenticated server event stream", "인증된 서버 이벤트 스트림에서 모델 로드와 프롬프트 프리필 진행률을 읽습니다"],
   },
   effort: {
     google: ["Sent as reasoning_effort (none, low, medium, high) to Gemini 2.5 and later", "Gemini 2.5 이상에 reasoning_effort(none·low·medium·high)로 전달합니다"],
     anthropic: ["Sent as output_config.effort with adaptive thinking; Temperature and other sampling values are not sent because current Claude models reject them", "적응형 사고와 함께 output_config.effort로 전달합니다. 최신 Claude 모델은 Temperature 등 샘플링 값을 받지 않으므로 전송하지 않습니다"],
-    nnui: ["Forwarded to llama.cpp; exact levels depend on the selected model and server build", "llama.cpp로 전달되며 정확한 단계 지원은 선택한 모델과 서버 빌드에 따라 달라집니다"],
   },
   reasoningHistory: {
     google: ["Earlier reasoning text is not accepted by the Gemini compatibility endpoint", "Gemini 호환 엔드포인트는 이전 생각 기록을 받지 않습니다"],
     anthropic: ["Earlier thinking is not replayed; Claude reasons afresh each turn", "이전 생각은 다시 보내지 않으며, Claude가 매 턴 새로 추론합니다"],
-    nnui: ["Forwarded through Chat Completions; acceptance depends on the selected llama.cpp model", "Chat Completions로 전달되며 선택한 llama.cpp 모델에 따라 처리 여부가 달라집니다"],
   },
 };
 
@@ -58,19 +52,14 @@ export const capabilityStateWord = (state: CapabilityState, locale: Locale) => S
 const STATES: Record<ConnectionDriver, Record<CapabilityId, CapabilityState>> = {
   openai: { discovery: "yes", management: "partial", progress: "no", effort: "yes", reasoningHistory: "yes" },
   lmstudio: { discovery: "yes", management: "yes", progress: "partial", effort: "yes", reasoningHistory: "yes" },
-  nnui: { discovery: "yes", management: "yes", progress: "yes", effort: "partial", reasoningHistory: "partial" },
   google: { discovery: "yes", management: "no", progress: "no", effort: "yes", reasoningHistory: "no" },
   anthropic: { discovery: "yes", management: "no", progress: "no", effort: "yes", reasoningHistory: "no" },
 };
 
-/**
- * What a driver can and cannot do, for the picker that chooses it. Progress for OpenAI-compatible
- * connections depends on the experimental switch, so that answer is computed rather than fixed.
- */
-export function driverCapabilities(driver: ConnectionDriver, locale: Locale, options: { openAIProgress?: boolean } = {}): CapabilityRow[] {
+/** What a driver can and cannot do, for the picker that chooses it. */
+export function driverCapabilities(driver: ConnectionDriver, locale: Locale): CapabilityRow[] {
   return CAPABILITY_IDS.map((id) => {
-    let state = STATES[driver][id];
-    if (id === "progress" && driver === "openai" && options.openAIProgress) state = "partial";
+    const state = STATES[driver][id];
     return { id, label: capabilityLabel(id, locale), state, detail: DETAILS[id]?.[driver]?.[locale === "ko" ? 1 : 0] };
   });
 }

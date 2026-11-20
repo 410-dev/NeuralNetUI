@@ -76,7 +76,7 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
   const signal = AbortSignal.any([ctx.signal, timeoutController.signal]);
   const release = await modelResidency.acquire({ server, model: model.sourceModel, limit,
     policy: peers.some(c => c.modelWaitPolicy === "serial") ? "serial" : "capacity", signal, onPhase: ctx.onPhase,
-    adapter: !isCloudDriver(connection.driver) && (ctx.config.preferences.onDemand || limit) || connection.driver === "lmstudio" || connection.driver === "nnui" ? createResidencyAdapter(connection, headers, model.contextWindowTokens, ctx.onPhase) : undefined }).catch(error => { if (timeout) clearTimeout(timeout); route.release(); throw error; });
+    adapter: !isCloudDriver(connection.driver) && (ctx.config.preferences.onDemand || limit) || connection.driver === "lmstudio" ? createResidencyAdapter(connection, headers, model.contextWindowTokens, ctx.onPhase) : undefined }).catch(error => { if (timeout) clearTimeout(timeout); route.release(); throw error; });
   const harnessSettings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const isCompaction = kind === "compaction" || prompt === harnessSettings.compactPrompt;
   const requestMessages = isCompaction ? compactionMessages(prompt, content, harnessSettings.compactPromptPosition) : [{role:"system", content:prompt}, {role:"user", content}];

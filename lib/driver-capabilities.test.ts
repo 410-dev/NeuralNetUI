@@ -4,7 +4,7 @@ import { capabilityStateWord, capabilitySummary, driverCapabilities } from "./dr
 import type { ConnectionDriver, Locale } from "./types.ts";
 
 test("every capability is answered for every driver in both languages", () => {
-  for (const driver of ["openai", "lmstudio", "nnui"] as ConnectionDriver[]) {
+  for (const driver of ["openai", "lmstudio", "google", "anthropic"] as ConnectionDriver[]) {
     for (const locale of ["en", "ko"] as Locale[]) {
       const rows = driverCapabilities(driver, locale);
       assert.equal(rows.length, 5, `${driver}/${locale}`);
@@ -25,20 +25,17 @@ test("LM Studio manages models natively while OpenAI-compatible connections are 
   assert.equal(compatible.find((row) => row.id === "management")!.state, "partial");
 });
 
-test("NNUI Server exposes native management and event progress", () => {
-  const nnui = driverCapabilities("nnui", "en");
-  assert.equal(nnui.find((row) => row.id === "management")!.state, "yes");
-  assert.equal(nnui.find((row) => row.id === "progress")!.state, "yes");
-  assert.equal(nnui.find((row) => row.id === "effort")!.state, "partial");
+test("hosted providers have nothing to manage and report no progress", () => {
+  for (const driver of ["google", "anthropic"] as ConnectionDriver[]) {
+    const rows = driverCapabilities(driver, "en");
+    assert.equal(rows.find((row) => row.id === "management")!.state, "no");
+    assert.equal(rows.find((row) => row.id === "progress")!.state, "no");
+  }
 });
 
-test("progress for OpenAI-compatible connections depends on the experimental switch", () => {
+test("only LM Studio reports load and prompt progress", () => {
   assert.equal(driverCapabilities("openai", "en").find((row) => row.id === "progress")!.state, "no");
-  assert.equal(driverCapabilities("openai", "en", { openAIProgress: true }).find((row) => row.id === "progress")!.state, "partial");
-  // The native driver reports progress on its own, and the switch does not change that.
-  for (const openAIProgress of [false, true]) {
-    assert.equal(driverCapabilities("lmstudio", "en", { openAIProgress }).find((row) => row.id === "progress")!.state, "partial");
-  }
+  assert.equal(driverCapabilities("lmstudio", "en").find((row) => row.id === "progress")!.state, "partial");
 });
 
 test("the caveat behind a limited answer is spelled out", () => {

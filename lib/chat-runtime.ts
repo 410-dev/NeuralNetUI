@@ -17,13 +17,12 @@ import { aliasBaseModel, aliasWithBaseModel } from "./alias-base-model";
 import { readConversation, writeConversation, renameConversation } from "./conversations";
 import { detectTextRepetition, detectToolCallRepetition, normalizeRepetitionSettings, toolArgumentText, type RepetitionFinding, type RepetitionSettings } from "./repetition.ts";
 import { readUpload, readUploadModelContent, saveGeneratedImage } from "./uploads";
-import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, envApiKey, isCloudDriver, nnuiEventsEndpoint } from "./connection-drivers";
+import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, envApiKey, isCloudDriver } from "./connection-drivers";
 import { chatFetcher, providerRequestBody } from "./provider-requests.ts";
 import type { ConnectionDriver } from "./types";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
 import { readPersonalSampling, resolveSampling, samplingRequestFields, type SamplingParams } from "./sampling-params";
 import { createResidencyAdapter } from "./residency-adapter";
-import { nnuiEventProgress, startNnuiEventObserver } from "./nnui-driver";
 import { modelResidency } from "./residency-runtime";
 import { progressFetch, SERVER_RESPONSE_TIMEOUT_MS, withSlowProgress } from "./chat-progress";
 import { resolveTools, toolSources } from "./tools";
@@ -341,18 +340,12 @@ async function materializeImageFiles(body: Record<string, unknown>) {
   return { ...body, messages:converted };
 }
 
-async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string; sampling?: SamplingParams }, allowProgress = false, threshold?: number, baseInput?: number, chargeModelId?: string, nnui?: { eventsUrl: string; sessionId: string; model: string }, pollLmStudioStatus = false) {
+async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: Record<string, string>, native?: { baseUrl: string; effort?: string; sampling?: SamplingParams }, allowProgress = false, threshold?: number, baseInput?: number, chargeModelId?: string, pollLmStudioStatus = false) {
   const turnController = new AbortController();
   const signal = AbortSignal.any([job.controller.signal, turnController.signal]);
-  const eventController = new AbortController();
   const prefillTimerController = new AbortController();
   let prefillSeen = false; let outputStarted = false; let statusPollStarted = false;
-  const events = nnui ? startNnuiEventObserver(nnui.eventsUrl, headers, AbortSignal.any([job.controller.signal, eventController.signal]), event => {
-    if (event.type !== "request.prefill.progress" || event.model !== nnui.model || event.session_id !== nnui.sessionId) return;
-    const progress = nnuiEventProgress(event); if (progress) { prefillSeen = true; prefillTimerController.abort(); setWaitProgress(job, progress.phase, progress.progress); }
-  }) : undefined;
-  await events?.ready;
-  if (!prefillSeen) setWaitPhase(job, "preparing-response");
+  setWaitPhase(job, "preparing-response");
   const statusPollController = new AbortController();
   const stopStatusPoll = () => statusPollController.abort();
   const startStatusPoll = () => {
@@ -382,7 +375,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     }, setResponsePhase, "preparing-response", chatFetcher(driver), SERVER_RESPONSE_TIMEOUT_MS, prefillTimerController.signal);
     if (!response.ok) throw new Error((await response.text()) || `Model server responded with ${response.status}`);
     if (!response.body) throw new Error("The model server returned no response stream.");
-  } catch (error) { stopStatusPoll(); eventController.abort(); void events?.done; throw error; }
+  } catch (error) { stopStatusPoll(); throw error; }
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
   const calls = new Map<number, ToolCall>(); let content = ""; let reasoning = ""; let usage: Record<string, number | undefined> = {};
   let visibleStarted: number | undefined; let visibleEnded: number | undefined; let reasoningStarted: number | undefined; let reasoningEnded: number | undefined;
@@ -473,7 +466,6 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     throw error;
   } finally {
     stopStatusPoll();
-    eventController.abort(); void events?.done;
     if (chargeModelId) clearLiveTokenUsage(job.userId, job.message.id);
     setWaitPhase(job, undefined);
     await reader.cancel().catch(() => undefined); reader.releaseLock();
@@ -643,20 +635,15 @@ async function run(job: ChatJob) {
     const sessionId = job.input.conversationId;
     const headers = chatHeaders(connection, envApiKey(connection.driver), sessionId);
     const cloud = isCloudDriver(connection.driver);
-    const progressEnabled = connection.driver === "lmstudio" || connection.driver === "nnui" || (!cloud && config.experimental?.openAIProgress === true);
-    let nativeServer = connection.driver === "lmstudio";
-    if (!nativeServer && progressEnabled) {
-      try {
-        const probe = await fetch(`${connectionRoot(connection.baseUrl)}/api/v1/models`, { headers, signal: AbortSignal.any([job.controller.signal, AbortSignal.timeout(2000)]), cache: "no-store" });
-        if (probe.ok) { const inventory = await probe.json(); nativeServer = Array.isArray(inventory.models) && inventory.models.some((m: {type?: string; key?: string; loaded_instances?: unknown}) => m.type === "llm" && typeof m.key === "string" && Array.isArray(m.loaded_instances)); }
-      } catch { job.controller.signal.throwIfAborted(); }
-    }
+    // Load and prompt progress comes from LM Studio's native API only.
+    const progressEnabled = connection.driver === "lmstudio";
+    const nativeServer = connection.driver === "lmstudio";
     const serverKey = connectionRoot(connection.baseUrl);
     const sameServer = config.connections.filter(item => connectionEndpoints(item).some(url => connectionRoot(url) === serverKey));
     const limits = sameServer.map(item => item.maxResidentModels || 0).filter(limit => limit > 0);
     const limit = limits.length ? Math.min(...limits) : 0;
     const policy = sameServer.some(item => item.modelWaitPolicy === "serial") ? "serial" : "capacity";
-    const managedServer = nativeServer || connection.driver === "nnui";
+    const managedServer = nativeServer;
     // Hosted providers have nothing to load or unload; only the local servers get a residency adapter.
     const adapter = !cloud && (config.preferences.onDemand || limit > 0 || managedServer) ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase), fetch, managedServer && progressEnabled ? progress => setWaitProgress(job, "loading-model", progress) : undefined) : undefined;
     const acquireModel = () => modelResidency.acquire({ server: serverKey, model: model.sourceModel, limit, policy, adapter, signal: job.controller.signal, onPhase: phase => setWaitPhase(job, phase) });
@@ -719,7 +706,7 @@ async function run(job: ChatJob) {
       try {
         const configuredThreshold = contextWindow ? Math.floor(contextWindow * harness.compactThreshold / 100) : undefined;
         const streamThreshold = configuredThreshold && projectedInput >= configuredThreshold && contextWindow ? Math.floor(contextWindow * .95) : configuredThreshold;
-        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: presetEffortValue(model, preset), sampling } : undefined, progressEnabled, usesCompactionThreshold(harness) ? streamThreshold : undefined, projectedInput, chargeModelId, connection.driver === "nnui" ? { eventsUrl: nnuiEventsEndpoint(connection.baseUrl), sessionId, model: model.sourceModel } : undefined, connection.driver === "lmstudio");
+        result = await streamTurn(job, body, headers, nativeServer ? { baseUrl: connection.baseUrl, effort: presetEffortValue(model, preset), sampling } : undefined, progressEnabled, usesCompactionThreshold(harness) ? streamThreshold : undefined, projectedInput, chargeModelId, connection.driver === "lmstudio");
       } catch (error) {
         const overflow = contextOverflowDetails(error);
         if (!overflow) throw error;

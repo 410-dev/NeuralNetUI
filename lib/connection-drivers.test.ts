@@ -5,22 +5,20 @@ import type { ConnectionConfig, ModelConfig } from "./types.ts";
 
 const model = (id: string, connectionId: string, name = id): ModelConfig => ({ id, name, sourceModel: id, description: "", isAlias: false, visible: true, reasoningSupported: false, reasoningPresets: [], connectionId });
 
-test("driver endpoints distinguish OpenAI, LM Studio, and NNUI Server", () => {
+test("driver endpoints distinguish OpenAI, LM Studio and the hosted providers", () => {
   assert.equal(modelsEndpoint("openai", "http://host:8000/v1"), "http://host:8000/v1/models");
   assert.equal(modelsEndpoint("lmstudio", "http://localhost:1234"), "http://localhost:1234/api/v1/models");
   assert.equal(chatEndpoint("lmstudio", "http://localhost:1234/api/v1"), "http://localhost:1234/v1/chat/completions");
-  assert.equal(modelsEndpoint("nnui", "http://localhost:11435"), "http://localhost:11435/v1/models");
-  assert.equal(modelsEndpoint("nnui", "http://localhost:11435/v1"), "http://localhost:11435/v1/models");
-  assert.equal(chatEndpoint("nnui", "http://localhost:11435"), "http://localhost:11435/v1/chat/completions");
+  assert.equal(chatEndpoint("google", "https://generativelanguage.googleapis.com/v1beta/openai"), "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
   assert.equal(imageGenerationEndpoint("http://host:8000/v1/"), "http://host:8000/v1/images/generations");
   assert.equal(imageEditEndpoint("http://host:8000/v1/"), "http://host:8000/v1/images/edits");
 });
 
-test("only NNUI chat requests carry the stable server session header", () => {
+test("chat requests authenticate with a bearer token, or x-api-key for Anthropic", () => {
   const base = { apiKey: "secret", clearApiKey: false };
-  assert.equal(chatHeaders({ ...base, driver: "nnui" }, "", "conversation-42")["X-Llama-NNUI-Session-Id"], "conversation-42");
-  assert.equal(chatHeaders({ ...base, driver: "openai" }, "", "conversation-42")["X-Llama-NNUI-Session-Id"], undefined);
-  assert.equal(chatHeaders({ ...base, driver: "lmstudio" }, "", "conversation-42")["X-Llama-NNUI-Session-Id"], undefined);
+  assert.equal(chatHeaders({ ...base, driver: "openai" }, "", "conversation-42").Authorization, "Bearer secret");
+  assert.equal(chatHeaders({ ...base, driver: "anthropic" }, "", "conversation-42")["x-api-key"], "secret");
+  assert.equal(chatHeaders({ ...base, driver: "anthropic" }, "", "conversation-42").Authorization, undefined);
 });
 
 test("connection order resolves duplicate model identifiers", () => {

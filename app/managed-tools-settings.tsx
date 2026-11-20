@@ -156,10 +156,11 @@ export function YoutubeCookiesSection({ ko }: { ko: boolean }) {
     catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   }
-  return <section className="settings-section wide managed-tool-section">
-    <SectionTitle icon={<Cookie size={19} />} title={ko ? "유튜브 쿠키" : "YouTube cookies"} description={ko
+  // A card in the General settings list, laid out like the cards around it.
+  return <div className="general-setting-card youtube-cookie-card">
+    <div><strong><Cookie size={14} aria-hidden="true" />{ko ? "유튜브 쿠키" : "YouTube cookies"}</strong><small>{ko
       ? "로그인해야 볼 수 있는 영상이나 \"봇이 아님을 확인\" 오류가 날 때 필요합니다. 브라우저 확장으로 youtube.com 쿠키를 Netscape 형식(cookies.txt)으로 내보내 올립니다. 이 계정의 유튜브 도구에만 쓰입니다."
-      : "Needed for videos that require signing in, or when YouTube asks to confirm you are not a bot. Export the youtube.com cookies in the Netscape format (cookies.txt) with a browser extension and upload them. Only this account's YouTube tool uses them."} />
+      : "Needed for videos that require signing in, or when YouTube asks to confirm you are not a bot. Export the youtube.com cookies in the Netscape format (cookies.txt) with a browser extension and upload them. Only this account's YouTube tool uses them."}</small></div>
     <div className="managed-binary-list"><div className={`managed-binary ${status?.present ? "ok" : "missing"}`}>
       <div><strong>cookies.txt</strong><small>{status?.present ? <><Check size={12} />{ko ? "저장됨" : "Saved"} · {sizeText(status.size)} · {dateText(status.updatedAt, ko)}</> : (ko ? "없음" : "None")}</small></div>
       <div className="managed-binary-actions">
@@ -168,7 +169,7 @@ export function YoutubeCookiesSection({ ko }: { ko: boolean }) {
         {status?.present && <button type="button" className="subtle-action danger" disabled={busy} aria-label={ko ? "쿠키 삭제" : "Remove cookies"} onClick={() => void remove()}><Trash2 size={15} /></button>}
       </div>
     </div></div>
-    <p className="settings-help">{ko ? "쿠키는 로그인 정보와 같습니다. 서버에 이 계정 전용 파일로 보관되며 다시 내려받을 수 없습니다." : "Cookies are as sensitive as a login. They are kept on the server as a file only this account's tool uses, and cannot be downloaded again."}</p>
-    {notice && <p className="settings-notice" role="status">{notice}</p>}
-  </section>;
+    <p className="youtube-cookie-note">{ko ? "쿠키는 로그인 정보와 같습니다. 서버에 이 계정 전용 파일로 보관되며 다시 내려받을 수 없습니다." : "Cookies are as sensitive as a login. They are kept on the server as a file only this account's tool uses, and cannot be downloaded again."}</p>
+    {notice && <p className="youtube-cookie-note" role="status">{notice}</p>}
+  </div>;
 }
