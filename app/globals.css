@@ -974,7 +974,12 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .message-attachments { width: min(360px, 78vw); }
   .draft-image { width: 66px; height: 56px; flex-basis: 66px; }
   .assistant-footer { flex-wrap: wrap; }
-  .message-token-stats { width: 100%; margin-left: 0; padding-left: 2px; }
+  .message-token-stats { position: relative; width: 100%; margin-left: 0; padding-left: 2px; }
+  /* The stats line starts at the left edge on phones, so the popover opens rightwards from it and stays on screen. */
+  .message-token-stats .token-rate { position: static; }
+  .token-rate-tooltip { left: 0; right: auto; min-width: 0; width: max-content; max-width: calc(100vw - 32px); }
+  .token-rate-tooltip::after { display: none; }
+  .message-token-stats .token-rate-tooltip small.token-model b { max-width: calc(100vw - 120px); }
   .tool-activity-list { margin-left: 9px; padding-left: 9px; }
   .tool-activity-body { margin-left: 25px; margin-right: 0; }
   .choice-composer-card { border-radius: var(--radius-lg); }
