@@ -393,6 +393,6 @@ export function ensureAgentScheduler() {
 /** Sends a push notification to every registered device, unless the person is looking at the agent somewhere. */
 async function notifyDevices(userId: string, text: string) {
   if (isViewingAgent(userId)) return;
-  try { const { pushToUser } = await import("./push"); await pushToUser(userId, { title: "Agent", body: text.replace(/\s+/g, " ").trim().slice(0, 180) }); }
+  try { const { markPushPending, pushToUser } = await import("./push"); markPushPending(userId); await pushToUser(userId, { title: "Agent", body: text.replace(/\s+/g, " ").trim().slice(0, 180) }); }
   catch (error) { console.warn("Agent push failed", error instanceof Error ? error.message : error); }
 }

@@ -178,8 +178,22 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [pushState, setPushState] = useState<"unsupported" | "off" | "on" | "denied" | "working">("off");
+  const [pushNotice, setPushNotice] = useState<{ text: string; error?: boolean }>();
+  const [pushDevices, setPushDevices] = useState(state.push?.devices ?? 0);
   useEffect(() => { api<{ connections: Array<{ id: string; name: string; kind?: "user" | "vm" }> }>("/api/mcp-connections").then(body => setMcp(body.connections || [])).catch(() => undefined); }, []);
-  useEffect(() => { void currentPushSubscription().then(subscription => setPushState(subscription === "unsupported" ? "unsupported" : typeof Notification !== "undefined" && Notification.permission === "denied" ? "denied" : subscription ? "on" : "off")); }, []);
+  useEffect(() => {
+    // "On" means this browser holds a subscription the server also has; anything else offers to register again.
+    void (async () => {
+      const support = pushSupport(ko);
+      if (support) { setPushState("unsupported"); setPushNotice({ text: support }); return; }
+      if (Notification.permission === "denied") { setPushState("denied"); return; }
+      const subscription = await currentPushSubscription().catch(() => null);
+      if (!subscription || subscription === "unsupported") { setPushState("off"); return; }
+      const known = await api<{ registered?: boolean; devices: number }>(`/api/agent/push?endpoint=${encodeURIComponent(subscription.endpoint)}`).catch(() => undefined);
+      if (known) setPushDevices(known.devices);
+      setPushState(known?.registered ? "on" : "off");
+    })();
+  }, [ko]);
   const providers = useMemo(() => [
     ...BUILTIN_TOOL_PROVIDERS.filter(item => !["code-runner", "location", "multiple-choice"].includes(item.id)).map(item => ({ id: item.id, name: ko ? item.label.ko : item.label.en, icon: item.icon })),
     ...mcp.map(item => item.kind === "vm" ? { id: `mcp:${item.id}`, name: ko ? "가상 컴퓨터" : "Virtual computer", icon: "monitor" as ToolIcon } : { id: `mcp:${item.id}`, name: `MCP · ${item.name}`, icon: "cable" as ToolIcon }),
@@ -192,9 +206,30 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); setBusy(false); }
   };
   const togglePush = async () => {
-    setPushState("working");
-    try { setPushState(await setPushSubscription(pushState !== "on", state.push?.publicKey)); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); setPushState("off"); }
+    const enable = pushState !== "on";
+    setPushState("working"); setPushNotice(undefined);
+    try {
+      // The permission prompt is asked first, while the tap still counts as the person's own action.
+      if (enable && Notification.permission !== "granted" && await Notification.requestPermission() !== "granted") { setPushState("denied"); setPushNotice({ text: ko ? "알림 권한이 허용되지 않았습니다. 브라우저(또는 앱) 설정에서 이 사이트의 알림을 허용해 주세요." : "Notification permission was not granted. Allow notifications for this site in the browser or app settings.", error: true }); return; }
+      const devices = await setPushSubscription(enable, state.push?.publicKey);
+      setPushDevices(devices); setPushState(enable ? "on" : "off");
+      setPushNotice({ text: enable ? (ko ? `이 기기를 등록했습니다. 등록된 기기 ${devices}대. '테스트 알림 보내기'로 도착하는지 확인해 보세요.` : `This device is registered (${devices} in total). Use "Send a test" to check delivery.`) : (ko ? "이 기기의 알림을 껐습니다." : "Notifications are off on this device.") });
+      onSaved();
+    } catch (caught) {
+      setPushState("off");
+      setPushNotice({ text: `${ko ? "등록하지 못했습니다" : "Could not register"}: ${caught instanceof Error ? caught.message : String(caught)}`, error: true });
+    }
+  };
+  const testPush = async () => {
+    setPushNotice({ text: ko ? "보내는 중…" : "Sending…" });
+    try {
+      const body = await api<{ results: Array<{ endpoint: string; ok: boolean; status?: number; error?: string }>; devices: number }>("/api/agent/push", { method: "POST", body: JSON.stringify({ test: true, ko }) });
+      setPushDevices(body.devices);
+      const failed = body.results.filter(item => !item.ok);
+      setPushNotice({ error: failed.length > 0, text: !body.results.length ? (ko ? "등록된 기기가 없습니다." : "No device is registered.")
+        : failed.length ? `${ko ? `${body.results.length}대 중 ${failed.length}대 실패` : `${failed.length} of ${body.results.length} failed`}: ${failed.map(item => `${item.endpoint} ${item.status ?? ""} ${item.error ?? ""}`.trim()).join(" / ")}`
+        : (ko ? `${body.results.length}대에 보냈습니다. 몇 초 안에 알림이 오는지 확인해 주세요.` : `Sent to ${body.results.length} device(s). A notification should arrive within seconds.`) });
+    } catch (caught) { setPushNotice({ text: caught instanceof Error ? caught.message : String(caught), error: true }); }
   };
   const decisionSelect = (current: AgentDecision | undefined, fallback: AgentDecision, onChange: (value: AgentDecision) => void, label: string) =>
     <label className="agent-rule-select"><span>{label}</span><select value={current ?? fallback} onChange={event => onChange(event.target.value as AgentDecision)}><option value="allow">{ko ? "자동 허용" : "Allow"}</option><option value="ask">{ko ? "물어보기" : "Ask"}</option></select></label>;
@@ -207,7 +242,7 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
       <label className="field"><span>{ko ? "압축 기준 (컨텍스트의 %)" : "Compact at (% of context)"}</span><input type="number" min={10} max={95} value={value.compactPercent} onChange={event => setValue({ ...value, compactPercent: Math.min(95, Math.max(10, Math.round(Number(event.target.value) || 50))) })} /><small>{ko ? "메인 채팅과 모든 서브에이전트가 이 비율을 넘으면 압축합니다. 하네스 설정과 별개입니다." : "The main chat and every subagent compact past this share; separate from harness settings."}</small></label>
     </div>
     <label className="field"><span>{ko ? "도구 실행 제한 시간 (분)" : "Tool time limit (minutes)"}</span><input type="number" min={0} max={1440} value={value.toolTimeoutMinutes ?? 10} onChange={event => setValue({ ...value, toolTimeoutMinutes: Math.min(1440, Math.max(0, Math.round(Number(event.target.value) || 0))) })} /><small>{ko ? "에이전트의 도구 호출이 이 시간을 넘기면 취소하고, 모델은 결과 없이 이어서 작업합니다. 승인을 기다리는 시간은 넣지 않습니다. 0은 제한 없음입니다. 실행 중인 도구는 언제든 '도구 취소'로 직접 멈출 수 있습니다." : "An agent tool call running longer than this is cancelled and the model carries on without its result. Time waiting for approval does not count. 0 means no limit. You can also cancel a running tool any time."}</small></label>
-    <div className="field"><span>{ko ? "이 기기 푸시 알림" : "Push notifications on this device"}</span><div className="agent-push-row"><button type="button" className="subtle-action" disabled={pushState === "unsupported" || pushState === "denied" || pushState === "working"} onClick={() => void togglePush()}>{pushState === "on" ? <><BellOff size={14} />{ko ? "이 기기 알림 끄기" : "Turn off on this device"}</> : <><Bell size={14} />{ko ? "이 기기에서 알림 받기" : "Notify this device"}</>}</button><small>{pushState === "unsupported" ? (ko ? "이 브라우저는 푸시 알림을 지원하지 않습니다. HTTPS 주소에서 앱으로 설치하면 쓸 수 있습니다." : "This browser cannot receive push here. Install the app from an HTTPS address.") : pushState === "denied" ? (ko ? "브라우저에서 알림이 차단되어 있습니다." : "Notifications are blocked in the browser.") : (ko ? `등록된 기기 ${state.push?.devices ?? 0}대 · 에이전트 화면을 보고 있지 않을 때만 보내고, 한 기기에서 확인하면 다른 기기 알림도 지웁니다.` : `${state.push?.devices ?? 0} device(s) · sent only while you are not viewing the agent; seeing one clears the others.`)}</small></div></div>
+    <div className="field"><span>{ko ? "이 기기 푸시 알림" : "Push notifications on this device"}</span><div className="agent-push-row"><button type="button" className="subtle-action" disabled={pushState === "unsupported" || pushState === "working"} onClick={() => void togglePush()}>{pushState === "working" ? <LoaderCircle size={14} className="spin" /> : pushState === "on" ? <BellOff size={14} /> : <Bell size={14} />}{pushState === "on" ? (ko ? "이 기기 알림 끄기" : "Turn off on this device") : (ko ? "이 기기에서 알림 받기" : "Notify this device")}</button>{pushDevices > 0 && <button type="button" className="subtle-action" onClick={() => void testPush()}>{ko ? "테스트 알림 보내기" : "Send a test"}</button>}<small>{ko ? `등록된 기기 ${pushDevices}대 · 에이전트 화면을 보고 있지 않을 때만 보내고, 한 기기에서 확인하면 다른 기기 알림도 지웁니다.` : `${pushDevices} device(s) · sent only while you are not viewing the agent; seeing one clears the others.`}</small></div>{pushNotice && <p className={`agent-push-notice ${pushNotice.error ? "error" : ""}`} role="status">{pushNotice.text}</p>}</div>
     <div className="field agent-rules"><span>{ko ? "자동 실행 중 도구 사용" : "Tools during automatic runs"}</span><small>{ko ? "사람이 없을 때(서브에이전트, 예약 작업, 에이전트가 스스로 시작한 응답) 승인 없이 쓸 수 있는 범위입니다. '물어보기'인 호출을 만나면 그 작업은 멈추고 알림을 보냅니다. MCP 도구는 서버가 읽기 전용이라고 밝힌 것만 읽기로 봅니다. 코드 실행은 가상 컴퓨터 MCP가 생기기 전까지 쓸 수 없습니다." : "What the agent may do without asking when you are not there (subagents, scheduled work, replies it starts itself). A call set to Ask pauses that work and notifies you. MCP tools count as reads only when the server marks them read-only. Code execution stays off until a virtual computer MCP exists."}</small>
       {providers.map(provider => { const current = rule(provider.id); const exceptions = Object.entries(current.tools || {}); return <div key={provider.id} className="agent-rule-row">
         <strong>{(() => { const Icon = RULE_ICONS[provider.icon] || Wrench; return <Icon size={15} />; })()}{provider.name}</strong>
@@ -302,23 +337,43 @@ function base64Key(value: string) {
   return Uint8Array.from(atob(padded), char => char.charCodeAt(0));
 }
 
+/** Why push cannot work here, or undefined when it can. */
+function pushSupport(ko: boolean): string | undefined {
+  if (typeof window === "undefined") return ko ? "지원하지 않습니다." : "Not supported.";
+  if (!window.isSecureContext) return ko ? "푸시 알림은 HTTPS 주소로 접속했을 때만 쓸 수 있습니다." : "Push notifications need an HTTPS address.";
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const standalone = window.matchMedia?.("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  if (ios && !standalone) return ko ? "iPhone·iPad에서는 Safari의 공유 > 홈 화면에 추가로 앱을 설치한 뒤, 그 앱에서만 알림을 받을 수 있습니다." : "On iPhone and iPad, add the app to the Home Screen (Share > Add to Home Screen) and enable notifications there.";
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) return ko ? "이 브라우저는 푸시 알림을 지원하지 않습니다. Chrome·Edge·Firefox 또는 설치한 앱에서 시도해 주세요." : "This browser does not support push notifications. Try Chrome, Edge, Firefox or the installed app.";
+  return undefined;
+}
+
 export async function currentPushSubscription(): Promise<PushSubscription | null | "unsupported"> {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator) || !("PushManager" in window) || !window.isSecureContext) return "unsupported";
   const registration = await navigator.serviceWorker.getRegistration();
   return registration ? registration.pushManager.getSubscription() : null;
 }
 
-async function setPushSubscription(enable: boolean, publicKey?: string): Promise<"on" | "off" | "denied" | "unsupported"> {
-  const current = await currentPushSubscription();
-  if (current === "unsupported") return "unsupported";
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string) {
+  return Promise.race([promise, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), ms))]);
+}
+
+/** Registers or removes this device and returns how many devices the account has. */
+async function setPushSubscription(enable: boolean, publicKey?: string): Promise<number> {
   if (!enable) {
-    if (current) { await api("/api/agent/push", { method: "DELETE", body: JSON.stringify({ endpoint: current.endpoint }) }).catch(() => undefined); await current.unsubscribe(); }
-    return "off";
+    const current = await currentPushSubscription();
+    if (current && current !== "unsupported") { const body = await api<{ devices: number }>("/api/agent/push", { method: "DELETE", body: JSON.stringify({ endpoint: current.endpoint }) }); await current.unsubscribe().catch(() => undefined); return body.devices; }
+    return (await api<{ devices: number }>("/api/agent/push")).devices;
   }
-  if (await Notification.requestPermission() !== "granted") return "denied";
-  const registration = await navigator.serviceWorker.getRegistration() ?? await navigator.serviceWorker.register("/sw.js");
+  // A subscription needs an active service worker; registering is harmless when one already runs.
+  await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+  const registration = await withTimeout(navigator.serviceWorker.ready, 15_000, "The service worker did not start. Reload the page and try again.");
   const key = publicKey || (await api<{ publicKey: string }>("/api/agent/push")).publicKey;
-  const subscription = current || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64Key(key) });
-  await api("/api/agent/push", { method: "POST", body: JSON.stringify(subscription.toJSON()) });
-  return "on";
+  let subscription = await registration.pushManager.getSubscription();
+  // A subscription made for another server key cannot receive this server's pushes.
+  const existingKey = subscription?.options.applicationServerKey ? btoa(String.fromCharCode(...new Uint8Array(subscription.options.applicationServerKey))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : undefined;
+  if (subscription && existingKey && existingKey !== key.replace(/=+$/, "")) { await subscription.unsubscribe().catch(() => undefined); subscription = null; }
+  subscription ??= await withTimeout(registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64Key(key) }), 20_000, "The browser's push service did not answer.");
+  const body = await api<{ devices: number }>("/api/agent/push", { method: "POST", body: JSON.stringify(subscription.toJSON()) });
+  return body.devices;
 }
