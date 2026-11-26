@@ -39,7 +39,9 @@ export async function PATCH(request: Request) {
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     const allowed = ["enabled", "modelId", "aliasBaseModelId", "reasoningPresetId", "subagentModelId", "heartbeatMinutes", "instructions", "compactPercent", "toolState", "toolRules", "timeZone", "locale", "language"];
     const merged = normalizeAgentSettings({ ...profile.settings, ...Object.fromEntries(Object.entries(body).filter(([key]) => allowed.includes(key))) });
-    if ("subagentModelId" in body && !body.subagentModelId) merged.subagentModelId = undefined;
-    return Response.json({ settings: updateAgentSettings(user.id, merged).settings });
+    const saved = updateAgentSettings(user.id, merged);
+    // An emptied choice clears the saved one, which a merge would otherwise keep.
+    if ("subagentModelId" in body && !body.subagentModelId && saved.settings.subagentModelId) { const { saveAgentSettings } = await import("@/lib/agent/store"); saveAgentSettings(user.id, { ...saved.settings, subagentModelId: undefined }); return Response.json({ settings: { ...saved.settings, subagentModelId: undefined } }); }
+    return Response.json({ settings: saved.settings });
   } catch (error) { return authErrorResponse(error); }
 }

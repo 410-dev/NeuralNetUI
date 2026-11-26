@@ -13,6 +13,7 @@ import { ImageLightbox } from "./image-lightbox";
 import { StorageUsageMeter } from "./storage-usage-meter";
 import { AccountBackupSettings, DataManagementSettings } from "./backup-settings";
 import { PlanSettings, WeightInput } from "./plan-settings";
+import { AgentControlPanel, AgentRunsDialog, AgentSettingsDialog, WorkboardDialog, type AgentState } from "./agent-panel";
 import { McpSettings } from "./mcp-settings";
 import { ArtifactCard } from "./artifact-viewer";
 import { SyntaxHighlightedCode } from "./syntax-highlighted-code";
@@ -46,7 +47,7 @@ import {
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
   Braces, Layers, LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Power, Upload, HardDrive,
   Palette, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Repeat2, Settings, Type, Zap, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge, Cable, Code2, Unlock,
-  RotateCcw, Video, LockKeyhole, ShieldAlert, Bot } from "lucide-react";
+  RotateCcw, Video, LockKeyhole, ShieldAlert, Bot, BellRing } from "lucide-react";
 import { Children, cloneElement, createContext, CSSProperties, FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -418,6 +419,26 @@ export default function Home() {
   const [storageOpen, setStorageOpen] = useState(false);
   // The Agent tab is a placeholder until the feature is designed: only the sidebar and model picker remain.
   const [agentOpen, setAgentOpen] = useState(false);
+  const [agentState, setAgentState] = useState<AgentState | null>(null);
+  const [agentDialog, setAgentDialog] = useState<{ kind: "settings" | "runs" | "memory" | "event" | "todo"; runId?: string } | null>(null);
+  const agentRevisionRef = useRef<number | undefined>(undefined);
+  const agentWatchingRef = useRef(false);
+  const agentSyncRef = useRef<() => void>(() => undefined);
+  const agentOpenRef = useRef(false);
+  agentOpenRef.current = agentOpen;
+  // While the agent is open: follow its state, and tell the server this device is looking so it does not push here.
+  useEffect(() => {
+    if (!agentOpen) return;
+    const deviceId = (() => { try { const saved = localStorage.getItem("neural-device-id"); if (saved) return saved; const created = uid("device"); localStorage.setItem("neural-device-id", created); return created; } catch { return "browser"; } })();
+    const report = (visible: boolean) => fetch("/api/agent/presence", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId, visible }), keepalive: true }).catch(() => undefined);
+    const visible = () => document.visibilityState === "visible";
+    const poll = window.setInterval(() => { if (visible()) agentSyncRef.current(); }, 3000);
+    const heartbeat = window.setInterval(() => { if (visible()) void report(true); }, 20_000);
+    const onVisibility = () => { void report(visible()); if (visible()) agentSyncRef.current(); };
+    void report(visible());
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { window.clearInterval(poll); window.clearInterval(heartbeat); document.removeEventListener("visibilitychange", onVisibility); void report(false); };
+  }, [agentOpen]);
   const [storagePickerOpen, setStoragePickerOpen] = useState(false);
   const [chatManagerOpen, setChatManagerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -539,6 +560,7 @@ export default function Home() {
         if (first) { selectedModelIdRef.current = first.id; setSelectedModelId(first.id); setSelectedPresetId(firstPreset?.id || ""); }
         const routeId = decodeURIComponent(window.location.pathname).match(/^\/chat\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
         if (routeId) await loadConversation(routeId, false, true);
+        else if (new URLSearchParams(window.location.search).get("agent") === "1") openAgent(true);
         else newChat(true);
       }).catch(() => setError("설정 또는 대화 기록을 불러오지 못했습니다."));
   }, [auth?.authenticated]);
@@ -548,10 +570,14 @@ export default function Home() {
     const navigateHistory = () => {
       const routeId = decodeURIComponent(window.location.pathname).match(/^\/chat\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
       if (routeId) void loadConversation(routeId, false, true);
+      else if (new URLSearchParams(window.location.search).get("agent") === "1") openAgent(true);
       else newChat(true);
     };
+    // A tapped agent notification asks an open window to show the agent.
+    const fromWorker = (event: MessageEvent) => { if (event.data?.type === "open-agent") openAgent(); };
     window.addEventListener("popstate", navigateHistory);
-    return () => window.removeEventListener("popstate", navigateHistory);
+    navigator.serviceWorker?.addEventListener("message", fromWorker);
+    return () => { window.removeEventListener("popstate", navigateHistory); navigator.serviceWorker?.removeEventListener("message", fromWorker); };
   }, [auth?.authenticated]);
 
   useEffect(() => {
@@ -985,7 +1011,7 @@ export default function Home() {
   }
 
   function newChat(replaceUrl = false, temporary = false) {
-    setAgentOpen(false);
+    agentOpenRef.current = false; setAgentOpen(false); setAgentDialog(null);
     setMainVisit(value => value + 1);
     abandonRef.current = true; abortRef.current?.abort();
     clearQueuedPrompts();
@@ -999,6 +1025,49 @@ export default function Home() {
     setDraftAttachments([]); setRenderedMessageCount(60); setIsGenerating(false); setPendingWait(null); setConversation(null); setMessages([]); setToolState(clearFunctionSelections); setDraft(""); setError(""); setMobileOpen(false);
     // Leaving a temporary chat discards it; the refresh tells the server it is no longer open.
     if (abandoned) void refreshHistories();
+  }
+
+  /** Opens the agent: its main chat takes the chat surface, with the control panel beside it. */
+  function openAgent(replaceUrl = false) {
+    newChat(replaceUrl);
+    agentOpenRef.current = true; setAgentOpen(true); setAgentState(null); agentRevisionRef.current = undefined; agentWatchingRef.current = false;
+    window.history.replaceState({}, "", "/?agent=1");
+    window.setTimeout(() => agentSyncRef.current(), 0);
+  }
+
+  /** Reads the agent's state; reloads its chat when something changed and follows a reply while one is being written. */
+  async function syncAgent() {
+    const response = await fetch(`/api/agent?language=${locale === "ko" ? "ko" : "en"}`, { cache: "no-store" }).catch(() => undefined);
+    if (!response?.ok) return;
+    const next = await response.json() as AgentState;
+    setAgentState(next);
+    if (!next.access.enabled || !next.conversationId) return;
+    if (next.settings?.modelId && agentRevisionRef.current === undefined && visibleModels.some(model => model.id === next.settings!.modelId)) { selectedModelIdRef.current = next.settings.modelId; setSelectedModelId(next.settings.modelId); }
+    const changed = agentRevisionRef.current !== next.revision;
+    agentRevisionRef.current = next.revision;
+    if (agentWatchingRef.current) return;
+    if (changed || !conversation) {
+      const loaded = await fetch(`/api/conversations/${next.conversationId}`, { cache: "no-store" }).then(item => item.ok ? item.json() as Promise<Conversation> : undefined).catch(() => undefined);
+      if (loaded && agentOpenRef.current) { setConversation(loaded); setMessages((loaded.branches.find(item => item.id === loaded.activeBranchId) || loaded.branches[0])?.messages || []); }
+      if (next.mainBusy && loaded && agentOpenRef.current) {
+        agentWatchingRef.current = true;
+        void watchChatJob(loaded, loaded.activeBranchId, true).finally(() => { agentWatchingRef.current = false; agentRevisionRef.current = undefined; agentSyncRef.current(); });
+      }
+    }
+  }
+  agentSyncRef.current = () => { void syncAgent(); };
+
+  /** The person's message to the agent: sent to the agent, which answers now or right after its current reply. */
+  async function sendAgentMessage(text: string, attachments: StoredAttachment[], requestModel: ModelConfig, presetId?: string) {
+    const userMessage: StoredMessage = { id: uid("user"), role: "user", content: text, attachments, createdAt: now() };
+    setDraft(""); setDraftAttachments([]); setMessages(current => [...current, userMessage]);
+    autoFollowThreadRef.current = true; setThreadAutoFollow(true);
+    try {
+      const response = await fetch("/api/agent/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: text, attachments: attachments.map(({ id }) => ({ id })), modelId: requestModel.id, aliasBaseModelId: requestModel.isAlias ? selectedAliasBase?.id : undefined, reasoningPresetId: presetId, toolState, clientContext: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: navigator.language, language: config.preferences.language } }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `요청에 실패했습니다 (${response.status})`);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); setMessages(current => current.filter(message => message.id !== userMessage.id)); setDraft(text); return; }
+    agentRevisionRef.current = undefined; await syncAgent();
   }
 
   function resetWorkspaceForAuthChange() {
@@ -1362,6 +1431,12 @@ export default function Home() {
       }
       setSwitchNoticeKey("");
     }
+    if (agentOpen) {
+      if (isGenerating && (!hasMessage || pendingChoice)) { await fetch("/api/agent/stop", { method: "POST" }).catch(() => undefined); return; }
+      if (!hasMessage || uploadingImages) return;
+      if (!requestModel) { setError(c.noModel); return; }
+      await sendAgentMessage(text, draftAttachments, requestModel, requestPreset?.id); return;
+    }
     if (isGenerating) {
       if (!hasMessage || pendingChoice) {
         const id = conversation?.id || pendingConversationIdRef.current;
@@ -1585,8 +1660,10 @@ export default function Home() {
   if (!auth.authenticated) return <AuthScreen setup={auth.setupRequired} onAuthenticated={async () => setAuth(await fetch("/api/auth/status").then((response) => response.json()))} />;
 
   const visibleHistory = histories;
-  const hiddenMessageCount = Math.max(0, messages.length - renderedMessageCount);
-  const renderedMessages = hiddenMessageCount ? messages.slice(-renderedMessageCount) : messages;
+  // In the agent chat, results only the model reads stay out of the transcript.
+  const visibleTranscript = agentOpen ? messages.filter(message => message.agentKind !== "context") : messages;
+  const hiddenMessageCount = Math.max(0, visibleTranscript.length - renderedMessageCount);
+  const renderedMessages = hiddenMessageCount ? visibleTranscript.slice(-renderedMessageCount) : visibleTranscript;
   function loadEarlierMessages() {
     const element = threadRef.current; const previousHeight = element?.scrollHeight || 0;
     setRenderedMessageCount((count) => Math.min(messages.length, count + 60));
@@ -1643,7 +1720,7 @@ export default function Home() {
           <div className="new-chat-halo"><button className="pill-button primary-nav" title={c.newChat} aria-label={c.newChat} onClick={() => newChat()}><MessageSquarePlus size={19} /> <span>{c.newChat}</span></button></div>
           <button className="pill-button" title={c.search} aria-label={c.search} onClick={() => setSearching(true)}><Search size={18} /> <span>{c.search}</span></button>
           <button className="pill-button" title={c.storageManager} aria-label={c.storageManager} onClick={() => { setStorageOpen(true); setMobileOpen(false); }}><HardDrive size={18} /> <span>{c.storageManager}</span></button>
-          <button className={`pill-button ${agentOpen ? "active" : ""}`} title={c.agent} aria-label={c.agent} aria-pressed={agentOpen} onClick={() => { setAgentOpen(true); setMobileOpen(false); }}><Bot size={18} /> <span>{c.agent}</span></button>
+          <button className={`pill-button ${agentOpen ? "active" : ""}`} title={c.agent} aria-label={c.agent} aria-pressed={agentOpen} onClick={() => { openAgent(); setMobileOpen(false); }}><Bot size={18} /> <span>{c.agent}</span></button>
           <div className="history-heading"><p className="section-label">{c.histories}</p><div>{(conversation || histories.length > 0) && <button onClick={() => setExportOpen(true)} title={conversation ? c.exportChat : c.exportAllChats} aria-label={conversation ? c.exportChat : c.exportAllChats}><Download size={15} /></button>}{histories.length > 0 && <button onClick={() => void deleteAllHistories()} title={c.deleteAllChats} aria-label={c.deleteAllChats}><Trash2 size={15} /></button>}</div></div>
           <div className="history-list">
             {visibleHistory.map((item, index) => <HistoryRow key={item.id} item={item} active={item.id === conversation?.id} afterPinned={!item.pinnedAt && index > 0 && Boolean(visibleHistory[index - 1].pinnedAt)} revealed={revealedHistoryId === item.id} onReveal={(value) => setRevealedHistoryId(value ? item.id : "")} c={c} locale={locale} onOpen={() => loadConversation(item.id)} onPin={() => void toggleHistoryPin(item)} onRename={() => setRenameTarget(item)} onDelete={() => void deleteHistory(item.id)} />)}
@@ -1655,7 +1732,7 @@ export default function Home() {
       </aside>
       {mobileOpen && <button className="mobile-scrim" aria-label={c.closeMenu} onClick={() => setMobileOpen(false)} />}
 
-      <section className="chat-surface">
+      <section className={`chat-surface ${agentOpen && agentState?.access.enabled ? "agent-mode" : ""}`}>
         <div className="ambient-glow" />
         <div className="model-switcher">
           <button className="model-trigger" onClick={() => { if (!modelMenuOpen) setModelControlNotice(null); setModelMenuOpen((value) => !value); }}><span>{serversOffline ? c.serverOffline : selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
@@ -1663,8 +1740,9 @@ export default function Home() {
           {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span>{checkingModelServers ? <LoaderCircle className="spin" size={13} aria-label={c.checkingModelServers} /> : <small>{onlineModels.length}</small>}</div>{!checkingModelServers && serversOffline && <p className="model-popover-empty">{c.noOnlineModels}</p>}{pickerModels.map(renderPickerModel)}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
         </div>
 
-        {agentOpen ? <div className="conversation-stage agent-stage"><div className="idle-center"><div className="welcome"><h1>{locale === "ko" ? "곧 찾아옵니다" : "Coming soon"}</h1></div></div></div> : <>
-        <div className="surface-actions">
+        {agentOpen && !agentState?.access.enabled ? <div className="conversation-stage agent-stage"><div className="idle-center"><div className="welcome">{agentState ? <><h1>{locale === "ko" ? "에이전트를 쓸 수 없습니다" : "The agent is not available"}</h1><p>{locale === "ko" ? "지금 플랜에서는 에이전트가 꺼져 있습니다. 관리자에게 문의해 주세요." : "Your plan does not include the agent. Ask an administrator."}</p></> : <LoaderCircle className="spin" size={22} />}</div></div></div> : <>
+        {agentOpen && agentState && <AgentControlPanel ko={locale === "ko"} state={agentState} cache={lmfCache && lmfCache.conversationId === conversation?.id ? lmfCache : undefined} onChanged={() => { agentRevisionRef.current = undefined; agentSyncRef.current(); }} onOpen={(target, runId) => { if (target === "context") { setContextViewOpen(true); void refreshContextState(); } else setAgentDialog({ kind: target, runId }); }} />}
+        {!agentOpen && <div className="surface-actions">
           {temporaryActive
             ? conversation?.temporary !== true && messages.length === 0
               ? <button className="surface-action active icon-only" title={c.returnToRegularChat} aria-label={c.returnToRegularChat} onClick={() => setTemporaryMode(false)}><MessageSquareDashed size={16} /></button>
@@ -1673,15 +1751,15 @@ export default function Home() {
               ? <button type="button" className={`surface-action icon-only ${contextViewOpen ? "active" : ""}`} title={locale === "ko" ? "모델에게 전달될 컨텍스트" : "Model context"} aria-label={locale === "ko" ? "모델에게 전달될 컨텍스트" : "Model context"} aria-pressed={contextViewOpen} onClick={() => { setContextViewOpen(value => !value); if (!contextViewOpen) void refreshContextState(); }}><Layers size={16} /></button>
               : <button className="surface-action icon-only" title={c.temporaryChat} aria-label={c.temporaryChat} onClick={() => newChat(false, true)}><MessageSquareDashed size={16} /></button>}
           {messages.length > 0 && conversation && <button type="button" className={`surface-action icon-only ${activityHidden ? "active" : ""}`} title={activityHidden ? c.showActivity : c.hideActivity} aria-label={activityHidden ? c.showActivity : c.hideActivity} aria-pressed={activityHidden} onClick={() => setHiddenActivityChats((current) => ({ ...current, [conversation.id]: !current[conversation.id] }))}>{activityHidden ? <EyeOff size={16} /> : <Eye size={16} />}</button>}
-        </div>
+        </div>}
 
         <div className="conversation-stage">
-          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} organizationNotice={config.organizationMode === true && !temporaryActive} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} lmfCache={lmfCache && lmfCache.modelId === selectedModel?.id && lmfCache.conversationId === conversation?.id ? lmfCache : undefined} onContextOpen={() => { if (!isGenerating) void refreshRouting(selectedModel?.id, selectedAliasBase?.id, conversation?.id, "next"); }} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} notice={notice} clearNotice={() => setNotice("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingApproval={pendingApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} /></div> : <>
+          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{agentOpen ? (locale === "ko" ? "무엇을 맡길까요?" : "What should I take care of?") : temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{agentOpen ? (locale === "ko" ? "일정·메일 확인, 알림 예약, 사이트·채널 추적처럼 계속 돌봐야 하는 일을 맡겨 보세요." : "Hand over ongoing work: checking schedules and mail, reminders, watching sites and channels.") : temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} organizationNotice={config.organizationMode === true && !temporaryActive} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} lmfCache={lmfCache && lmfCache.modelId === selectedModel?.id && lmfCache.conversationId === conversation?.id ? lmfCache : undefined} onContextOpen={() => { if (!isGenerating) void refreshRouting(selectedModel?.id, selectedAliasBase?.id, conversation?.id, "next"); }} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} notice={notice} clearNotice={() => setNotice("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingApproval={pendingApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} /></div> : <>
             <div className="thread-shell">
               <div className={`thread ${activityHidden ? "activity-hidden" : ""}`} ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
                 {contextViewOpen ? <ContextView ko={locale === "ko"} messages={messages} state={branchContext} includeReasoning={rememberReasoning} systemPrompt={selectedSystemPrompt} summaryEditing={contextSummaryEditing} setSummaryEditing={setContextSummaryEditing} onSave={saveContextState} confirm={askConfirm} onClose={() => setContextViewOpen(false)} /> : <>
                 {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
-                {renderedMessages.map((message) => <Message c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} waitStartedAt={pendingWait?.messageId === message.id ? pendingWait.startedAt : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={editUserRequest} onEditAssistant={editAssistantResponse} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
+                {renderedMessages.map((message) => <Message agentMode={agentOpen} c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} waitStartedAt={pendingWait?.messageId === message.id ? pendingWait.startedAt : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={editUserRequest} onEditAssistant={editAssistantResponse} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
                 {manualCompaction && manualCompaction.key === `${conversation?.id}:${activeBranch?.id}` && <div className="message-row assistant-message manual-compaction"><CompactionStep c={c} locale={locale} step={manualCompaction.step} live={manualCompaction.live} /></div>}
                 </>}
               </div>
@@ -1694,6 +1772,11 @@ export default function Home() {
 
 
       {searching && <HistorySearch ko={locale === "ko"} onClose={() => setSearching(false)} onSelect={(id, branchId) => { setSearching(false); void loadConversation(id, true, false, branchId); }} />}
+      {agentDialog && agentState?.settings && (agentDialog.kind === "settings"
+        ? <AgentSettingsDialog ko={locale === "ko"} state={agentState} models={visibleModels} onClose={() => setAgentDialog(null)} onSaved={() => { agentRevisionRef.current = undefined; agentSyncRef.current(); }} />
+        : agentDialog.kind === "runs"
+          ? <AgentRunsDialog ko={locale === "ko"} initialRunId={agentDialog.runId} onClose={() => setAgentDialog(null)} onChanged={() => agentSyncRef.current()} />
+          : <WorkboardDialog ko={locale === "ko"} initialKind={agentDialog.kind} onClose={() => setAgentDialog(null)} onChanged={() => agentSyncRef.current()} />)}
       {storageOpen && <StorageManager ko={locale === "ko"} onClose={() => setStorageOpen(false)} onOpenConversation={id=>void loadConversation(id)} onConversationsChanged={()=>void managedChatsChanged()} />}
       {storagePickerOpen && <StorageManager ko={locale === "ko"} selectMode maxSelectable={Math.max(0,config.toolSettings.maxAttachmentsPerMessage-draftAttachments.length)} onSelect={attachStoredFiles} onClose={() => setStoragePickerOpen(false)} />}
       {chatManagerOpen&&<ChatManager
@@ -2284,7 +2367,7 @@ function ChatMarkdown({ text, c, renderStrikethrough, onImagePreview, fadeDurati
   return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: true }], remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>{text}</ReactMarkdown>;
 }
 
-function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, renderStrikethrough, appearance, pending, revisions, onFork, onEditAssistant,onEditArtifact, onRegenerate, onRegenerateUser, onDeleteUser, onRevision }: { c: CopySet; locale: Locale; message: StoredMessage; waitPhase?: ChatWaitPhase; waitStartedAt?: number; waitProgress?: number; renderStrikethrough: boolean; appearance: AppearancePreferences; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void;onEditArtifact:(eventId:string,artifact:ArtifactDocument)=>void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
+function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, renderStrikethrough, appearance, pending, revisions, onFork, onEditAssistant,onEditArtifact, onRegenerate, onRegenerateUser, onDeleteUser, onRevision, agentMode = false }: { agentMode?: boolean; c: CopySet; locale: Locale; message: StoredMessage; waitPhase?: ChatWaitPhase; waitStartedAt?: number; waitProgress?: number; renderStrikethrough: boolean; appearance: AppearancePreferences; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void;onEditArtifact:(eventId:string,artifact:ArtifactDocument)=>void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [imagePreview,setImagePreview]=useState<{src:string;alt:string}>();
@@ -2298,7 +2381,7 @@ function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, r
     ? createPortal(<MobileMessageActions c={c} locale={locale} role={message.role} canCopy={Boolean(message.content)} onClose={() => setMobileActionsOpen(false)} onRegenerate={regenerateMessage} onEdit={editMessage} onCopy={() => void copyMessage()} onDelete={message.role === "user" ? () => { setMobileActionsOpen(false); onDeleteUser(message.id); } : undefined} />, document.body)
     : null;
 
-  if (message.role === "user") return <div className="message-row user-message" data-message-id={message.id}><div className="user-message-actions"><div className="user-message-toolbar"><button title={c.regenerateRequest} aria-label={c.regenerateRequest} onClick={() => onRegenerateUser(message.id)}><RefreshCw size={13} /></button>{message.content && <button title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={13} /></button>}<button title={c.editBranch} aria-label={c.editBranch} onClick={() => setEditing(true)}><Pencil size={13} /></button><button className="delete" title={c.deleteMessage} aria-label={c.deleteMessage} onClick={() => onDeleteUser(message.id)}><Trash2 size={13} /></button></div><div className="user-message-stack long-press-target" {...longPress}><div className="user-message-content">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}{message.content && <div className="message-bubble">{message.content}</div>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /></div></div>{editing && <TextDialog ko={locale === "ko"} title={c.editMessage} value={message.content} multiline saveLabel={c.forkSend} saveIcon={<GitBranch size={14} />} cancelLabel={c.cancel} preface={message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null} onClose={() => setEditing(false)} onSave={(value) => { if (value !== message.content) onFork(message.id, value); setEditing(false); }} />}{actions}</div>;
+  if (message.role === "user") return <div className="message-row user-message" data-message-id={message.id}><div className="user-message-actions"><div className="user-message-toolbar">{!agentMode && <button title={c.regenerateRequest} aria-label={c.regenerateRequest} onClick={() => onRegenerateUser(message.id)}><RefreshCw size={13} /></button>}{message.content && <button title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={13} /></button>}{!agentMode && <><button title={c.editBranch} aria-label={c.editBranch} onClick={() => setEditing(true)}><Pencil size={13} /></button><button className="delete" title={c.deleteMessage} aria-label={c.deleteMessage} onClick={() => onDeleteUser(message.id)}><Trash2 size={13} /></button></>}</div><div className="user-message-stack long-press-target" {...longPress}><div className="user-message-content">{message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null}{message.content && <div className="message-bubble">{message.content}</div>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /></div></div>{editing && <TextDialog ko={locale === "ko"} title={c.editMessage} value={message.content} multiline saveLabel={c.forkSend} saveIcon={<GitBranch size={14} />} cancelLabel={c.cancel} preface={message.attachments?.length ? <AttachmentGrid attachments={message.attachments} /> : null} onClose={() => setEditing(false)} onSave={(value) => { if (value !== message.content) onFork(message.id, value); setEditing(false); }} />}{actions}</div>;
   const steps = displaySteps(transcriptSteps(message), (ids) => formatToolCallMarkers(stepToolEvents(ids, message.toolEvents), locale));
   const liveContentIndex = lastContentStep(steps);
   // A prompt stage running now belongs to the last thinking block when no answer text has come after it, since the
@@ -2328,7 +2411,7 @@ function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, r
     {waitStatus}
     {!steps.length && (pending && !waitingForChoice && !waitPhase ? <div className="assistant-copy markdown-body"><span className="typing"><i /><i /><i /></span></div> : null)}
     {editing && <TextDialog ko={locale === "ko"} title={c.editResponse} value={message.content} multiline saveLabel={c.saveEdit} saveIcon={<Check size={14} />} cancelLabel={c.cancel} onClose={() => setEditing(false)} onSave={(value) => { onEditAssistant(message.id, value); setEditing(false); }} />}
-    {!pending && <div className="assistant-footer"><div className="assistant-actions"><button className="message-action-button" title={c.regenerate} aria-label={c.regenerate} onClick={() => onRegenerate(message.id)}><RefreshCw size={14} /></button>{message.content && <button className="message-action-button" title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={14} /></button>}<button className="message-action-button" title={c.editResponse} aria-label={c.editResponse} onClick={() => setEditing(true)}><Pencil size={14} /></button></div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /><MessageTokenStats c={c} locale={locale} message={message} /></div>}
+    {!pending && <div className="assistant-footer"><div className="assistant-actions">{agentMode && message.agentKind === "notice" && <span className="agent-notice-badge"><BellRing size={12} />{locale === "ko" ? "에이전트 알림" : "Agent notice"}</span>}{!agentMode && <button className="message-action-button" title={c.regenerate} aria-label={c.regenerate} onClick={() => onRegenerate(message.id)}><RefreshCw size={14} /></button>}{message.content && <button className="message-action-button" title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={14} /></button>}{!agentMode && <button className="message-action-button" title={c.editResponse} aria-label={c.editResponse} onClick={() => setEditing(true)}><Pencil size={14} /></button>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /><MessageTokenStats c={c} locale={locale} message={message} /></div>}
     {actions}{imagePreview&&<ImageLightbox src={imagePreview.src} alt={imagePreview.alt} onClose={()=>setImagePreview(undefined)}/>}
   </div>;
 }
@@ -2896,6 +2979,7 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
           <button type="button" className="backup-url-add" disabled={(activeConnection.backupUrls || []).length >= 16} onClick={() => patchConnection(activeConnection.id, { backupUrls: [...(activeConnection.backupUrls || []), ""] })}>{locale === "ko" ? "+ 보조 서버 추가" : "+ Add backup server"}</button>
           <small>{locale === "ko" ? "같은 모델을 서빙하는 서버를 추가합니다. 모두 온라인이면 작업 중이 아니고 처리한 입출력 토큰이 가장 적은 서버로 보내고, 그렇지 않으면 기본 URL부터 순서대로 온라인인 첫 서버로 보냅니다." : "Add servers that serve the same models. When all are online, requests go to the one that is idle and has handled the fewest input and output tokens; otherwise to the first online server, starting with the base URL."}</small>
         </div>
+        <label className="field"><span>{draft.preferences.language === "ko" ? "동시 요청 수" : "Concurrent requests"}</span><input type="number" min={0} max={64} step={1} inputMode="numeric" value={activeConnection.maxConcurrentRequests ?? 1} onChange={(event) => patchConnection(activeConnection.id, { maxConcurrentRequests: Math.min(64, Math.max(0, Math.floor(Number(event.target.value) || 0))) })} /><small>{draft.preferences.language === "ko" ? "이 서버가 한 번에 처리할 수 있는 요청 수입니다. 0은 제한 없음으로, 에이전트가 서브에이전트를 병렬로 실행합니다. 1 이상이면 그 수만큼만 동시에 실행합니다." : "How many requests this server handles at once. 0 means no limit, and the agent runs subagents in parallel; a positive number runs at most that many at once."}</small></label>
         {activeConnection.driver !== "lmf" && <><label className="field"><span>{draft.preferences.language === "ko" ? "최대 모델 상주 한도" : "Maximum resident models"}</span><input type="number" min={0} max={128} step={1} inputMode="numeric" value={activeConnection.maxResidentModels || 0} onChange={(event) => patchConnection(activeConnection.id, { maxResidentModels: Math.min(128, Math.max(0, Math.floor(Number(event.target.value) || 0))) })} /><small>{draft.preferences.language === "ko" ? "0은 제한 없음입니다. 한도를 설정하면 필요할 때 모델을 로드하고, 사용 중이지 않은 모델 중 사용 횟수가 가장 적은 모델부터 교체합니다. 모델 관리 API가 필요합니다." : "0 means unlimited. A positive limit loads models as needed and replaces the least-used idle model. Requires a model-management API."}</small></label>
         <label className="field"><span>{draft.preferences.language === "ko" ? "다른 세션 실행 중 대기 방식" : "Wait policy while other sessions are running"}</span><SelectMenu label={draft.preferences.language === "ko" ? "다른 세션 실행 중 대기 방식" : "Wait policy while other sessions are running"} value={activeConnection.modelWaitPolicy || "capacity"} options={[{ value: "capacity", label: draft.preferences.language === "ko" ? "교체 후보가 모두 사용 중일 때만 대기" : "Wait only when all eviction candidates are busy" }, { value: "serial", label: draft.preferences.language === "ko" ? "다른 세션이 실행 중이면 항상 대기" : "Always wait for other sessions to finish" }]} onChange={(value) => patchConnection(activeConnection.id, { modelWaitPolicy: value as "capacity" | "serial" })} /><small>{draft.preferences.language === "ko" ? "이 앱의 모든 사용자와 대화에 적용됩니다. Alias는 기반 모델과 상주 공간을 공유합니다." : "Applies across all users and conversations in this app. Aliases share residency with their base model."}</small></label></>}
         {activeConnection.driver === "lmf" && (() => { const discountOn = activeConnection.lmfCacheDiscount !== false; return <><div className="model-visibility-row"><div><strong>{draft.preferences.language === "ko" ? "세션·캐시 사용량 할인" : "Session and cache usage discount"}</strong><small>{draft.preferences.language === "ko" ? "채팅마다 LMFuseFramework 세션을 이어 쓰고, 서버가 캐시에서 읽었다고 알린 입력 토큰은 플랜 사용량에서 아래 비율만큼 할인합니다. 끄면 모든 입력 토큰을 그대로 계산합니다." : "Each chat continues an LMFuseFramework session. Input tokens the server reports as read from cache are discounted in plan usage by the rate below. When off, every input token counts in full."}</small></div><button role="switch" aria-label={draft.preferences.language === "ko" ? "세션·캐시 사용량 할인" : "Session and cache usage discount"} aria-checked={discountOn} className={`toggle ${discountOn ? "on" : ""}`} onClick={() => patchConnection(activeConnection.id, { lmfCacheDiscount: !discountOn })}><i /></button></div><label className="field"><span>{draft.preferences.language === "ko" ? "캐시 토큰 할인율 (%)" : "Cached token discount (%)"}</span><input type="number" min={0} max={100} step={1} inputMode="numeric" disabled={!discountOn} value={activeConnection.lmfCacheDiscountPercent ?? 90} onChange={(event) => patchConnection(activeConnection.id, { lmfCacheDiscountPercent: Math.min(100, Math.max(0, Math.round(Number(event.target.value) || 0))) })} /><small>{draft.preferences.language === "ko" ? "캐시에서 읽은 입력 토큰 하나를 몇 % 덜 계산할지 정합니다. 기본값 90%는 캐시 토큰을 10%만 계산합니다." : "How much less each cached input token counts. The default 90% counts cached tokens at 10%."}</small></label><label className="field"><span>{draft.preferences.language === "ko" ? "세션 유지 시간 (시간)" : "Session lifetime (hours)"}</span><input type="number" min={1} max={8760} step={1} inputMode="numeric" value={activeConnection.lmfSessionTtlHours ?? 24} onChange={(event) => patchConnection(activeConnection.id, { lmfSessionTtlHours: Math.min(8760, Math.max(1, Math.round(Number(event.target.value) || 1))) })} /><small>{draft.preferences.language === "ko" ? "채팅이 이 시간 안에 이어지지 않으면 LMFuseFramework 서버에서 그 채팅의 세션을 삭제합니다. 채팅은 그대로 남고, 다음 메시지부터 새 세션이 대화 전체를 받아 이어 갑니다. 채팅을 삭제하면 세션도 바로 삭제합니다." : "When a chat is not continued within this time, its session is deleted on the LMFuseFramework server. The chat stays; its next message opens a new session from the full history. Deleting a chat deletes its session right away."}</small></label></>; })()}

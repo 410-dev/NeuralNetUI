@@ -13,3 +13,31 @@ self.addEventListener("fetch", event => {
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
   })));
 });
+
+// Agent notifications. Every device receives them; a "close" message, sent once the person looks at the agent on
+// any device, replaces the notification under the same tag and closes it so it disappears everywhere.
+self.addEventListener("push", event => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data ? event.data.text() : "" }; }
+  const tag = data.tag || "neuralnetui-agent";
+  event.waitUntil((async () => {
+    if (data.close) {
+      // Browsers expect a visible notification for each push, so a silent replacement is shown and closed at once.
+      await self.registration.showNotification(data.title || "Neural Chat", { tag, silent: true, renotify: false });
+      for (const notification of await self.registration.getNotifications({ tag })) notification.close();
+      return;
+    }
+    await self.registration.showNotification(data.title || "Neural Chat", { body: data.body || "", tag, renotify: true, icon: "/pwa/icon-192.png", badge: "/pwa/icon-192.png", data: { url: data.url || "/?agent=1" } });
+  })());
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || "/?agent=1", self.location.origin).href;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const existing = windows.find(client => new URL(client.url).origin === self.location.origin);
+    if (existing) { await existing.focus(); existing.postMessage({ type: "open-agent" }); return; }
+    await self.clients.openWindow(url);
+  })());
+});

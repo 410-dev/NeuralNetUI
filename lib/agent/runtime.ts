@@ -64,10 +64,11 @@ export async function ensureAgent(userId: string, language?: "ko" | "en"): Promi
 export function updateAgentSettings(userId: string, patch: Partial<AgentSettings>) {
   const profile = readAgentProfile(userId);
   if (!profile) throw Object.assign(new Error("The agent has not been set up."), { status: 404 });
-  const settings = { ...profile.settings, ...patch };
+  // Fields a caller leaves out (undefined) keep their saved values.
+  const settings = { ...profile.settings, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) };
   saveAgentSettings(userId, settings);
   // A shorter interval takes effect now rather than after the old one.
-  if (patch.heartbeatMinutes !== undefined || patch.enabled !== undefined) setAgentHeartbeat(userId, null);
+  if ((patch.heartbeatMinutes !== undefined && patch.heartbeatMinutes !== profile.settings.heartbeatMinutes) || (patch.enabled !== undefined && patch.enabled !== profile.settings.enabled)) setAgentHeartbeat(userId, null);
   markAgentChanged(userId);
   return readAgentProfile(userId)!;
 }
