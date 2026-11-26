@@ -9,7 +9,9 @@ import { useModalTransition } from "@/lib/use-modal-focus";
 // mark and the accent: irreversible work reads as danger, recoverable work as warning.
 export type MessageTone = "danger" | "warning" | "info" | "success";
 export type MessageChoice = { id: string; label: string; quiet?: boolean };
-export type MessageRequest = { tone?: MessageTone; title: string; message?: string; detail?: string; confirmLabel?: string; cancelLabel?: string; choices?: MessageChoice[] };
+/** A required free-text answer collected by `prompt`; the confirming action stays disabled until it is filled. */
+export type MessageInput = { label: string; placeholder?: string; maxLength?: number };
+export type MessageRequest = { tone?: MessageTone; title: string; message?: string; detail?: string; confirmLabel?: string; cancelLabel?: string; choices?: MessageChoice[]; input?: MessageInput };
 
 const TONE_MARKS: Record<MessageTone, ReactNode> = {
   danger: <TriangleAlert size={19} />,
@@ -18,23 +20,25 @@ const TONE_MARKS: Record<MessageTone, ReactNode> = {
   success: <CircleCheck size={19} />,
 };
 
-export function MessageDialog({ tone = "info", title, message, detail, choices, cancelLabel, onChoose, onClose }: MessageRequest & { onChoose: (id: string) => void; onClose: () => void }) {
+export function MessageDialog({ tone = "info", title, message, detail, choices, cancelLabel, input, onChoose, onClose }: MessageRequest & { onChoose: (id: string, text?: string) => void; onClose: () => void }) {
   const { ref, close, closing } = useModalTransition(onClose);
+  const [text, setText] = useState("");
   return createPortal(<div ref={ref} tabIndex={-1} className={`message-dialog-layer tone-${tone} ${closing ? "modal-closing" : ""}`} role="alertdialog" aria-modal="true" aria-label={title}>
     <button className="settings-backdrop" tabIndex={-1} onClick={() => close()} aria-label={title} />
     <section className="message-dialog">
       <header><span className="message-dialog-mark">{TONE_MARKS[tone]}</span><h2>{title}</h2></header>
       {message && <p className="message-dialog-body">{message}</p>}
       {detail && <p className="message-dialog-detail">{detail}</p>}
+      {input && <label className="field message-dialog-input"><span>{input.label}</span><textarea data-autofocus rows={4} value={text} maxLength={input.maxLength} placeholder={input.placeholder} onChange={(event) => setText(event.target.value)} /></label>}
       <footer>
         {cancelLabel && <button type="button" className="secondary-button" onClick={() => close()}>{cancelLabel}</button>}
-        {(choices || []).map((choice) => <button key={choice.id} type="button" className={choice.quiet ? "secondary-button" : "message-dialog-confirm"} onClick={() => close(() => onChoose(choice.id))}>{choice.label}</button>)}
+        {(choices || []).map((choice) => <button key={choice.id} type="button" disabled={Boolean(input && !choice.quiet && !text.trim())} className={choice.quiet ? "secondary-button" : "message-dialog-confirm"} onClick={() => close(() => onChoose(choice.id, input ? text.trim() : undefined))}>{choice.label}</button>)}
       </footer>
     </section>
   </div>, document.body);
 }
 
-type PendingMessage = MessageRequest & { resolve: (value: string) => void };
+type PendingMessage = MessageRequest & { resolve: (value: string, text?: string) => void };
 
 /**
  * `confirm` resolves true only when the confirming action is taken, `choose` names which action was
@@ -44,12 +48,17 @@ type PendingMessage = MessageRequest & { resolve: (value: string) => void };
 export function useMessageDialog(ko: boolean) {
   const [pending, setPending] = useState<PendingMessage | null>(null);
   const request = useCallback((value: MessageRequest) => new Promise<string>((resolve) => setPending({ ...value, resolve })), []);
+  /** Resolves the entered text when confirmed, or undefined when dismissed. */
+  const prompt = useCallback((value: MessageRequest & { input: MessageInput }) => new Promise<string | undefined>((resolve) => setPending({
+    cancelLabel: ko ? "취소" : "Cancel", ...value, choices: [{ id: "confirm", label: value.confirmLabel || (ko ? "확인" : "Confirm") }],
+    resolve: (id, text) => resolve(id === "confirm" && text ? text : undefined),
+  })), [ko]);
   const choose = useCallback((value: MessageRequest & { choices: MessageChoice[] }) => request({ cancelLabel: ko ? "취소" : "Cancel", ...value }), [ko, request]);
   const confirm = useCallback(async (value: MessageRequest) => await request({
     cancelLabel: ko ? "취소" : "Cancel", ...value, choices: [{ id: "confirm", label: value.confirmLabel || (ko ? "확인" : "Confirm") }],
   }) === "confirm", [ko, request]);
   const notify = useCallback((value: MessageRequest) => request({ ...value, cancelLabel: undefined, choices: [{ id: "close", label: value.confirmLabel || (ko ? "닫기" : "Close") }] }), [ko, request]);
-  const settle = (value: string) => { const current = pending; setPending(null); current?.resolve(value); };
+  const settle = (value: string, text?: string) => { const current = pending; setPending(null); current?.resolve(value, text); };
   const dialog = pending
     ? <MessageDialog
         tone={pending.tone}
@@ -58,9 +67,10 @@ export function useMessageDialog(ko: boolean) {
         detail={pending.detail}
         choices={pending.choices}
         cancelLabel={pending.cancelLabel}
+        input={pending.input}
         onChoose={settle}
         onClose={() => settle("")}
       />
     : null;
-  return { dialog, confirm, choose, notify };
+  return { dialog, confirm, choose, notify, prompt };
 }
