@@ -30,28 +30,28 @@ export async function POST(request: Request) {
       for (const instanceId of instanceIds) { const response = await fetch(lmStudioEndpoint(connection.baseUrl, "unload"), { method: "POST", headers, body: JSON.stringify({ instance_id: instanceId }), signal: AbortSignal.timeout(300_000), cache: "no-store" }); if (!response.ok) throw new Error((await response.text()) || `Model unload failed with ${response.status}`); }
       return NextResponse.json({ ok: true });
     }
-    const statusResponse = await fetch(inferenceEndpoint(connection.baseUrl, "status"), {
-      headers,
-      signal: AbortSignal.timeout(30_000),
-      cache: "no-store",
-    });
-    const statusDetail = await statusResponse.text();
-    if (!statusResponse.ok) throw new Error(statusDetail || `Model status failed with ${statusResponse.status}`);
+    // OpenAI-compatible servers may not implement the optional status/unload endpoints; that is not an error.
+    const unsupported = () => NextResponse.json({ ok: true, unsupported: true });
     let status: unknown;
-    try { status = JSON.parse(statusDetail); }
-    catch { throw new Error("The inference server returned an invalid model status response."); }
+    try {
+      const statusResponse = await fetch(inferenceEndpoint(connection.baseUrl, "status"), { headers, signal: AbortSignal.timeout(30_000), cache: "no-store" });
+      if (!statusResponse.ok) { await statusResponse.body?.cancel().catch(() => undefined); return unsupported(); }
+      status = JSON.parse(await statusResponse.text());
+    } catch { return unsupported(); }
     const modelPath = loadedModelIdentifier(status);
     if (!modelPath) return NextResponse.json({ ok: true, alreadyUnloaded: true });
 
-    const response = await fetch(inferenceEndpoint(connection.baseUrl, "unload"), {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ model_path: modelPath }),
-      signal: AbortSignal.timeout(300_000),
-      cache: "no-store",
-    });
-    const detail = await response.text();
-    if (!response.ok) throw new Error(detail || `Model unload failed with ${response.status}`);
+    try {
+      const response = await fetch(inferenceEndpoint(connection.baseUrl, "unload"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ model_path: modelPath }),
+        signal: AbortSignal.timeout(300_000),
+        cache: "no-store",
+      });
+      await response.text();
+      if (!response.ok) return unsupported();
+    } catch { return unsupported(); }
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (error && typeof error === "object" && "status" in error) return authErrorResponse(error);
