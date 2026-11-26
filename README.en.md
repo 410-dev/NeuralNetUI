@@ -6,7 +6,7 @@ A self-hosted chat UI for working with local and remote OpenAI-compatible infere
 
 ![NeuralNetUI](neuralnetui.png)
 
-`1.0` · Node.js 22+ · Next.js 16 · SQLite
+`2.0-devel` · Node.js 22+ · Next.js 16 · SQLite
 
 ## Features
 
