@@ -539,6 +539,21 @@ function openDatabase() {
     if (!columns.some(column => column.name === "disabled_tool_ids")) connection.exec("ALTER TABLE plans ADD COLUMN disabled_tool_ids TEXT NOT NULL DEFAULT '[]';");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(28, new Date().toISOString());
   })();
+  const auditUnlockVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (auditUnlockVersion.version < 29) connection.transaction(() => {
+    // Outside organization mode an auditor must state a reason to open a user's records; the user is told on their next visit.
+    connection.exec(`CREATE TABLE IF NOT EXISTS audit_unlocks (
+        id TEXT PRIMARY KEY,
+        actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+        target_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        reason TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        acknowledged_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS audit_unlocks_target_idx ON audit_unlocks(target_user_id, created_at DESC);`);
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(29, new Date().toISOString());
+  })();
   return connection;
 }
 

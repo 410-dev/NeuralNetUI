@@ -1547,6 +1547,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .message-dialog-confirm { height: 38px; padding: 0 18px; border-radius: var(--radius-pill); color: white; background: var(--tone); font-size: 12px; transition: filter .16s, transform .2s var(--spring); }
 .message-dialog-layer.tone-warning .message-dialog-confirm, .message-dialog-layer.tone-success .message-dialog-confirm { color: #17171b; }
 .message-dialog-confirm:hover { filter: brightness(1.08); }
+.message-dialog-confirm:disabled { opacity: .45; cursor: not-allowed; filter: none; }
+.message-dialog-input textarea { padding: 10px 13px; resize: vertical; min-height: 92px; line-height: 1.55; }
+.audit-lock-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--field); }
+.audit-lock-card > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.audit-lock-card strong { font-size: 12.5px; }
+.audit-lock-card small { color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.managed-audit-links button:disabled { opacity: .45; cursor: not-allowed; }
 .message-dialog-confirm:active { transform: scale(.97); }
 
 /* Long text is edited in the shared dialog, so the field in place is a readable preview with one
