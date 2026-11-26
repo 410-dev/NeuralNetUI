@@ -1,5 +1,5 @@
 import { connectionHeaders, envApiKey } from "./connection-drivers";
-import { deleteRemoteLmfSession, dropLmfSessionRow, staleLmfSessions } from "./lmf";
+import { deleteRemoteLmfSession, dropLmfSessionRow, lmfSessionCache, lmfSessionRowsFor, staleLmfSessions } from "./lmf";
 
 declare global {
   var neuralLmfSweep: Promise<void> | undefined;
@@ -30,4 +30,29 @@ export function requestLmfSessionSweep() {
   if (globalThis.neuralLmfSweepTimer) return;
   globalThis.neuralLmfSweepTimer = setTimeout(() => { globalThis.neuralLmfSweepTimer = undefined; void sweepLmfSessions(); }, 500);
   globalThis.neuralLmfSweepTimer.unref?.();
+}
+
+/** The prompt cache of a chat's LMFuseFramework routing session: seconds left and the full TTL of its current provider. */
+export async function lmfCacheOfConversation(conversationId: string) {
+  const { readConfig } = await import("./config");
+  const { connections } = await readConfig();
+  for (const row of lmfSessionRowsFor(conversationId)) {
+    const connection = connections.find(item => item.id === row.connectionId);
+    if (!connection || connection.driver !== "lmf") continue;
+    const cache = await lmfSessionCache(connection, connectionHeaders(connection, envApiKey(connection.driver)), row.sessionId).catch(() => undefined);
+    if (cache) return cache;
+  }
+  return undefined;
+}
+
+/** Closes (and purges) a chat's LMFuseFramework sessions now; the chat keeps its history and opens a new session next time. */
+export async function closeLmfSessionsOf(conversationId: string) {
+  const { readConfig } = await import("./config");
+  const { connections } = await readConfig();
+  for (const row of lmfSessionRowsFor(conversationId)) {
+    const connection = connections.find(item => item.id === row.connectionId);
+    if (!connection || connection.driver !== "lmf") { dropLmfSessionRow(row); continue; }
+    try { if (await deleteRemoteLmfSession(connection, connectionHeaders(connection, envApiKey(connection.driver)), row.sessionId)) dropLmfSessionRow(row); }
+    catch (error) { console.warn(`Unable to close LMFuseFramework session ${row.sessionId}; the sweep retries later`, error instanceof Error ? error.message : error); }
+  }
 }

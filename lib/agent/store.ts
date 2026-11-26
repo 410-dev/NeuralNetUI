@@ -233,6 +233,26 @@ export function createAgentRun(userId: string, input: { kind: AgentRun["kind"]; 
   return getAgentRun(userId, id)!;
 }
 
+/**
+ * The chat of the latest earlier run of the same periodic series (the periodic check, or one recurring schedule) whose
+ * LMFuseFramework session was kept open; a closed session leaves no record, so its chat is not offered.
+ */
+export function keptSeriesConversation(userId: string, run: Pick<AgentRun, "id" | "kind" | "scheduleId">): string | undefined {
+  if (run.kind !== "heartbeat" && !(run.kind === "schedule" && run.scheduleId)) return undefined;
+  const row = db.prepare(`SELECT r.conversation_id AS conversationId FROM agent_runs r
+    WHERE r.user_id = ? AND r.id <> ? AND r.conversation_id IS NOT NULL AND r.status IN ('completed', 'failed', 'cancelled')
+      AND ${run.kind === "heartbeat" ? "r.kind = 'heartbeat'" : "r.kind = 'schedule' AND r.schedule_id = ?"}
+      AND EXISTS (SELECT 1 FROM lmf_sessions s WHERE s.conversation_id = r.conversation_id)
+    ORDER BY r.created_at DESC LIMIT 1`).get(...(run.kind === "heartbeat" ? [userId, run.id] : [userId, run.id, run.scheduleId])) as { conversationId: string } | undefined;
+  return row?.conversationId;
+}
+
+/** Chats of a recurring schedule's runs whose LMFuseFramework session is still open. */
+export function scheduleConversationsWithSessions(userId: string, scheduleId: string): string[] {
+  return (db.prepare(`SELECT DISTINCT r.conversation_id AS conversationId FROM agent_runs r WHERE r.user_id = ? AND r.schedule_id = ? AND r.conversation_id IS NOT NULL
+    AND EXISTS (SELECT 1 FROM lmf_sessions s WHERE s.conversation_id = r.conversation_id)`).all(userId, scheduleId) as Array<{ conversationId: string }>).map(row => row.conversationId);
+}
+
 export function getAgentRun(userId: string, id: string) {
   const row = db.prepare("SELECT * FROM agent_runs WHERE id = ? AND user_id = ?").get(id, userId) as RunRow | undefined;
   return row ? run(row) : undefined;

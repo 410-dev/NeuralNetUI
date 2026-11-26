@@ -93,3 +93,19 @@ test("the cache lifetime is read from a routing session's current provider only"
   assert.equal(lmf.cacheFrom({ object: "lmf.route", providers: [] }), undefined);
   assert.equal(lmf.cacheFrom({ route: { current: { provider: "c", cache_ttl_remaining_seconds: -4 } } })?.remainingSeconds, 0);
 });
+
+test("quota targets: provider windows in routing order, none for a provider without quota", () => {
+  const payload = { object: "lmf.route", providers: [
+    { provider: "claude-be", model: "sonnet", effort: "medium", position: 1, available: true, windows: [
+      { name: "five_hour", source: "provider", used: 0.11, threshold: 0.75, window_seconds: 18000, resets_at: "2026-11-27T00:40:00+00:00", observed_at: 1795733851 },
+      { name: "seven_day", source: "provider", used: 0.59, threshold: 0.7, window_seconds: 604800 }] },
+    { provider: "gemini", model: "gemini-4-hydrogen-high", position: 2, available: true, windows: [] },
+    { provider: "codex", model: "gpt-6.2-sol", position: 3, available: false, windows: [{ name: "primary", used: "bad" }] }] };
+  const targets = lmf.quotaTargets(payload, { routeDisplayNames: { "claude-be/sonnet": "Claude Sonnet" } });
+  assert.deepEqual(targets.map(item => item.label), ["Claude Sonnet", "gemini · gemini-4-hydrogen-high", "codex · gpt-6.2-sol"]);
+  assert.deepEqual(targets[0].windows.map(item => [item.windowSeconds, item.usedPercent, item.thresholdPercent]), [[18000, 11, 75], [604800, 59, 70]]);
+  assert.equal(targets[0].windows[0].observedAt, new Date(1795733851000).toISOString());
+  assert.equal(targets[1].windows.length, 0);
+  assert.equal(targets[2].available, false);
+  assert.equal(targets[2].windows.length, 0);
+});

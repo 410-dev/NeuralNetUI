@@ -5,6 +5,8 @@ import { AGENT_PROVIDER_ID } from "./policy.ts";
 
 /** What the agent tools need from the agent runtime, passed in so this module does not import it. */
 export type AgentToolHandlers = {
+  /** Closes the LMF session a recurring schedule's runs kept, once the schedule no longer keeps one (removed, off, slower). */
+  releaseSchedule?: (userId: string, scheduleId: string) => void;
   minIntervalMinutes(userId: string): number;
   spawnSubagent(userId: string, input: { title: string; instructions: string }): Promise<{ id: string; status: string }>;
   notifyUser(userId: string, input: { message: string; runId?: string }): Promise<void>;
@@ -66,9 +68,11 @@ export function agentToolSource(handlers: AgentToolHandlers): ToolProviderSource
           if (name === "update_wakeup") {
             const id = String(args.id || "");
             if (!getAgentSchedule(userId, id)) throw new Error("Schedule not found.");
-            return { result: updateAgentSchedule(userId, id, { title: str(args.title), instructions: str(args.instructions), at: str(args.at), everyMinutes: typeof args.every_minutes === "number" ? args.every_minutes : undefined, enabled: typeof args.enabled === "boolean" ? args.enabled : undefined }, handlers.minIntervalMinutes(userId)) };
+            const updated = updateAgentSchedule(userId, id, { title: str(args.title), instructions: str(args.instructions), at: str(args.at), everyMinutes: typeof args.every_minutes === "number" ? args.every_minutes : undefined, enabled: typeof args.enabled === "boolean" ? args.enabled : undefined }, handlers.minIntervalMinutes(userId));
+            handlers.releaseSchedule?.(userId, id);
+            return { result: updated };
           }
-          if (name === "cancel_wakeup") return { result: { removed: removeAgentSchedule(userId, String(args.id || "")) } };
+          if (name === "cancel_wakeup") { const id = String(args.id || ""); const removed = removeAgentSchedule(userId, id); handlers.releaseSchedule?.(userId, id); return { result: { removed } }; }
           if (name === "spawn_subagent") return { result: await handlers.spawnSubagent(userId, { title: String(args.title || ""), instructions: String(args.instructions || "") }) };
           if (name === "notify_user") { await handlers.notifyUser(userId, { message: String(args.message || ""), runId: agent.runId }); return { result: { delivered: true } }; }
           throw new Error(`Unknown agent tool ${name}.`);

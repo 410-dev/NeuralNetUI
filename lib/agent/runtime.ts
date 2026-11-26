@@ -16,8 +16,9 @@ import { isViewingAgent } from "./presence";
 import {
   advanceAgentSchedule, agentRunLoad, AGENT_RUN_LIMITS, createAgentProfile, createAgentRun, dueAgentSchedules, failInterruptedAgentRuns, getAgentRun, listAgentItems,
   listAgentProfiles, queuedAgentRuns, readAgentProfile, registerAgentConversation, runningAgentRunCount, saveAgentSettings, setAgentHeartbeat,
-  updateAgentRun, DEFAULT_AGENT_SETTINGS, type AgentProfile, type AgentRun, type AgentSettings,
+  updateAgentRun, DEFAULT_AGENT_SETTINGS, getAgentSchedule, keptSeriesConversation, scheduleConversationsWithSessions, type AgentProfile, type AgentRun, type AgentSettings,
 } from "./store";
+import { keepsSeriesSession, reusesSeriesSession } from "./series";
 
 type Pending = { messages: StoredMessage[]; trigger: boolean; autonomous: boolean };
 type RuntimeState = { pending: Map<string, Pending>; locks: Map<string, Promise<unknown>>; changed: Map<string, number>; timer?: ReturnType<typeof setInterval>; started: boolean; ticking?: Promise<void> };
@@ -119,11 +120,12 @@ function subPrompt(settings: AgentSettings, run: AgentRun) {
   return [
     "# Subagent",
     `You are a subagent of the person's personal agent, working alone on one ${run.kind === "heartbeat" ? "periodic check" : run.kind === "schedule" ? "scheduled task" : "task"}: "${run.title}". The person is not watching.`,
-    `Current time: ${clock(settings)}. Write anything meant for the person in ${ko(settings) ? "Korean" : "English"}.`,
+    `Write anything meant for the person in ${ko(settings) ? "Korean" : "English"}. The current time is given with each request.`,
     "- Do the work with the tools you have. Some tools may need the person's approval; if a call is refused, work around it or say what is blocked.",
     "- Use notify_user only when the person should know something now (a reminder they asked for, an important message, a conflict, a change they track). Do not notify about routine checks that found nothing.",
     "- Record durable findings on the workboard (memories, events, to-dos) and keep recurring work up to date with update_wakeup, e.g. what was last seen, so the next run can compare.",
     "- End with a short plain summary of what you did and found; it goes to the main agent.",
+    ...(run.kind === "task" ? [] : ["- This chat may hold earlier runs of the same work; use them to compare, but act on the latest request."]),
   ].join("\n");
 }
 
@@ -158,6 +160,7 @@ function gateFor(userId: string, settings: AgentSettings, autonomous: boolean, o
 
 const toolSource = agentToolSource({
   minIntervalMinutes: userId => planAgentAccess(userId).minIntervalMinutes,
+  releaseSchedule: (userId, scheduleId) => void releaseScheduleSessions(userId, scheduleId).catch(error => console.warn("Unable to release a schedule's session", error instanceof Error ? error.message : error)),
   spawnSubagent: async (userId, input) => {
     const load = agentRunLoad(userId);
     if (load.open >= AGENT_RUN_LIMITS.open) throw new Error(`${load.open} subagents are already queued or running; wait for some to finish.`);
@@ -262,22 +265,95 @@ export function stopAgentMain(userId: string) {
 
 // ------------------------------------------------------------------ subagent runs
 
+/** How often a periodic run repeats: the periodic check's interval or an enabled recurring schedule's; none for one-off work. */
+function seriesIntervalMinutes(run: AgentRun): number | undefined {
+  if (run.kind === "heartbeat") {
+    const profile = readAgentProfile(run.userId);
+    return profile?.settings.enabled ? Math.max(profile.settings.heartbeatMinutes, planAgentAccess(run.userId).minIntervalMinutes) : undefined;
+  }
+  if (run.kind === "schedule" && run.scheduleId) {
+    const schedule = getAgentSchedule(run.userId, run.scheduleId);
+    return schedule?.enabled && schedule.kind === "recurring" && schedule.intervalMinutes ? schedule.intervalMinutes : undefined;
+  }
+  return undefined;
+}
+
+/** The previous run's chat, if its LMFuseFramework session was kept and its cache is still warm; a stale one is closed. */
+async function reusableSeriesConversation(run: AgentRun, intervalMinutes: number): Promise<Conversation | undefined> {
+  const previous = keptSeriesConversation(run.userId, run);
+  if (!previous) return undefined;
+  const job = getChatJob(previous, run.userId);
+  if (job && (job.status === "running" || job.status === "waiting")) return undefined;
+  const { lmfCacheOfConversation, closeLmfSessionsOf } = await import("../lmf-maintenance");
+  const cache = await lmfCacheOfConversation(previous).catch(() => undefined);
+  if (reusesSeriesSession(intervalMinutes, cache)) {
+    const conversation = await readConversation(previous, run.userId);
+    if (conversation) return conversation;
+  }
+  await closeLmfSessionsOf(previous).catch(() => undefined);
+  return undefined;
+}
+
+/**
+ * After a periodic run: its LMFuseFramework session stays open for the next run when the interval fits in the
+ * provider's prompt-cache lifetime, and is closed otherwise. One-off runs are left to the regular idle sweep.
+ */
+async function settleRunSession(run: AgentRun) {
+  if (!run.conversationId) return;
+  const interval = seriesIntervalMinutes(run);
+  if (interval === undefined) return;
+  const { lmfCacheOfConversation, closeLmfSessionsOf } = await import("../lmf-maintenance");
+  const cache = await lmfCacheOfConversation(run.conversationId).catch(() => undefined);
+  if (keepsSeriesSession(interval, cache?.totalSeconds)) return;
+  await closeLmfSessionsOf(run.conversationId);
+}
+
+/** A recurring schedule was removed, turned off or slowed down: close the session its runs kept, if any. */
+export async function releaseScheduleSessions(userId: string, scheduleId: string) {
+  const schedule = getAgentSchedule(userId, scheduleId);
+  const conversations = scheduleConversationsWithSessions(userId, scheduleId);
+  if (!conversations.length) return;
+  const { lmfCacheOfConversation, closeLmfSessionsOf } = await import("../lmf-maintenance");
+  for (const conversationId of conversations) {
+    const job = getChatJob(conversationId, userId);
+    if (job && (job.status === "running" || job.status === "waiting")) continue;
+    if (schedule?.enabled && schedule.kind === "recurring" && schedule.intervalMinutes) {
+      const cache = await lmfCacheOfConversation(conversationId).catch(() => undefined);
+      if (keepsSeriesSession(schedule.intervalMinutes, cache?.totalSeconds)) continue;
+    }
+    await closeLmfSessionsOf(conversationId).catch(() => undefined);
+  }
+}
+
 async function startRun(run: AgentRun) {
   const profile = readAgentProfile(run.userId);
   if (!profile) { updateAgentRun(run.id, { status: "failed", error: "No agent profile.", finishedAt: nowIso() }); return; }
   const { settings, userId } = profile;
-  const stamp = nowIso(), conversationId = id("agent-run"), branchId = id("branch");
+  const stamp = nowIso();
   const instructions = run.kind === "heartbeat" ? heartbeatInstructions(userId, settings) : run.instructions;
-  const first: StoredMessage = { id: id("msg"), role: "user", content: instructions, createdAt: stamp };
+  // The time goes with the request, not the system prompt: a changing system prompt would restart the LMF session.
+  const first: StoredMessage = { id: id("msg"), role: "user", content: `[${clock(settings)}]\n${instructions}`, createdAt: stamp };
+  const interval = seriesIntervalMinutes(run);
+  const reused = interval !== undefined ? await reusableSeriesConversation(run, interval).catch(() => undefined) : undefined;
+  let conversationId: string, branchId: string, history: StoredMessage[];
+  if (reused) {
+    const branch = reused.branches.find(item => item.id === reused.activeBranchId) ?? reused.branches[0];
+    branch.messages = [...branch.messages, first];
+    branch.updatedAt = reused.updatedAt = stamp;
+    await writeConversation(reused, userId);
+    ({ id: conversationId } = reused); branchId = branch.id; history = branch.messages;
+  } else {
+    conversationId = id("agent-run"); branchId = id("branch"); history = [first];
+    await writeConversation({ id: conversationId, title: run.title, modelId: "agent", activeBranchId: branchId, createdAt: stamp, updatedAt: stamp, branches: [{ id: branchId, name: "Main", messages: [first], createdAt: stamp, updatedAt: stamp }] }, userId);
+  }
   registerAgentConversation(userId, conversationId, "sub", run.id);
-  await writeConversation({ id: conversationId, title: run.title, modelId: "agent", activeBranchId: branchId, createdAt: stamp, updatedAt: stamp, branches: [{ id: branchId, name: "Main", messages: [first], createdAt: stamp, updatedAt: stamp }] }, userId);
   updateAgentRun(run.id, { status: "running", startedAt: stamp, conversationId });
   markAgentChanged(userId);
-  await startRunJob(run, profile, conversationId, branchId, first, 0);
+  await startRunJob(run, profile, conversationId, branchId, history, 0);
 }
 
 /** One attempt at a run's reply; a reply discarded for repeating itself is attempted again. */
-async function startRunJob(run: AgentRun, profile: AgentProfile, conversationId: string, branchId: string, first: StoredMessage, attempt: number) {
+async function startRunJob(run: AgentRun, profile: AgentProfile, conversationId: string, branchId: string, history: StoredMessage[], attempt: number) {
   const { settings, userId } = profile;
   const { model, aliasBaseModelId } = await agentModel(userId, settings.subagentModelId || settings.modelId, settings.subagentModelId ? undefined : settings.aliasBaseModelId);
   const options: AgentJobOptions = {
@@ -287,7 +363,7 @@ async function startRunJob(run: AgentRun, profile: AgentProfile, conversationId:
       void postToMain(userId, { content: ko(settings) ? `작업 "${run.title}"이(가) 도구 사용 승인을 기다립니다: ${tool}. 서브에이전트 기록에서 승인하거나 거절해 주세요.` : `Task "${run.title}" is waiting for approval to use ${tool}. Approve or reject it in the subagent history.`, kind: "notice" });
     }),
     onSettled: result => {
-      if (result.looped && attempt < LOOP_RETRIES) { markAgentChanged(userId); void startRunJob(run, readAgentProfile(userId) ?? profile, conversationId, branchId, first, attempt + 1).catch(error => void finishRun(run, { status: "error", content: "", error: error instanceof Error ? error.message : String(error) })); return; }
+      if (result.looped && attempt < LOOP_RETRIES) { markAgentChanged(userId); void startRunJob(run, readAgentProfile(userId) ?? profile, conversationId, branchId, history, attempt + 1).catch(error => void finishRun(run, { status: "error", content: "", error: error instanceof Error ? error.message : String(error) })); return; }
       void finishRun(run, result.looped ? { status: "error", content: "", error: ko(settings) ? `출력이 같은 내용을 계속 반복해서 ${LOOP_RETRIES}번 다시 생성했지만 해결되지 않았습니다.` : `The reply kept repeating itself; ${LOOP_RETRIES} regenerations did not help.` } : result);
     },
   };
@@ -295,7 +371,7 @@ async function startRunJob(run: AgentRun, profile: AgentProfile, conversationId:
   const original = options.gate!;
   options.gate = async call => { const decision = await original(call); if (getAgentRun(userId, run.id)?.status === "waiting") { updateAgentRun(run.id, { status: "running" }); markAgentChanged(userId); } return decision; };
   await startChatJob({
-    conversationId, branchId, assistantMessageId: id("msg"), modelId: model.id, aliasBaseModelId, tools: settings.toolState, messages: messagesForJob([first]),
+    conversationId, branchId, assistantMessageId: id("msg"), modelId: model.id, aliasBaseModelId, tools: settings.toolState, messages: messagesForJob(history),
     clientContext: { timeZone: settings.timeZone, locale: settings.locale, language: settings.language },
   }, userId, userRole(userId), { agent: options });
 }
@@ -305,6 +381,7 @@ async function finishRun(run: AgentRun, result: { status: string; content: strin
   updateAgentRun(run.id, { status, result: result.content.slice(0, 40_000) || undefined, error: result.error, finishedAt: nowIso() });
   markAgentChanged(run.userId);
   const profile = readAgentProfile(run.userId);
+  void settleRunSession(getAgentRun(run.userId, run.id) ?? run).catch(error => console.warn("Unable to settle a subagent session", error instanceof Error ? error.message : error));
   // Work the person asked for always comes back to the main agent; automatic runs speak through notify_user.
   if (profile && run.report === "always" && status !== "cancelled") {
     const label = ko(profile.settings) ? (status === "completed" ? "완료" : "실패") : status;

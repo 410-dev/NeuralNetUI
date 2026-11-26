@@ -86,6 +86,19 @@ export function saveLmfSession(conversationId: string, connectionId: string, mod
     .run(conversationId, connectionId, model, sessionId, new Date().toISOString());
 }
 
+/** Every LMFuseFramework session recorded for one chat (one per connection and model). */
+export function lmfSessionRowsFor(conversationId: string): LmfSessionRow[] {
+  return (db.prepare("SELECT conversation_id AS conversationId, connection_id AS connectionId, model, session_id AS sessionId, updated_at AS updatedAt FROM lmf_sessions WHERE conversation_id = ?").all(conversationId) as Array<Omit<LmfSessionRow, "conversationGone">>)
+    .map(row => ({ ...row, conversationGone: false }));
+}
+
+/** `GET /v1/lmf/sessions/{id}`: the prompt-cache state of a routing session's current provider, if the server reports one. */
+export async function lmfSessionCache(connection: Pick<ConnectionConfig, "baseUrl">, headers: Record<string, string>, sessionId: string, request: typeof fetch = fetch) {
+  const response = await request(lmfEndpoint(connection.baseUrl, `sessions/${encodeURIComponent(sessionId)}`), { headers, signal: AbortSignal.timeout(10_000), cache: "no-store" });
+  if (!response.ok) { await response.body?.cancel().catch(() => undefined); return undefined; }
+  return cacheFrom(await response.json());
+}
+
 export function forgetLmfSession(conversationId: string, connectionId: string, model: string) {
   db.prepare("DELETE FROM lmf_sessions WHERE conversation_id = ? AND connection_id = ? AND model = ?").run(conversationId, connectionId, model);
 }
@@ -132,4 +145,28 @@ export function lmfChargedInput(connection: Pick<ConnectionConfig, "lmfCacheDisc
   if (connection.lmfCacheDiscount === false || cachedTokens <= 0) return inputTokens;
   const percent = Math.min(100, Math.max(0, connection.lmfCacheDiscountPercent ?? LMF_DEFAULT_DISCOUNT_PERCENT));
   return Math.max(0, Math.round(inputTokens - Math.min(cachedTokens, inputTokens) * percent / 100));
+}
+
+/** One provider window of a routing target: how much of it is used, the routing threshold and when it resets. */
+export type LmfQuotaWindow = { name: string; usedPercent: number; thresholdPercent?: number; windowSeconds?: number; resetsAt?: string; observedAt?: string; source: "provider" | "config" };
+/** A routing target with its remaining provider quota; `windows` is empty when the provider reports none. */
+export type LmfQuotaTarget = { key: string; label: string; position?: number; available: boolean; windows: LmfQuotaWindow[] };
+
+/** The routing targets of `/v1/lmf/route` with their usage windows, in routing order. */
+export function quotaTargets(payload: unknown, model: Pick<ModelConfig, "routeDisplayNames">): LmfQuotaTarget[] {
+  const providers = record(payload)?.providers;
+  return (Array.isArray(providers) ? providers : []).flatMap(item => {
+    const entry = routeEntry(item); const value = record(item);
+    if (!entry || !value) return [];
+    const windows = (Array.isArray(value.windows) ? value.windows : []).flatMap(raw => {
+      const w = record(raw); const used = w?.used;
+      if (!w || typeof used !== "number" || !Number.isFinite(used)) return [];
+      const threshold = typeof w.threshold === "number" ? w.threshold : undefined;
+      const observed = typeof w.observed_at === "number" && w.observed_at > 0 ? new Date(w.observed_at * 1000).toISOString() : undefined;
+      return [{ name: text(w.name) || "", usedPercent: Math.round(used * 1000) / 10, thresholdPercent: threshold === undefined ? undefined : Math.round(threshold * 1000) / 10,
+        windowSeconds: typeof w.window_seconds === "number" && w.window_seconds > 0 ? w.window_seconds : undefined, resetsAt: text(w.resets_at), observedAt: observed,
+        source: w.source === "config" ? "config" as const : "provider" as const }];
+    });
+    return [{ key: `${entry.position ?? ""}:${lmfRouteKey(entry)}:${entry.effort ?? ""}`, label: lmfRouteLabel(model, entry), position: entry.position, available: value.available !== false, windows }];
+  });
 }

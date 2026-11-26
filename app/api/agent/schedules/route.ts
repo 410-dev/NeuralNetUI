@@ -1,6 +1,6 @@
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { addAgentSchedule, listAgentSchedules, removeAgentSchedule, updateAgentSchedule } from "@/lib/agent/store";
-import { agentAccess, markAgentChanged } from "@/lib/agent/runtime";
+import { agentAccess, markAgentChanged, releaseScheduleSessions } from "@/lib/agent/runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,10 +18,10 @@ export async function POST(request: Request) {
   catch (error) { return authErrorResponse(error); }
 }
 export async function PATCH(request: Request) {
-  try { const { user, access } = guard(request); const body = await request.json(); const schedule = updateAgentSchedule(user.id, String(body.id || ""), input(body), access.minIntervalMinutes); markAgentChanged(user.id); return Response.json({ schedule }); }
+  try { const { user, access } = guard(request); const body = await request.json(); const schedule = updateAgentSchedule(user.id, String(body.id || ""), input(body), access.minIntervalMinutes); markAgentChanged(user.id); void releaseScheduleSessions(user.id, String(body.id || "")).catch(() => undefined); return Response.json({ schedule }); }
   catch (error) { return authErrorResponse(error); }
 }
 export async function DELETE(request: Request) {
-  try { const { user } = guard(request); const body = await request.json(); removeAgentSchedule(user.id, String(body.id || "")); markAgentChanged(user.id); return new Response(null, { status: 204 }); }
+  try { const { user } = guard(request); const body = await request.json(); removeAgentSchedule(user.id, String(body.id || "")); markAgentChanged(user.id); void releaseScheduleSessions(user.id, String(body.id || "")).catch(() => undefined); return new Response(null, { status: 204 }); }
   catch (error) { return authErrorResponse(error); }
 }
