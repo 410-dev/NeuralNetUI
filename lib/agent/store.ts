@@ -19,6 +19,8 @@ export type AgentSettings = {
   instructions: string;
   /** The main chat and every subagent are compacted past this share of the model's context window. */
   compactPercent: number;
+  /** A tool call running longer than this is cancelled (approval waits excluded); 0 means no limit. */
+  toolTimeoutMinutes: number;
   /** Tools the agent may use, as switched on in the agent screen's tool menu. */
   toolState?: ToolState;
   /** What automatic runs may do without asking, per tool provider. */
@@ -28,7 +30,7 @@ export type AgentSettings = {
   language?: "ko" | "en";
 };
 
-export const DEFAULT_AGENT_SETTINGS: AgentSettings = { enabled: true, heartbeatMinutes: 60, instructions: "", compactPercent: 50, toolRules: {} };
+export const DEFAULT_AGENT_SETTINGS: AgentSettings = { enabled: true, heartbeatMinutes: 60, instructions: "", compactPercent: 50, toolTimeoutMinutes: 10, toolRules: {} };
 
 export type AgentProfile = { userId: string; conversationId: string; settings: AgentSettings; nextHeartbeatAt?: string; lastHeartbeatAt?: string };
 export type AgentItemKind = "todo" | "event" | "memory";
@@ -58,6 +60,7 @@ export function normalizeAgentSettings(value: unknown): AgentSettings {
     heartbeatMinutes: bounded(raw.heartbeatMinutes, 1, 10080, DEFAULT_AGENT_SETTINGS.heartbeatMinutes),
     instructions: text(raw.instructions, 20_000) ?? "",
     compactPercent: bounded(raw.compactPercent, 10, 95, DEFAULT_AGENT_SETTINGS.compactPercent),
+    toolTimeoutMinutes: bounded(raw.toolTimeoutMinutes, 0, 1440, DEFAULT_AGENT_SETTINGS.toolTimeoutMinutes),
     ...(raw.toolState && typeof raw.toolState === "object" ? { toolState: raw.toolState } : {}),
     toolRules: rules,
     timeZone: text(raw.timeZone, 100), locale: text(raw.locale, 50), language: raw.language === "ko" || raw.language === "en" ? raw.language : undefined,

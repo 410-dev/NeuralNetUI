@@ -24,6 +24,9 @@ declare global { var neuralAgentRuntime: RuntimeState | undefined; }
 const state: RuntimeState = globalThis.neuralAgentRuntime ??= { pending: new Map(), locks: new Map(), changed: new Map(), started: false };
 
 const TICK_MS = 20_000;
+/** A reply that keeps repeating itself is regenerated this many times before it is reported as an error. */
+export const LOOP_RETRIES = 3;
+const toolTimeout = (settings: AgentSettings) => settings.toolTimeoutMinutes > 0 ? settings.toolTimeoutMinutes * 60_000 : undefined;
 const id = (prefix: string) => `${prefix}-${randomUUID()}`;
 const nowIso = () => new Date().toISOString();
 const ko = (settings: AgentSettings) => settings.language !== "en";
@@ -212,15 +215,21 @@ export function flushMain(userId: string): Promise<void> {
   });
 }
 
-async function startMainTurn(profile: AgentProfile, conversation: Conversation, autonomous: boolean) {
+async function startMainTurn(profile: AgentProfile, conversation: Conversation, autonomous: boolean, attempt = 0) {
   const { settings, userId } = profile;
   const branch = conversation.branches.find(item => item.id === conversation.activeBranchId) ?? conversation.branches[0];
   const { model, aliasBaseModelId } = await agentModel(userId, settings.modelId, settings.aliasBaseModelId);
   const options: AgentJobOptions = {
-    mode: "main", autonomous, systemPrompt: mainPrompt(settings), compactPercent: settings.compactPercent, toolState: settings.toolState, sources: [toolSource],
+    mode: "main", autonomous, systemPrompt: mainPrompt(settings), compactPercent: settings.compactPercent, toolState: settings.toolState, sources: [toolSource], toolTimeoutMs: toolTimeout(settings),
     gate: gateFor(userId, settings, autonomous, tool => void postToMain(userId, { content: ko(settings) ? `도구 사용 승인이 필요합니다: ${tool}. 에이전트 채팅에서 승인해 주세요.` : `Approval needed for ${tool}. Approve it in the agent chat.`, kind: "notice" })),
     onSettled: result => {
       markAgentChanged(userId);
+      if (result.looped) {
+        // The repeating reply was discarded; write it again, and give up with a notice after the last retry.
+        if (attempt < LOOP_RETRIES) { void serialized(userId, async () => { const latest = readAgentProfile(userId) ?? profile; const fresh = await readConversation(latest.conversationId, userId); if (fresh) await startMainTurn(latest, fresh, autonomous, attempt + 1); }).catch(error => console.error("Agent retry failed", error)); return; }
+        void postToMain(userId, { content: ko(settings) ? `에이전트의 응답이 같은 내용을 계속 반복해서 ${LOOP_RETRIES}번 다시 생성했지만 해결되지 않았습니다. 요청을 바꾸거나 다른 모델로 다시 시도해 주세요.` : `The agent's reply kept repeating itself; it was regenerated ${LOOP_RETRIES} times without success. Rephrase the request or try another model.`, kind: "notice" });
+        return;
+      }
       if (result.status === "completed" && result.content.trim()) void notifyDevices(userId, result.content);
       setTimeout(() => void flushMain(userId), 50);
     },
@@ -263,14 +272,23 @@ async function startRun(run: AgentRun) {
   await writeConversation({ id: conversationId, title: run.title, modelId: "agent", activeBranchId: branchId, createdAt: stamp, updatedAt: stamp, branches: [{ id: branchId, name: "Main", messages: [first], createdAt: stamp, updatedAt: stamp }] }, userId);
   updateAgentRun(run.id, { status: "running", startedAt: stamp, conversationId });
   markAgentChanged(userId);
+  await startRunJob(run, profile, conversationId, branchId, first, 0);
+}
+
+/** One attempt at a run's reply; a reply discarded for repeating itself is attempted again. */
+async function startRunJob(run: AgentRun, profile: AgentProfile, conversationId: string, branchId: string, first: StoredMessage, attempt: number) {
+  const { settings, userId } = profile;
   const { model, aliasBaseModelId } = await agentModel(userId, settings.subagentModelId || settings.modelId, settings.subagentModelId ? undefined : settings.aliasBaseModelId);
   const options: AgentJobOptions = {
-    mode: "sub", runId: run.id, autonomous: true, systemPrompt: subPrompt(settings, run), compactPercent: settings.compactPercent, toolState: settings.toolState, sources: [toolSource],
+    mode: "sub", runId: run.id, autonomous: true, systemPrompt: subPrompt(settings, run), compactPercent: settings.compactPercent, toolState: settings.toolState, sources: [toolSource], toolTimeoutMs: toolTimeout(settings),
     gate: gateFor(userId, settings, true, tool => {
       updateAgentRun(run.id, { status: "waiting" }); markAgentChanged(userId);
       void postToMain(userId, { content: ko(settings) ? `작업 "${run.title}"이(가) 도구 사용 승인을 기다립니다: ${tool}. 서브에이전트 기록에서 승인하거나 거절해 주세요.` : `Task "${run.title}" is waiting for approval to use ${tool}. Approve or reject it in the subagent history.`, kind: "notice" });
     }),
-    onSettled: result => void finishRun(run, result),
+    onSettled: result => {
+      if (result.looped && attempt < LOOP_RETRIES) { markAgentChanged(userId); void startRunJob(run, readAgentProfile(userId) ?? profile, conversationId, branchId, first, attempt + 1).catch(error => void finishRun(run, { status: "error", content: "", error: error instanceof Error ? error.message : String(error) })); return; }
+      void finishRun(run, result.looped ? { status: "error", content: "", error: ko(settings) ? `출력이 같은 내용을 계속 반복해서 ${LOOP_RETRIES}번 다시 생성했지만 해결되지 않았습니다.` : `The reply kept repeating itself; ${LOOP_RETRIES} regenerations did not help.` } : result);
+    },
   };
   // A decision on a waiting call resumes the run.
   const original = options.gate!;

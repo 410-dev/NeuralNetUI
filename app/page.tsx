@@ -120,6 +120,8 @@ const now = () => new Date().toISOString();
 const titleFrom = (text: string) => text.trim().split(/\s+/).slice(0, 7).join(" ").slice(0, 58) || "New chat";
 /** The composer's tool menu: every provider offered to this account and this chat's switches for them. */
 type ToolMenu = { state: ToolState; providers: ToolProviderManifest[]; setEnabled: (manifest: ToolProviderManifest, value: boolean) => void; setOption: (manifest: ToolProviderManifest, key: string, value: boolean | number) => void; setFunctions: (manifest: ToolProviderManifest, names: string[]) => void };
+/** Cancels one running tool call in the open chat (the reply continues without its result). */
+const ToolCancelContext = createContext<((toolCallId: string) => void) | undefined>(undefined);
 const ToolMenuContext = createContext<ToolMenu>({ state: DEFAULT_TOOL_STATE, providers: [], setEnabled: () => undefined, setOption: () => undefined, setFunctions: () => undefined });
 /** On a phone a settings list and its editor take turns on screen; choosing an item opens its editor. */
 const SettingsDetailContext = createContext<(open: boolean) => void>(() => undefined);
@@ -1708,6 +1710,7 @@ export default function Home() {
     </div>;
   }
   return (
+    <ToolCancelContext.Provider value={(toolCallId) => { const id = conversation?.id || pendingConversationIdRef.current; if (id) void fetch(`/api/chat/${id}/tool-cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ toolCallId }) }).catch(() => undefined); }}>
     <ToolMenuContext.Provider value={toolMenu}>
     <main className={`app-shell ${messages.length ? "chat-active" : "chat-idle"} ${temporaryActive ? "temporary-chat" : ""} ${contextViewOpen && messages.length ? "context-view-active" : ""} ${appearance.chatBackgroundGlow !== false ? "chat-glow" : ""}`}>
       <button className="mobile-menu" aria-label={locale === "ko" ? "메뉴 열기" : "Open menu"} onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
@@ -1792,6 +1795,7 @@ export default function Home() {
       {messageDialog}
     </main>
     </ToolMenuContext.Provider>
+    </ToolCancelContext.Provider>
   );
 }
 
@@ -2246,6 +2250,8 @@ function ToolEventIcon({ name, size = 15 }: { name: string; size?: number }) {
 
 function ToolActivity({ c, locale, event }: { c: CopySet; locale: Locale; event: ToolEvent }) {
   const active = event.status === "calling" || event.status === "waiting";
+  const cancelTool = useContext(ToolCancelContext);
+  const [cancelling, setCancelling] = useState(false);
   const resultRecord=event.result&&typeof event.result==="object"?event.result as Record<string,unknown>:undefined;
   const candidate=resultRecord?.attachment&&typeof resultRecord.attachment==="object"?resultRecord.attachment as Partial<StoredAttachment>:undefined;
   const attachment=candidate?.id&&candidate.url&&candidate.name&&candidate.mimeType&&typeof candidate.size==="number"?candidate as StoredAttachment:undefined;
@@ -2255,6 +2261,7 @@ function ToolActivity({ c, locale, event }: { c: CopySet; locale: Locale; event:
       <span className="tool-event-icon"><ToolEventIcon name={event.name} /></span>
       <strong>{getToolStatusLabel(event.name, event.status, locale)}</strong>
       <span className="tool-status-dot" aria-hidden="true" />
+      {active && cancelTool && <button type="button" className="tool-cancel" disabled={cancelling} title={locale === "ko" ? "이 도구 실행 취소 (응답은 계속됩니다)" : "Cancel this tool call (the reply continues)"} onClick={(clickEvent) => { clickEvent.preventDefault(); clickEvent.stopPropagation(); setCancelling(true); cancelTool(event.id); }}><X size={12} />{cancelling ? (locale === "ko" ? "취소 중" : "Cancelling") : (locale === "ko" ? "취소" : "Cancel")}</button>}
     </summary>
     <div className="tool-activity-body">
       <details open><summary>{c.toolCall}</summary><StructuredJson value={event.arguments} /></details>
@@ -2268,11 +2275,14 @@ function ToolActivity({ c, locale, event }: { c: CopySet; locale: Locale; event:
 
 function ToolActivityGroup({ c, locale, events }: { c: CopySet; locale: Locale; events: ToolEvent[] }) {
   const state = getToolGroupState(events);
+  const cancelTool = useContext(ToolCancelContext);
+  const running = events.filter(event => event.status === "calling");
   const label = getToolGroupLabel(events, locale);
   return <details className={`tool-activity-group ${state}`}>
     <summary aria-label={label}>
       <span className="tool-group-icon"><Wrench size={16} /></span>
       <strong>{label}</strong>
+      {running.length > 0 && cancelTool && <button type="button" className="tool-cancel" title={locale === "ko" ? "실행 중인 도구 취소 (응답은 계속됩니다)" : "Cancel the running tool call (the reply continues)"} onClick={(clickEvent) => { clickEvent.preventDefault(); clickEvent.stopPropagation(); for (const event of running) cancelTool(event.id); }}><X size={12} />{locale === "ko" ? "도구 취소" : "Cancel tool"}</button>}
       <ChevronDown size={14} className="tool-group-chevron" />
     </summary>
     <div className="tool-activity-list" aria-label={locale === "ko" ? "도구 호출 목록" : "Tool call list"}>

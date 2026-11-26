@@ -37,7 +37,7 @@ export async function PATCH(request: Request) {
     if (!agentAccess(user.id).enabled) return Response.json({ error: "The agent is not available on this plan." }, { status: 403 });
     const profile = readAgentProfile(user.id) ?? await ensureAgent(user.id);
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
-    const allowed = ["enabled", "modelId", "aliasBaseModelId", "reasoningPresetId", "subagentModelId", "heartbeatMinutes", "instructions", "compactPercent", "toolState", "toolRules", "timeZone", "locale", "language"];
+    const allowed = ["enabled", "modelId", "aliasBaseModelId", "reasoningPresetId", "subagentModelId", "heartbeatMinutes", "instructions", "compactPercent", "toolTimeoutMinutes", "toolState", "toolRules", "timeZone", "locale", "language"];
     const merged = normalizeAgentSettings({ ...profile.settings, ...Object.fromEntries(Object.entries(body).filter(([key]) => allowed.includes(key))) });
     const saved = updateAgentSettings(user.id, merged);
     // An emptied choice clears the saved one, which a merge would otherwise keep.

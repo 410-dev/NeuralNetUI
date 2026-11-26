@@ -13,7 +13,8 @@ export interface ResolvedTools {
   rejected: Array<{ provider: string; name: string; reason: string }>;
   has(name: string): boolean;
   releasesModel(name: string): boolean;
-  execute(name: string, args: Record<string, unknown>, call: Omit<ToolCallContext, keyof ToolContext>): Promise<ToolExecution>;
+  /** `signal` replaces the request's, so one call can be cancelled on its own. */
+  execute(name: string, args: Record<string, unknown>, call: Omit<ToolCallContext, keyof ToolContext> & { signal?: AbortSignal }): Promise<ToolExecution>;
 }
 
 /** The single conversion from a provider's MCP-shaped spec to what the model receives. */
@@ -74,7 +75,7 @@ export async function resolveTools(request: ToolRequestContext, state: ToolState
     async execute(name, args, call) {
       const binding = bindings.get(name);
       if (!binding) throw new Error(`Tool ${name} is not enabled.`);
-      const ctx: ToolCallContext = { ...binding.ctx, ...call };
+      const ctx: ToolCallContext = { ...binding.ctx, ...call, signal: call.signal ?? binding.ctx.signal };
       const gated = binding.ctx.gate ? await binding.ctx.gate({ providerId: binding.provider.manifest.id, name, sourceName: binding.spec.sourceName ?? name, readOnlyHint: binding.spec.readOnly, args, ctx }) : "provider";
       if (typeof gated === "object") return { result: gated.result };
       if (gated === "run") return binding.provider.execute(name, args, ctx);

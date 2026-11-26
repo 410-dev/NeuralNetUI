@@ -15,7 +15,7 @@ import { readSsePayload } from "./stream-protocol";
 import { canUseModel, readConfig } from "./config";
 import { aliasBaseModel, aliasWithBaseModel } from "./alias-base-model";
 import { readConversation, writeConversation, renameConversation } from "./conversations";
-import { detectTextRepetition, detectToolCallRepetition, normalizeRepetitionSettings, toolArgumentText, type RepetitionFinding, type RepetitionSettings } from "./repetition.ts";
+import { DEFAULT_REPETITION_SETTINGS, detectTextRepetition, detectToolCallRepetition, normalizeRepetitionSettings, toolArgumentText, type RepetitionFinding, type RepetitionSettings } from "./repetition.ts";
 import { readUpload, readUploadModelContent, saveGeneratedImage } from "./uploads";
 import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, envApiKey, hasModelResidency } from "./connection-drivers";
 import { chatFetcher, providerRequestBody } from "./provider-requests.ts";
@@ -106,12 +106,18 @@ export type AgentJobOptions = {
   /** Extra tool sources (the agent's own tools). */
   sources: ToolProviderSource[];
   gate?: ToolGate;
-  /** Called once when the reply ends, however it ends. */
-  onSettled?: (result: { status: JobStatus; content: string; error?: string }) => void;
+  /** A running tool call is cancelled after this long (time spent waiting for approval does not count). */
+  toolTimeoutMs?: number;
+  /** Called once when the reply ends, however it ends. `looped` means it was stopped for repeating itself and discarded. */
+  onSettled?: (result: { status: JobStatus; content: string; error?: string; looped?: boolean }) => void;
 };
 
 type ChatJob = {
   agent?: AgentJobOptions;
+  /** Set when an agent reply was stopped for repeating itself: it is dropped from the chat so it can be regenerated. */
+  agentLoop?: RepetitionFinding;
+  /** One controller per running tool call, so a single call can be cancelled without stopping the reply. */
+  toolAborts?: Map<string, { controller: AbortController; reason?: string }>;
   /** Set for LMFuseFramework connections: the session this chat continues, created on the first turn. */
   lmf?: { connection: ConnectionConfig; model: string; sessionId?: string };
   userId: string;
@@ -167,6 +173,19 @@ function usageFrom(payload: Record<string, unknown>) {
  * The agent's tools: code that runs in the person's browser is not offered to the agent until a virtual computer is
  * available, and automatic runs also leave out what only the person can answer there (questions, location).
  */
+/** The agent always watches for loops: when every rule is off in harness settings it uses the defaults. */
+function agentRepetitionRules(rules: RepetitionSettings, agent: boolean): RepetitionSettings {
+  return agent && !Object.values(rules).some(rule => rule.enabled) ? DEFAULT_REPETITION_SETTINGS : rules;
+}
+
+/** Cancels one running tool call; the model receives a "cancelled" result and the reply continues. */
+export function cancelChatTool(job: ChatJob, toolCallId: string, reason = "cancelled by the person") {
+  const entry = job.toolAborts?.get(toolCallId);
+  if (!entry || entry.controller.signal.aborted) return false;
+  entry.reason = reason; entry.controller.abort();
+  return true;
+}
+
 function agentToolState(state: ToolState, autonomous: boolean): ToolState {
   const off = Object.fromEntries([...BROWSER_ONLY_PROVIDERS].filter(id => autonomous || id === "code-runner").map(id => [id, { ...state.providers[id], enabled: false }]));
   return { version: 2, providers: { ...state.providers, ...off } };
@@ -292,6 +311,8 @@ function inspectRepetition(job: ChatJob, streamingCalls: ToolCall[] = [], force 
     || detectToolCallRepetition((job.message.toolEvents || []).map(event => ({ name: event.name, arguments: event.arguments })), rules)
     || (argumentText ? detectTextRepetition(argumentText, "tool", rules) : undefined);
   if (!found || found.id === job.repetition?.id && found.count === job.repetition.count) return;
+  // The agent has no one to press "retry": the looping reply is discarded and the agent runtime regenerates it.
+  if (job.agent) { job.agentLoop = found; job.controller.abort(); return; }
   job.repetition = found; broadcast(job, true);
 }
 
@@ -336,7 +357,7 @@ function conversationWithMessage(job: ChatJob) {
     ...job.conversation,
     updatedAt: stamp,
     branches: job.conversation.branches.map((branch) => branch.id === job.input.branchId
-      ? { ...branch, messages: [...branch.messages.filter((message) => message.id !== job.message.id), job.message], updatedAt: stamp }
+      ? { ...branch, messages: [...branch.messages.filter((message) => message.id !== job.message.id), ...(job.agentLoop ? [] : [job.message])], updatedAt: stamp }
       : branch),
   };
 }
@@ -881,12 +902,27 @@ async function run(job: ChatJob) {
         // Some providers wait for approval or run their own model call (their own model calls). Do not hold
         // this chat's residency lease through either (a serial residency policy would self-deadlock).
         if (resolvedTools.releasesModel(call.function.name)) { releaseModel?.(); releaseModel = undefined; }
-        try { execution = await resolvedTools.execute(call.function.name, parseArguments(call.function.arguments), { callId: call.id, rawArguments: call.function.arguments, updateEvent: patch => updateToolEvent(job, call.id, patch), waitForUser: () => waitForBrowser(job, call), setWaitPhase: phase => setWaitPhase(job, phase) }); updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() }); }
-        catch (error) {
-          if ((error as Error).name === "AbortError") throw error;
-          execution = { result: { error: error instanceof Error ? error.message : "Tool execution failed." } };
-          updateToolEvent(job, call.id, { status: "error", result: execution.result, completedAt: new Date().toISOString() });
+        // A single call can be cancelled (by the person, or after the agent's time limit) while the reply goes on.
+        const toolAbort: { controller: AbortController; reason?: string } = { controller: new AbortController() };
+        (job.toolAborts ??= new Map()).set(call.id, toolAbort);
+        const cancelledResult = (): ToolExecution => ({ result: { cancelled: true, error: `The tool call was ${toolAbort.reason || "cancelled"} before it finished. Continue without its result.` } });
+        const cancelled = new Promise<ToolExecution>(resolve => toolAbort.controller.signal.addEventListener("abort", () => resolve(cancelledResult()), { once: true }));
+        const limit = job.agent?.toolTimeoutMs; let usedMs = 0;
+        const limitTimer = limit ? setInterval(() => {
+          // Time spent waiting for the person's approval does not count toward the limit.
+          if (job.message.toolEvents?.find(event => event.id === call.id)?.status !== "waiting") usedMs += 5000;
+          if (usedMs >= limit) cancelChatTool(job, call.id, `stopped after the ${Math.round(limit / 60_000)}-minute time limit`);
+        }, 5000) : undefined;
+        try {
+          execution = await Promise.race([resolvedTools.execute(call.function.name, parseArguments(call.function.arguments), { callId: call.id, rawArguments: call.function.arguments, signal: AbortSignal.any([job.controller.signal, toolAbort.controller.signal]), updateEvent: patch => updateToolEvent(job, call.id, patch), waitForUser: () => waitForBrowser(job, call), setWaitPhase: phase => setWaitPhase(job, phase) }), cancelled]);
+          if (toolAbort.controller.signal.aborted) { job.waiting.delete(call.id); updateToolEvent(job, call.id, { status: "error", result: execution.result, completedAt: new Date().toISOString() }); job.status = "running"; }
+          else updateToolEvent(job, call.id, { status: "completed", result: execution.result, completedAt: new Date().toISOString() });
         }
+        catch (error) {
+          if ((error as Error).name === "AbortError" && job.controller.signal.aborted) throw error;
+          execution = toolAbort.controller.signal.aborted ? cancelledResult() : { result: { error: error instanceof Error ? error.message : "Tool execution failed." } };
+          updateToolEvent(job, call.id, { status: "error", result: execution.result, completedAt: new Date().toISOString() });
+        } finally { if (limitTimer) clearInterval(limitTimer); job.toolAborts?.delete(call.id); }
         const textContent = execution.content?.filter((part): part is Extract<ModelContentPart, { type: "text" }> => part.type === "text").map((part) => part.text).join("\n\n");
         messages.push({ role: "tool", tool_call_id: call.id, name: call.function.name, content: textContent || JSON.stringify(execution.result) });
         const images = execution.content?.filter((part): part is Exclude<ModelContentPart, { type: "text" }> => part.type === "image_url" || part.type === "image_file") || [];
@@ -905,7 +941,7 @@ async function run(job: ChatJob) {
     await persist(job).catch(() => undefined); broadcast(job, true); finishSubscribers(job);
   } finally {
     if (!job.agent) releasePlanAdmission(job.userId);
-    try { job.agent?.onSettled?.({ status: job.status, content: job.message.content, error: job.error }); }
+    try { job.agent?.onSettled?.({ status: job.status, content: job.message.content, error: job.error, looped: Boolean(job.agentLoop) }); }
     catch (error) { console.error("Agent settle handler failed", error); }
     releaseModel?.();
     releaseRoute?.();
@@ -936,7 +972,7 @@ export async function startChatJob(input: StartChatJobInput, userId: string, use
   if (options.agent) assertPlanAccess(userId, base.id, base.sourceModel); else acquirePlanAdmission(userId,base.id,base.sourceModel);
   const job: ChatJob = {
     agent: options.agent, userId, userRole, input, conversation: input.systemPromptOverrides ? { ...conversation, systemPromptOverrides: readSystemPromptOverrides(input.systemPromptOverrides) } : conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
-    repetitionRules: normalizeRepetitionSettings(config.harnessSettings?.repetitionDetection), repetitionCheck: { size: 0, at: 0 },
+    repetitionRules: agentRepetitionRules(normalizeRepetitionSettings(config.harnessSettings?.repetitionDetection), Boolean(options.agent)), repetitionCheck: { size: 0, at: 0 },
     startedAt: Date.now(), waitPhaseStartedAt: Date.now(),
     message: { id: input.assistantMessageId, revisionGroupId: input.revisionGroupId, role: "assistant", content: "", reasoning: "", toolEvents: [], createdAt: new Date().toISOString() },
   };
