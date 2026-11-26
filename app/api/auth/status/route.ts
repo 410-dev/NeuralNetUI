@@ -1,12 +1,13 @@
 import { getUser, setupRequired } from "@/lib/auth";
 import { ensureRetentionMaintenanceScheduled } from "@/lib/retention-maintenance";
+import { ensureAgentScheduler } from "@/lib/agent/runtime";
 import { accentColorOf, DEFAULT_LOGIN_APPEARANCE } from "@/lib/appearance";
 import { readConfig } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  ensureRetentionMaintenanceScheduled();
+  ensureRetentionMaintenanceScheduled(); ensureAgentScheduler();
   const user = getUser(request);
   // The sign-in screen paints itself before any account exists, so the workspace accent for it
   // travels with the unauthenticated status rather than the per-user configuration.

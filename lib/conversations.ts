@@ -27,6 +27,7 @@ const messageSchema = z.object({
   promptProcessingSeconds: z.number().nonnegative().optional(),
   totalDurationSeconds: z.number().nonnegative().optional(),
   modelName: z.string().max(200).optional(),
+  agentKind: z.enum(["notice", "context"]).optional(),
   routedModel: z.string().max(200).optional(),
   steps: z.array(z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("reasoning"), text: z.string(), seconds: z.number().nonnegative().optional(), startedAt: z.number().nonnegative().optional(), promptSeconds: z.number().nonnegative().optional() }),
@@ -161,6 +162,7 @@ function storeConversation(record: Conversation, userId: string, guard?: () => b
         });
         db.prepare("UPDATE messages SET context_tokens = ?, prompt_processing_seconds = ?, total_duration_seconds = ? WHERE id = ? AND conversation_id = ?").run(message.contextTokens ?? null, message.promptProcessingSeconds ?? null, message.totalDurationSeconds ?? null, message.id, record.id);
         // A save that does not carry the answering model (an older client, an edited copy) keeps the recorded one.
+        if (message.agentKind) db.prepare("UPDATE messages SET agent_kind = ? WHERE id = ? AND conversation_id = ?").run(message.agentKind, message.id, record.id);
         if (message.modelName || message.routedModel) db.prepare("UPDATE messages SET model_name = COALESCE(?, model_name), routed_model = COALESCE(?, routed_model) WHERE id = ? AND conversation_id = ?").run(message.modelName ?? null, message.routedModel ?? null, message.id, record.id);
         insertBranchMessage.run(branch.id, message.id, messagePosition);
         for (const [attachmentPosition, attachment] of (message.attachments || []).entries()) {
@@ -219,14 +221,14 @@ export async function listConversations(userId: string): Promise<ConversationSum
     SELECT c.id, c.title, c.active_branch_id AS activeBranchId, COUNT(b.id) AS branchCount, c.updated_at AS updatedAt, c.pinned_at AS pinnedAt
     FROM conversations c
     LEFT JOIN branches b ON b.conversation_id = c.id
-    WHERE c.user_id = ? AND c.temporary = 0 AND c.deleted_at IS NULL
+    WHERE c.user_id = ? AND c.temporary = 0 AND c.deleted_at IS NULL AND c.id NOT IN (SELECT conversation_id FROM agent_conversations)
     GROUP BY c.id
     ORDER BY c.pinned_at IS NULL, c.pinned_at DESC, c.updated_at DESC
   `).all(userId) as Array<ConversationSummary & { pinnedAt: string | null }>;
   return rows.map(row => ({ ...row, pinnedAt: row.pinnedAt || undefined }));
 }
 
-export async function listManagedConversationIds(userId:string){await ensureLegacyConversationsMigrated(userId);return(db.prepare("SELECT id FROM conversations WHERE user_id=? AND temporary=0 ORDER BY updated_at DESC").all(userId) as Array<{id:string}>).map(row=>row.id);}
+export async function listManagedConversationIds(userId:string){await ensureLegacyConversationsMigrated(userId);return(db.prepare("SELECT id FROM conversations WHERE user_id=? AND temporary=0 AND id NOT IN (SELECT conversation_id FROM agent_conversations) ORDER BY updated_at DESC").all(userId) as Array<{id:string}>).map(row=>row.id);}
 
 export async function listConversationsPage(userId:string,input:{page?:number;pageSize?:number;query?:string;state?:"all"|"active"|"deleted";inactiveHours?:number}={}){
   await ensureLegacyConversationsMigrated(userId);
@@ -235,12 +237,12 @@ export async function listConversationsPage(userId:string,input:{page?:number;pa
   const inactiveHours=Number.isFinite(input.inactiveHours)&&Number(input.inactiveHours)>0?Math.min(24*365*20,Number(input.inactiveHours)):0;
   const inactiveSql=inactiveHours?"AND c.updated_at <= ?":"";const inactiveArgs=inactiveHours?[new Date(Date.now()-inactiveHours*3600_000).toISOString()]:[];
   const searchSql=query?"AND (instr(lower(c.id),lower(?))>0 OR instr(lower(c.title),lower(?))>0 OR EXISTS(SELECT 1 FROM branches sb JOIN branch_messages sbm ON sbm.branch_id=sb.id JOIN messages sm ON sm.id=sbm.message_id WHERE sb.conversation_id=c.id AND instr(lower(sm.content),lower(?))>0))":"";
-  const searchArgs=query?[query,query,query]:[];const args=[...inactiveArgs,...searchArgs];const total=(db.prepare(`SELECT COUNT(*) AS total FROM conversations c WHERE c.user_id = ? AND c.temporary = 0 ${stateSql} ${inactiveSql} ${searchSql}`).get(userId,...args) as {total:number}).total;
+  const searchArgs=query?[query,query,query]:[];const args=[...inactiveArgs,...searchArgs];const total=(db.prepare(`SELECT COUNT(*) AS total FROM conversations c WHERE c.user_id = ? AND c.temporary = 0 AND c.id NOT IN (SELECT conversation_id FROM agent_conversations) ${stateSql} ${inactiveSql} ${searchSql}`).get(userId,...args) as {total:number}).total;
   const pageSize=Math.max(1,Math.min(100,Math.floor(input.pageSize||10)));const pageCount=Math.max(1,Math.ceil(total/pageSize));const page=Math.max(1,Math.min(pageCount,Math.floor(input.page||1)));
   const items=db.prepare(`
     SELECT c.id,c.title,c.active_branch_id AS activeBranchId,COUNT(b.id) AS branchCount,c.updated_at AS updatedAt,c.deleted_at AS deletedAt
     FROM conversations c LEFT JOIN branches b ON b.conversation_id=c.id
-    WHERE c.user_id=? AND c.temporary=0 ${stateSql} ${inactiveSql} ${searchSql} GROUP BY c.id
+    WHERE c.user_id=? AND c.temporary=0 AND c.id NOT IN (SELECT conversation_id FROM agent_conversations) ${stateSql} ${inactiveSql} ${searchSql} GROUP BY c.id
     ORDER BY c.updated_at DESC,c.id LIMIT ? OFFSET ?
   `).all(userId,...args,pageSize,(page-1)*pageSize) as Array<ConversationSummary&{deletedAt:string|null}>;
   return{items:items.map(item=>({...item,deletedAt:item.deletedAt||undefined})),total,page,pageSize,pageCount,query,state,inactiveHours};
@@ -268,7 +270,7 @@ export async function deleteConversations(ids:string[],userId:string){
   if(unique.some(id=>!/^[a-zA-Z0-9_-]+$/.test(id)))throw new Error("Invalid conversation id");
   const placeholders=unique.map(()=>"?").join(",");const stamp=new Date().toISOString();
   const deleted=db.transaction(()=>{
-    const found=(db.prepare(`SELECT id FROM conversations WHERE user_id=? AND temporary=0 AND deleted_at IS NULL AND id IN (${placeholders})`).all(userId,...unique) as Array<{id:string}>).map(row=>row.id);
+    const found=(db.prepare(`SELECT id FROM conversations WHERE user_id=? AND temporary=0 AND deleted_at IS NULL AND id NOT IN (SELECT conversation_id FROM agent_conversations) AND id IN (${placeholders})`).all(userId,...unique) as Array<{id:string}>).map(row=>row.id);
     if(found.length!==unique.length)throw Object.assign(new Error("One or more conversations were not found."),{code:"ENOENT"});
     db.prepare(`UPDATE conversations SET deleted_at=? WHERE user_id=? AND deleted_at IS NULL AND id IN (${placeholders})`).run(stamp,userId,...unique);
     return found;
@@ -283,7 +285,7 @@ export async function deleteConversationsMatching(userId:string,input:{query?:st
   const inactiveSql=inactiveHours?"AND c.updated_at <= ?":"";const inactiveArgs=inactiveHours?[new Date(Date.now()-inactiveHours*3600_000).toISOString()]:[];
   const searchSql=query?"AND (instr(lower(c.id),lower(?))>0 OR instr(lower(c.title),lower(?))>0 OR EXISTS(SELECT 1 FROM branches sb JOIN branch_messages sbm ON sbm.branch_id=sb.id JOIN messages sm ON sm.id=sbm.message_id WHERE sb.conversation_id=c.id AND instr(lower(sm.content),lower(?))>0))":"";
   const searchArgs=query?[query,query,query]:[];
-  const ids=(db.prepare(`SELECT c.id FROM conversations c WHERE c.user_id=? AND c.temporary=0 AND c.deleted_at IS NULL ${inactiveSql} ${searchSql} ORDER BY c.updated_at`).all(userId,...inactiveArgs,...searchArgs) as Array<{id:string}>).map(row=>row.id);
+  const ids=(db.prepare(`SELECT c.id FROM conversations c WHERE c.user_id=? AND c.temporary=0 AND c.deleted_at IS NULL AND c.id NOT IN (SELECT conversation_id FROM agent_conversations) ${inactiveSql} ${searchSql} ORDER BY c.updated_at`).all(userId,...inactiveArgs,...searchArgs) as Array<{id:string}>).map(row=>row.id);
   return ids.length?deleteConversations(ids,userId):[];
 }
 
@@ -341,6 +343,7 @@ type MessageRow = {
   prompt_processing_seconds: number | null;
   total_duration_seconds: number | null;
   model_name: string | null;
+  agent_kind: string | null;
   routed_model: string | null;
   context_tokens: number | null;
   tool_events: string | null;
@@ -366,7 +369,7 @@ async function readConversationRecord(id: string, userId: string, includeDeleted
   const branchRows = db.prepare("SELECT id, name, parent_branch_id, forked_from_message_id, created_at, updated_at FROM branches WHERE conversation_id = ? ORDER BY position").all(id) as BranchRow[];
   const messageRows = db.prepare(`
     SELECT bm.branch_id, m.id, m.revision_group_id, m.role, m.content, m.reasoning, m.reasoning_duration_seconds,
-           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.prompt_processing_seconds, m.total_duration_seconds, m.model_name, m.routed_model, m.context_tokens, m.tool_events, m.steps, m.created_at
+           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.prompt_processing_seconds, m.total_duration_seconds, m.model_name, m.routed_model, m.agent_kind, m.context_tokens, m.tool_events, m.steps, m.created_at
     FROM branch_messages bm
     JOIN messages m ON m.id = bm.message_id
     JOIN branches b ON b.id = bm.branch_id
@@ -412,6 +415,7 @@ async function readConversationRecord(id: string, userId: string, includeDeleted
       promptProcessingSeconds: row.prompt_processing_seconds ?? undefined,
       totalDurationSeconds: row.total_duration_seconds ?? undefined,
       modelName: row.model_name ?? undefined,
+      agentKind: row.agent_kind === "notice" || row.agent_kind === "context" ? row.agent_kind : undefined,
       routedModel: row.routed_model ?? undefined,
       toolEvents: row.tool_events ? JSON.parse(row.tool_events) : undefined,
       steps: row.steps ? JSON.parse(row.steps) : undefined,
@@ -539,7 +543,7 @@ export async function searchConversations(userId: string, query: string) {
   if (!needle) return [];
   const rows = db.prepare(`SELECT c.id, c.title, c.active_branch_id AS activeBranchId, b.id AS branchId, b.name AS branchName, m.content
     FROM conversations c JOIN branches b ON b.conversation_id = c.id JOIN branch_messages bm ON bm.branch_id = b.id JOIN messages m ON m.id = bm.message_id
-    WHERE c.user_id = ? AND c.temporary = 0 AND c.deleted_at IS NULL ORDER BY c.updated_at DESC, b.position, bm.position`).all(userId) as Array<{id:string;title:string;activeBranchId:string;branchId:string;branchName:string;content:string}>;
+    WHERE c.user_id = ? AND c.temporary = 0 AND c.deleted_at IS NULL AND c.id NOT IN (SELECT conversation_id FROM agent_conversations) ORDER BY c.updated_at DESC, b.position, bm.position`).all(userId) as Array<{id:string;title:string;activeBranchId:string;branchId:string;branchName:string;content:string}>;
   const seen = new Set<string>();
   return rows.filter(row => { const key = row.id + ":" + row.branchId; if (seen.has(key) || !(row.content.toLocaleLowerCase().includes(needle) || row.title.toLocaleLowerCase().includes(needle))) return false; seen.add(key); return true; }).slice(0, 100).map(row => { const at = row.content.toLocaleLowerCase().indexOf(needle); return {...row, content: row.content.slice(Math.max(0, at - 60), Math.max(0, at - 60) + 240), otherBranch: row.branchId !== row.activeBranchId}; });
 }

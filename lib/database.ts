@@ -575,6 +575,87 @@ function openDatabase() {
     if (!columns.some(column => column.name === "routed_model")) connection.exec("ALTER TABLE messages ADD COLUMN routed_model TEXT;");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(31, new Date().toISOString());
   })();
+  const agentVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (agentVersion.version < 32) connection.transaction(() => {
+    // The personal agent: one long main chat per account, subagent sessions, its workboard, schedules and push devices.
+    // Conversations are rewritten on every save, so the agent tables refer to them without a foreign key.
+    connection.exec(`CREATE TABLE IF NOT EXISTS agent_profiles (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id TEXT NOT NULL,
+        settings TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(settings)),
+        next_heartbeat_at TEXT,
+        last_heartbeat_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS agent_conversations (
+        conversation_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('main', 'sub')),
+        run_id TEXT
+      );
+      CREATE TABLE IF NOT EXISTS agent_items (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('todo', 'event', 'memory')),
+        title TEXT NOT NULL,
+        body TEXT,
+        status TEXT,
+        starts_at TEXT,
+        ends_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS agent_items_user_idx ON agent_items(user_id, kind, updated_at DESC);
+      CREATE TABLE IF NOT EXISTS agent_schedules (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('once', 'recurring')),
+        title TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        next_run_at TEXT,
+        interval_minutes INTEGER CHECK (interval_minutes IS NULL OR interval_minutes >= 1),
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        last_run_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS agent_schedules_due_idx ON agent_schedules(enabled, next_run_at);
+      CREATE TABLE IF NOT EXISTS agent_runs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        conversation_id TEXT,
+        kind TEXT NOT NULL CHECK (kind IN ('task', 'heartbeat', 'schedule')),
+        schedule_id TEXT,
+        title TEXT NOT NULL,
+        instructions TEXT NOT NULL,
+        report TEXT NOT NULL DEFAULT 'if_needed' CHECK (report IN ('always', 'if_needed')),
+        status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'waiting', 'completed', 'failed', 'cancelled')),
+        result TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS agent_runs_user_idx ON agent_runs(user_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS push_subscriptions (
+        endpoint TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        user_agent TEXT,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS app_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL);`);
+    const planColumns = connection.prepare("PRAGMA table_info(plans)").all() as Array<{ name: string }>;
+    if (!planColumns.some(column => column.name === "agent_enabled")) connection.exec("ALTER TABLE plans ADD COLUMN agent_enabled INTEGER NOT NULL DEFAULT 0 CHECK (agent_enabled IN (0, 1));");
+    if (!planColumns.some(column => column.name === "agent_min_interval_minutes")) connection.exec("ALTER TABLE plans ADD COLUMN agent_min_interval_minutes INTEGER NOT NULL DEFAULT 30 CHECK (agent_min_interval_minutes >= 1);");
+    const messageColumns = connection.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+    // "notice": something the agent told the person on its own; "context": a result shown to the model, not the person.
+    if (!messageColumns.some(column => column.name === "agent_kind")) connection.exec("ALTER TABLE messages ADD COLUMN agent_kind TEXT;");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(32, new Date().toISOString());
+  })();
   return connection;
 }
 

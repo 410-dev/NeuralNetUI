@@ -15,7 +15,15 @@ export interface ToolSpec {
   inputSchema: Record<string, unknown>;
   /** The provider's own name for the function when the advertised name is namespaced (MCP tool name). */
   sourceName?: string;
+  /** The tool says it only reads (MCP `readOnlyHint`). Missing means unknown. */
+  readOnly?: boolean;
 }
+
+/**
+ * Decides a call before the provider's own approval: "run" executes it without asking, "provider" leaves it to the
+ * provider's approval, and `{ result }` answers the model without running it. Used by the agent's automatic runs.
+ */
+export type ToolGate = (call: { providerId: string; name: string; sourceName: string; readOnlyHint?: boolean; args: Record<string, unknown>; ctx: ToolCallContext }) => Promise<"run" | "provider" | { result: unknown }>;
 
 /** What a call returns: `result` is kept on the tool event for the transcript, `content` (when present) is what the model reads. */
 export type ToolExecution = { result: unknown; content?: ModelContentPart[] };
@@ -43,6 +51,10 @@ export interface ToolRequestContext {
   disabledTools?: readonly string[];
   /** Executables installed in Harness settings. */
   managedTools?: { browser?: boolean; youtube?: boolean };
+  /** Set for the personal agent: its automatic runs decide calls here first. */
+  gate?: ToolGate;
+  /** Set for the personal agent: which agent session this request belongs to. */
+  agent?: { userId: string; mode: "main" | "sub"; runId?: string; autonomous: boolean };
 }
 
 /** The request context plus this provider's own switch values. */

@@ -75,6 +75,9 @@ export async function resolveTools(request: ToolRequestContext, state: ToolState
       const binding = bindings.get(name);
       if (!binding) throw new Error(`Tool ${name} is not enabled.`);
       const ctx: ToolCallContext = { ...binding.ctx, ...call };
+      const gated = binding.ctx.gate ? await binding.ctx.gate({ providerId: binding.provider.manifest.id, name, sourceName: binding.spec.sourceName ?? name, readOnlyHint: binding.spec.readOnly, args, ctx }) : "provider";
+      if (typeof gated === "object") return { result: gated.result };
+      if (gated === "run") return binding.provider.execute(name, args, ctx);
       const authorization = await binding.provider.authorize?.(name, args, ctx);
       if (authorization && !authorization.approved) return { result: authorization.result };
       return binding.provider.execute(name, args, ctx);

@@ -23,6 +23,7 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
         name: binding.advertisedName, sourceName: binding.toolName,
         description: `[MCP: ${binding.connectionName}] ${binding.tool.description || binding.toolName}`,
         inputSchema: (binding.tool.inputSchema || { type: "object", properties: {} }) as Record<string, unknown>,
+        readOnly: (binding.tool as { annotations?: { readOnlyHint?: boolean } }).annotations?.readOnlyHint === true,
       }));
     },
     async authorize(name, args, ctx) {

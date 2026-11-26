@@ -128,6 +128,8 @@ export interface ConnectionConfig {
   lmfCacheDiscount?: boolean;
   /** LMFuseFramework only: how much of each cached prompt token is waived, in percent. Missing means 90. */
   lmfCacheDiscountPercent?: number;
+  /** Requests this server may run at once; 0 means no limit. The agent runs subagents in parallel only up to it. Missing means 1. */
+  maxConcurrentRequests?: number;
   /** LMFuseFramework only: a chat's session is deleted on the server after this many hours without a request. Missing means 24. */
   lmfSessionTtlHours?: number;
   models: ModelConfig[];
@@ -177,6 +179,10 @@ export interface UsagePlan {
   artifactHtmlEnabled: boolean;
   /** Built-in tool provider ids people on this plan cannot use. */
   disabledToolIds: string[];
+  /** People on this plan may use the personal agent. */
+  agentEnabled: boolean;
+  /** Shortest interval, in minutes, between the agent's automatic runs and recurring tasks. */
+  agentMinIntervalMinutes: number;
   userCount?: number;
 }
 
@@ -392,6 +398,8 @@ export interface StoredMessage {
   modelName?: string;
   /** For an LMFuseFramework routing model: the routed provider and model that actually answered. */
   routedModel?: string;
+  /** Agent chat only: "notice" is something the agent told the person on its own; "context" is a result only the model reads. */
+  agentKind?: "notice" | "context";
   /** Absent on messages written before the sequential transcript existed. */
   steps?: MessageStep[];
   toolEvents?: ToolEvent[];

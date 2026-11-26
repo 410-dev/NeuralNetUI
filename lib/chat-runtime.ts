@@ -20,6 +20,9 @@ import { readUpload, readUploadModelContent, saveGeneratedImage } from "./upload
 import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, envApiKey, hasModelResidency } from "./connection-drivers";
 import { chatFetcher, providerRequestBody } from "./provider-requests.ts";
 import type { ConnectionConfig, ConnectionDriver } from "./types";
+import { agentConversation } from "./agent/store";
+import { BROWSER_ONLY_PROVIDERS } from "./agent/policy";
+import type { ToolGate, ToolProviderSource } from "./tools/types";
 import { routedModelLabel, deleteRemoteLmfSession, forgetLmfSession, isLmfSessionGone, LMF_SESSION_HEADER, lmfChargedInput, lmfSessionFrom, lmfSessionTtlMs, saveLmfSession, storedLmfSession } from "./lmf";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
 import { readPersonalSampling, resolveSampling, samplingRequestFields, type SamplingParams } from "./sampling-params";
@@ -88,7 +91,27 @@ export function runtimeModel(config: Awaited<ReturnType<typeof readConfig>>, inp
   return { selected, base, model: aliasWithBaseModel(selected, base, userId) };
 }
 
+/** Set by the agent runtime for its main chat and subagent sessions. */
+export type AgentJobOptions = {
+  mode: "main" | "sub";
+  runId?: string;
+  /** No one started this turn: tool calls follow the agent's automatic-run rules. */
+  autonomous: boolean;
+  /** Appended to the model's system prompt. */
+  systemPrompt: string;
+  /** Compaction threshold (share of the context window) that replaces the harness setting. */
+  compactPercent: number;
+  /** Tools on for this session; missing means the request's own. */
+  toolState?: ToolState;
+  /** Extra tool sources (the agent's own tools). */
+  sources: ToolProviderSource[];
+  gate?: ToolGate;
+  /** Called once when the reply ends, however it ends. */
+  onSettled?: (result: { status: JobStatus; content: string; error?: string }) => void;
+};
+
 type ChatJob = {
+  agent?: AgentJobOptions;
   /** Set for LMFuseFramework connections: the session this chat continues, created on the first turn. */
   lmf?: { connection: ConnectionConfig; model: string; sessionId?: string };
   userId: string;
@@ -138,6 +161,15 @@ function usageFrom(payload: Record<string, unknown>) {
     reasoningTokens: token(details?.reasoning_tokens), totalTokens: token(value.total_tokens),
     cachedTokens: token((value.prompt_tokens_details as Record<string, unknown> | undefined)?.cached_tokens),
   };
+}
+
+/**
+ * The agent's tools: code that runs in the person's browser is not offered to the agent until a virtual computer is
+ * available, and automatic runs also leave out what only the person can answer there (questions, location).
+ */
+function agentToolState(state: ToolState, autonomous: boolean): ToolState {
+  const off = Object.fromEntries([...BROWSER_ONLY_PROVIDERS].filter(id => autonomous || id === "code-runner").map(id => [id, { ...state.providers[id], enabled: false }]));
+  return { version: 2, providers: { ...state.providers, ...off } };
 }
 
 /** Keeps the session id LMFuseFramework named for this chat, for the next turn and the next request. */
@@ -538,7 +570,9 @@ async function run(job: ChatJob) {
   let releaseModel: (() => void) | undefined;
   let releaseRoute: (() => void) | undefined;
   try {
-    const config = await readConfig();
+    let config = await readConfig();
+    // The agent compacts at its own threshold and never retitles its chats.
+    if (job.agent) config = { ...config, harnessSettings: { ...(config.harnessSettings || DEFAULT_HARNESS_SETTINGS), contextMode: "compacting", compactThreshold: job.agent.compactPercent, titleEnabled: false } };
     if (job.input.messages.some((message) => (message.attachments?.length || 0) > config.toolSettings.maxAttachmentsPerMessage)) throw new Error(`A message exceeds the configured ${config.toolSettings.maxAttachmentsPerMessage}-attachment limit.`);
     const { model, selected, base } = runtimeModel(config, job.input, job.userId);
     job.message = { ...job.message, modelName: selected.name };
@@ -560,7 +594,8 @@ async function run(job: ChatJob) {
     // An account's own rewrite of this model and preset replaces the composed prompt, where the model allows it.
     // This chat's prompt, then the account's prompt for the model, then the server default — where the model allows it.
     const allowed = canPersonalizeSystemPrompt(selected, job.userRole);
-    const systemPrompt = resolveSystemPrompt({ model, selectedId: selected.id, preset, allowed, personal: readModelSystemPrompts(readUserPreferences(job.userId))[selected.id], session: readSystemPromptOverrides(job.input.systemPromptOverrides) });
+    const composedPrompt = resolveSystemPrompt({ model, selectedId: selected.id, preset, allowed, personal: readModelSystemPrompts(readUserPreferences(job.userId))[selected.id], session: readSystemPromptOverrides(job.input.systemPromptOverrides) });
+    const systemPrompt = job.agent ? [composedPrompt, job.agent.systemPrompt].filter(Boolean).join("\n\n") : composedPrompt;
     if (model.imageGeneration === true) {
       if (connection.driver !== "openai") throw new Error("Image generation currently requires an OpenAI-compatible connection.");
       const latest = job.input.messages.findLast(message => message.role === "user");
@@ -616,9 +651,10 @@ async function run(job: ChatJob) {
       services: { complete: (modelId, effort, prompt, input, maxTokens) => harnessCompletion(harnessContext, modelId || job.input.modelId, effort, prompt, input, maxTokens) },
       disabledTools: planDisabledToolIds(job.userId),
       managedTools: managedToolsInstalled(),
+      ...(job.agent ? { gate: job.agent.gate, agent: { userId: job.userId, mode: job.agent.mode, runId: job.agent.runId, autonomous: job.agent.autonomous } } : {}),
     };
     // Every provider the request switched on and the server allows, fixed for the whole reply.
-    const resolvedTools = await resolveTools(toolRequest, requestToolState(job.input.tools), toolSources());
+    const resolvedTools = await resolveTools(toolRequest, job.agent ? agentToolState(job.agent.toolState ?? requestToolState(job.input.tools), job.agent.autonomous) : requestToolState(job.input.tools), job.agent ? [...toolSources(), ...job.agent.sources] : toolSources());
     for (const dropped of resolvedTools.rejected) console.warn(`Tool ${dropped.name} from ${dropped.provider} was not offered: ${dropped.reason}.`);
     const tools = resolvedTools.definitions;
     const firstResponse = !job.conversation.branches.some(b => b.messages.some(m => m.role === "assistant" && m.content));
@@ -868,7 +904,9 @@ async function run(job: ChatJob) {
     if (job.message.reasoning) job.message.reasoningDurationSeconds ||= Math.max(1, reasoningSeconds);
     await persist(job).catch(() => undefined); broadcast(job, true); finishSubscribers(job);
   } finally {
-    releasePlanAdmission(job.userId);
+    if (!job.agent) releasePlanAdmission(job.userId);
+    try { job.agent?.onSettled?.({ status: job.status, content: job.message.content, error: job.error }); }
+    catch (error) { console.error("Agent settle handler failed", error); }
     releaseModel?.();
     releaseRoute?.();
     job.waiting.clear();
@@ -883,7 +921,9 @@ async function run(job: ChatJob) {
   }
 }
 
-export async function startChatJob(input: StartChatJobInput, userId: string, userRole: UserRole = "user") {
+export async function startChatJob(input: StartChatJobInput, userId: string, userRole: UserRole = "user", options: { agent?: AgentJobOptions } = {}) {
+  // The agent's own sessions start only through the agent runtime, which supplies their tools and rules.
+  if (!options.agent && agentConversation(input.conversationId)) throw new Error("This chat belongs to the agent. Send messages from the agent screen.");
   let existing = jobs.get(input.conversationId);
   if (existing && existing.userId === userId && ["running", "waiting"].includes(existing.status)) return snapshot(existing);
   const conversation = await readConversation(input.conversationId, userId);
@@ -892,9 +932,10 @@ export async function startChatJob(input: StartChatJobInput, userId: string, use
   existing = jobs.get(input.conversationId);
   if (existing && existing.userId === userId && ["running", "waiting"].includes(existing.status)) return snapshot(existing);
   const config=await readConfig();const {base}=runtimeModel(config,input,userId);
-  acquirePlanAdmission(userId,base.id,base.sourceModel);
+  // Agent sessions run beside the person's own chats, so they do not take the one-reply-at-a-time slot; limits still apply.
+  if (options.agent) assertPlanAccess(userId, base.id, base.sourceModel); else acquirePlanAdmission(userId,base.id,base.sourceModel);
   const job: ChatJob = {
-    userId, userRole, input, conversation: input.systemPromptOverrides ? { ...conversation, systemPromptOverrides: readSystemPromptOverrides(input.systemPromptOverrides) } : conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
+    agent: options.agent, userId, userRole, input, conversation: input.systemPromptOverrides ? { ...conversation, systemPromptOverrides: readSystemPromptOverrides(input.systemPromptOverrides) } : conversation, status: "running", waitPhase: "preparing-response", controller: new AbortController(), subscribers: new Set(), waiting: new Map(),
     repetitionRules: normalizeRepetitionSettings(config.harnessSettings?.repetitionDetection), repetitionCheck: { size: 0, at: 0 },
     startedAt: Date.now(), waitPhaseStartedAt: Date.now(),
     message: { id: input.assistantMessageId, revisionGroupId: input.revisionGroupId, role: "assistant", content: "", reasoning: "", toolEvents: [], createdAt: new Date().toISOString() },
