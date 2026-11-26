@@ -195,6 +195,8 @@ export interface McpConnection {
   hasCredential: boolean;
   enabled: boolean;
   toolTimeoutSeconds: number;
+  /** "vm" is the account's virtual computer: one per account, not counted toward the plan's MCP limit. */
+  kind: "user" | "vm";
   createdAt: string;
   updatedAt: string;
 }

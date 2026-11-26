@@ -47,7 +47,7 @@ import {
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
   Braces, Layers, LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Power, Upload, HardDrive,
   Palette, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Repeat2, Settings, Type, Zap, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge, Cable, Code2, Unlock,
-  RotateCcw, Video, LockKeyhole, ShieldAlert, Bot, BellRing } from "lucide-react";
+  RotateCcw, Video, LockKeyhole, ShieldAlert, Bot, BellRing, Monitor } from "lucide-react";
 import { Children, cloneElement, createContext, CSSProperties, FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -2020,7 +2020,7 @@ function CodeSnippet({ c, children, fadeDurationMs = 0 }: { c: CopySet; children
   </div>;
 }
 
-const MENU_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video };
+const MENU_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video, monitor: Monitor };
 
 /** A bounded number option. Typing stays free; the value is clamped and saved when the field loses focus or on Enter. */
 function OptionNumber({ field, value, locale, onChange }: { field: Extract<ToolOptionField, { kind: "integer" }>; value: number; locale: Locale; onChange: (value: number) => void }) {
@@ -2241,7 +2241,7 @@ function MultipleChoiceResponse({ event }: { event: ToolEvent }) {
   })}</div></div>;
 }
 
-const EVENT_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Search, link: Link2, braces: Braces, clock: Clock3, "map-pin": LocateFixed, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video };
+const EVENT_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Search, link: Link2, braces: Braces, clock: Clock3, "map-pin": LocateFixed, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video, monitor: Monitor };
 
 function ToolEventIcon({ name, size = 15 }: { name: string; size?: number }) {
   const Icon = EVENT_TOOL_ICONS[toolIconFor(name)] || Wrench;

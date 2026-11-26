@@ -1,0 +1,25 @@
+# NeuralNetUI virtual computer.
+#   NNUI_VM_KEY=... CLOUDFLARE_TUNNEL_TOKEN=... docker compose up -d --build
+# Without NNUI_VM_KEY a key is generated and printed in the log (docker compose logs vm).
+# Set GUI=1 for a desktop (screenshots, mouse and keyboard); leave it 0 for a headless computer.
+services:
+  vm:
+    build:
+      context: .
+      args:
+        GUI: ${GUI:-0}
+    image: neuralnetui-vm:${GUI:-0}
+    container_name: neuralnetui-vm
+    restart: unless-stopped
+    environment:
+      NNUI_VM_KEY: ${NNUI_VM_KEY:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    ports:
+      - "${NNUI_VM_PUBLISH:-127.0.0.1:8765}:8765"
+    shm_size: 1gb
+    volumes:
+      - vm-home:/home
+      - vm-data:/var/lib/neuralnetui-vm
+volumes:
+  vm-home:
+  vm-data:

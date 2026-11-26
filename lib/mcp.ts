@@ -1,3 +1,5 @@
+import { vmCallerId, vmDefaultPolicy } from "./vm";
+import { isVmFileTool, runVmFileTool, VM_FILE_TOOLS } from "./vm-files";
 import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { Client, StreamableHTTPClientTransport, type AuthProvider, type Tool } from "@modelcontextprotocol/client";
@@ -19,7 +21,7 @@ const DEFAULT_TOOL_POLICY: McpToolPolicy = "session_ask";
 
 type McpRow = {
   id: string; user_id: string; name: string; description: string; url: string;
-  auth_type: McpAuthType; credential: string; enabled: number; tool_timeout_seconds: number; created_at: string; updated_at: string;
+  auth_type: McpAuthType; credential: string; enabled: number; tool_timeout_seconds: number; kind?: "user" | "vm"; created_at: string; updated_at: string;
 };
 
 const connectionSchema = z.object({
@@ -29,22 +31,25 @@ const connectionSchema = z.object({
   authType: z.enum(["oauth", "api_key", "none"]),
   credential: z.string().max(8000).optional().default(""),
   enabled: z.boolean().optional().default(true),
-  toolTimeoutSeconds: z.number().int().min(MIN_MCP_TOOL_TIMEOUT_SECONDS, toolTimeoutMessage).max(MAX_MCP_TOOL_TIMEOUT_SECONDS, toolTimeoutMessage).optional().default(DEFAULT_MCP_TOOL_TIMEOUT_SECONDS),
+  toolTimeoutSeconds: z.number().int().min(MIN_MCP_TOOL_TIMEOUT_SECONDS, toolTimeoutMessage).max(MAX_MCP_TOOL_TIMEOUT_SECONDS, toolTimeoutMessage).optional(),
+  kind: z.enum(["user", "vm"]).optional().default("user"),
 });
+/** Shell commands on a virtual computer can run for minutes; they report progress, but start with a long limit. */
+const VM_TOOL_TIMEOUT_SECONDS = 600;
 
 function publicConnection(row: McpRow): McpConnection {
-  return { id: row.id, name: row.name, description: row.description || undefined, url: row.url, authType: row.auth_type, hasCredential: Boolean(row.credential), enabled: row.enabled === 1, toolTimeoutSeconds: row.tool_timeout_seconds, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, name: row.name, description: row.description || undefined, url: row.url, authType: row.auth_type, hasCredential: Boolean(row.credential), enabled: row.enabled === 1, toolTimeoutSeconds: row.tool_timeout_seconds, kind: row.kind === "vm" ? "vm" : "user", createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
 export function mcpEntitlement(userId: string): McpEntitlement {
   const row = db.prepare(`SELECT p.mcp_enabled AS enabled,p.max_mcp_connections AS maximum,
-    (SELECT COUNT(*) FROM mcp_connections m WHERE m.user_id=u.id) AS used
+    (SELECT COUNT(*) FROM mcp_connections m WHERE m.user_id=u.id AND m.kind='user') AS used
     FROM users u LEFT JOIN plans p ON p.id=u.plan_id WHERE u.id=?`).get(userId) as { enabled: number | null; maximum: number | null; used: number } | undefined;
   return { enabled: row?.enabled === 1, maxConnections: row?.maximum || 0, usedConnections: row?.used || 0 };
 }
 
 export function listMcpConnections(userId: string): McpConnection[] {
-  return (db.prepare("SELECT * FROM mcp_connections WHERE user_id=? ORDER BY created_at,name").all(userId) as McpRow[]).map(publicConnection);
+  return (db.prepare("SELECT * FROM mcp_connections WHERE user_id=? ORDER BY kind='vm' DESC,created_at,name").all(userId) as McpRow[]).map(publicConnection);
 }
 
 function ownedRow(userId: string, id: string): McpRow {
@@ -61,13 +66,15 @@ function assertEntitled(userId: string, adding = false) {
 }
 
 export function createMcpConnection(userId: string, input: unknown): McpConnection {
-  assertEntitled(userId, true);
   const value = connectionSchema.parse(input);
+  // The virtual computer is separate from the plan's MCP allowance; an account has at most one.
+  if (value.kind === "vm") { if (db.prepare("SELECT 1 FROM mcp_connections WHERE user_id=? AND kind='vm'").get(userId)) throw new AuthError("가상 컴퓨터는 하나만 등록할 수 있습니다.", 409); }
+  else assertEntitled(userId, true);
   if (value.authType !== "none" && !value.credential.trim()) throw new AuthError("선택한 인증 방식의 토큰 또는 API 키를 입력해 주세요.", 400);
   const id = randomUUID(), stamp = new Date().toISOString();
   try {
-    db.prepare("INSERT INTO mcp_connections(id,user_id,name,description,url,auth_type,credential,enabled,tool_timeout_seconds,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
-      .run(id, userId, value.name, value.description, value.url, value.authType, value.authType === "none" ? "" : value.credential.trim(), value.enabled ? 1 : 0, value.toolTimeoutSeconds, stamp, stamp);
+    db.prepare("INSERT INTO mcp_connections(id,user_id,name,description,url,auth_type,credential,enabled,tool_timeout_seconds,kind,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(id, userId, value.name, value.description, value.url, value.authType, value.authType === "none" ? "" : value.credential.trim(), value.enabled ? 1 : 0, value.toolTimeoutSeconds ?? (value.kind === "vm" ? VM_TOOL_TIMEOUT_SECONDS : DEFAULT_MCP_TOOL_TIMEOUT_SECONDS), value.kind, stamp, stamp);
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new AuthError("같은 이름의 MCP 연결이 이미 있습니다.", 409);
     throw error;
@@ -76,13 +83,13 @@ export function createMcpConnection(userId: string, input: unknown): McpConnecti
 }
 
 export function updateMcpConnection(userId: string, id: string, input: unknown): McpConnection {
-  assertEntitled(userId);
   const previous = ownedRow(userId, id), value = connectionSchema.parse(input);
+  if (previous.kind !== "vm") assertEntitled(userId);
   const credential = value.authType === "none" ? "" : value.credential.trim() || (value.authType === previous.auth_type ? previous.credential : "");
   if (value.authType !== "none" && !credential) throw new AuthError("선택한 인증 방식의 토큰 또는 API 키를 입력해 주세요.", 400);
   try {
     db.prepare("UPDATE mcp_connections SET name=?,description=?,url=?,auth_type=?,credential=?,enabled=?,tool_timeout_seconds=?,updated_at=? WHERE id=? AND user_id=?")
-      .run(value.name, value.description, value.url, value.authType, credential, value.enabled ? 1 : 0, value.toolTimeoutSeconds, new Date().toISOString(), id, userId);
+      .run(value.name, value.description, value.url, value.authType, credential, value.enabled ? 1 : 0, value.toolTimeoutSeconds ?? previous.tool_timeout_seconds, new Date().toISOString(), id, userId);
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new AuthError("같은 이름의 MCP 연결이 이미 있습니다.", 409);
     throw error;
@@ -112,7 +119,9 @@ async function connectedClient(row: McpRow, signal?: AbortSignal) {
   await assertNetworkTarget(row.user_id,row.url);
   const authProvider: AuthProvider | undefined = row.auth_type === "none" ? undefined : { token: async () => row.credential || undefined };
   const guardedFetch:typeof fetch=async(input,init)=>{const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;await assertNetworkTarget(row.user_id,url);return fetch(input,{...init,redirect:"error"});};
-  const transport = new StreamableHTTPClientTransport(new URL(row.url), { ...(authProvider ? { authProvider } : {}),fetch:guardedFetch });
+  // A virtual computer keeps one workspace per account, named by an opaque id.
+  const requestInit = row.kind === "vm" ? { headers: { "X-NNUI-User": vmCallerId(row.user_id) } } : undefined;
+  const transport = new StreamableHTTPClientTransport(new URL(row.url), { ...(authProvider ? { authProvider } : {}),fetch:guardedFetch, ...(requestInit ? { requestInit } : {}) });
   const client = new Client({ name: "NeuralNetUI", version: "3.0.0" }, { cachePartition: row.user_id });
   await client.connect(transport, { signal: requestSignal(signal) });
   return client;
@@ -132,21 +141,21 @@ function toolPolicies(connectionId: string) {
 }
 
 export async function listMcpTools(userId: string, connectionId: string, signal?: AbortSignal): Promise<McpToolInfo[]> {
-  assertEntitled(userId);
   const row=ownedRow(userId,connectionId);
+  if(row.kind!=="vm")assertEntitled(userId);
   if(!row.enabled)throw new AuthError("이 MCP 연결은 비활성화되어 있습니다.",403);
   const policies=toolPolicies(connectionId);
   return talkToServer(row.url,signal,async()=>{
     const client=await connectedClient(row,signal);
     try {
       const result=await client.listTools(undefined,{signal:requestSignal(signal),cacheMode:"bypass"});
-      return result.tools.map(tool=>({name:tool.name,description:tool.description,inputSchema:tool.inputSchema,policy:policies.get(tool.name)||DEFAULT_TOOL_POLICY}));
+      return [...result.tools,...(row.kind==="vm"?VM_FILE_TOOLS:[])].map(tool=>({name:tool.name,description:tool.description,inputSchema:tool.inputSchema,policy:policies.get(tool.name)||(row.kind==="vm"?vmDefaultPolicy(tool.name):DEFAULT_TOOL_POLICY)}));
     } finally { await client.close().catch(()=>undefined); }
   });
 }
 
 export function saveMcpToolPolicies(userId:string,connectionId:string,input:unknown){
-  assertEntitled(userId);ownedRow(userId,connectionId);
+  const owned=ownedRow(userId,connectionId);if(owned.kind!=="vm")assertEntitled(userId);
   const source=input&&typeof input==="object"?input as Record<string,unknown>:{};
   const entries=Array.isArray(source.tools)?source.tools:[];
   const parsed=entries.map(item=>{const value=item&&typeof item==="object"?item as Record<string,unknown>:{};const name=String(value.name||"").trim(),policy=String(value.policy||"") as McpToolPolicy;if(!name||name.length>200||!["blocked","always_ask","session_ask","always_allow"].includes(policy))throw new AuthError("올바르지 않은 MCP 도구 정책입니다.",400);return{name,policy};});
@@ -156,13 +165,13 @@ export function saveMcpToolPolicies(userId:string,connectionId:string,input:unkn
 }
 
 export async function testMcpConnection(userId: string, input: unknown & { id?: string }, signal?: AbortSignal) {
-  assertEntitled(userId);
   const source = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const previous = typeof source.id === "string" ? ownedRow(userId, source.id) : undefined;
   const value = connectionSchema.parse(source);
+  if (value.kind !== "vm") assertEntitled(userId);
   const credential = value.authType === "none" ? "" : value.credential.trim() || (previous?.auth_type === value.authType ? previous.credential : "");
   if (value.authType !== "none" && !credential) throw new AuthError("연결 테스트에 사용할 토큰 또는 API 키를 입력해 주세요.", 400);
-  const row: McpRow = { id: previous?.id || "test", user_id: userId, name: value.name, description: value.description, url: value.url, auth_type: value.authType, credential, enabled: 1, tool_timeout_seconds: value.toolTimeoutSeconds, created_at: "", updated_at: "" };
+  const row: McpRow = { id: previous?.id || "test", user_id: userId, name: value.name, description: value.description, url: value.url, auth_type: value.authType, credential, enabled: 1, tool_timeout_seconds: value.toolTimeoutSeconds ?? VM_TOOL_TIMEOUT_SECONDS, kind: value.kind, created_at: "", updated_at: "" };
   return talkToServer(row.url, signal, async () => {
     const client = await connectedClient(row, signal);
     try { const result = await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" }); return { toolCount: result.tools.length, tools: result.tools.slice(0, 20).map(tool => tool.name) }; }
@@ -177,8 +186,8 @@ export type McpToolBinding = { advertisedName: string; connectionId: string; con
  * connection so two servers can offer tools with the same name.
  */
 export async function mcpConnectionBindings(userId: string, connectionId: string, signal?: AbortSignal): Promise<McpToolBinding[]> {
-  assertEntitled(userId);
   const row = ownedRow(userId, connectionId);
+  if (row.kind !== "vm") assertEntitled(userId);
   if (row.enabled !== 1) return [];
   const tools = await talkToServer(row.url, signal, async () => {
     const client = await connectedClient(row, signal);
@@ -188,11 +197,16 @@ export async function mcpConnectionBindings(userId: string, connectionId: string
   const policies = toolPolicies(row.id);
   const bindings = new Map<string, McpToolBinding>();
   for (const tool of tools) {
-    const policy = policies.get(tool.name) || DEFAULT_TOOL_POLICY;
+    const policy = policies.get(tool.name) || (row.kind === "vm" ? vmDefaultPolicy(tool.name) : DEFAULT_TOOL_POLICY);
     if (policy === "blocked") continue;
     let advertisedName = mcpToolAlias(row.id, tool.name), suffix = 2;
     while (bindings.has(advertisedName)) advertisedName = `${mcpToolAlias(row.id, tool.name).slice(0, 60)}_${suffix++}`;
     bindings.set(advertisedName, { advertisedName, connectionId: row.id, connectionName: row.name, toolName: tool.name, tool, policy });
+  }
+  // The virtual computer also moves files to and from private storage; NeuralNetUI runs these itself.
+  if (row.kind === "vm") for (const tool of VM_FILE_TOOLS) {
+    const policy = policies.get(tool.name) || vmDefaultPolicy(tool.name);
+    if (policy !== "blocked") bindings.set(mcpToolAlias(row.id, tool.name), { advertisedName: mcpToolAlias(row.id, tool.name), connectionId: row.id, connectionName: row.name, toolName: tool.name, tool, policy });
   }
   return [...bindings.values()];
 }
@@ -207,9 +221,10 @@ export type McpToolProgress = { stage: "tool" | "storage"; progress: number; tot
  * server marks for saving (see mcpStorageLink) are then streamed into the caller's private storage the same way.
  */
 export async function executeMcpTool(userId: string, binding: McpToolBinding, args: unknown, signal?: AbortSignal, onProgress?: (update: McpToolProgress) => void): Promise<{ result: unknown; content?: ModelContentPart[] }> {
-  assertEntitled(userId);
   const row = ownedRow(userId, binding.connectionId);
+  if (row.kind !== "vm") assertEntitled(userId);
   if (!row.enabled) throw new AuthError("이 MCP 연결은 비활성화되어 있습니다.", 403);
+  if (row.kind === "vm" && isVmFileTool(binding.toolName)) return runVmFileTool(userId, binding.toolName, (args && typeof args === "object" ? args : {}) as Record<string, unknown>, signal ?? AbortSignal.timeout(row.tool_timeout_seconds * 1000), message => onProgress?.({ stage: "storage", progress: 0, message }));
   const timeoutMs = (row.tool_timeout_seconds || DEFAULT_MCP_TOOL_TIMEOUT_SECONDS) * 1000;
   const response = await talkToServer(row.url, signal, async () => {
     const client = await connectedClient(row, signal);

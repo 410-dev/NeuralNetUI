@@ -57,9 +57,11 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
 export const mcpSource: ToolProviderSource = {
   id: "mcp",
   providers(ctx, state) {
-    if (!mcpEntitlement(ctx.userId).enabled) return [];
+    // The virtual computer does not depend on the plan's MCP allowance; other connections do.
+    const entitled = mcpEntitlement(ctx.userId).enabled;
     // Only switched-on connections are built: each one costs a round trip to its server when offered.
     return listMcpConnections(ctx.userId)
+      .filter(connection => entitled || connection.kind === "vm")
       .map((connection, index) => ({ connection, index }))
       .filter(({ connection }) => connection.enabled && resolveProviderState(state, mcpManifest(connection)).enabled)
       .map(({ connection, index }) => connectionProvider(connection, index));

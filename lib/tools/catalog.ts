@@ -13,7 +13,7 @@ export type ToolOrigin = "builtin" | "workspace" | "user";
 export type ToolCategory = "internet" | "awareness" | "agent" | "interaction";
 /** Menu section: the fixed built-in categories, then the installed tiers. */
 export type ToolSection = ToolCategory | "workspace" | "mcp";
-export type ToolIcon = "search" | "link" | "braces" | "clock" | "map-pin" | "hard-drive" | "list-checks" | "code" | "cable" | "wrench" | "globe" | "video";
+export type ToolIcon = "search" | "link" | "braces" | "clock" | "map-pin" | "hard-drive" | "list-checks" | "code" | "cable" | "wrench" | "globe" | "video" | "monitor";
 export type Localized = Record<Locale, string>;
 
 export type ToolOptionField =
@@ -159,10 +159,11 @@ export const mcpProviderId = (connectionId: string) => `${MCP_PROVIDER_PREFIX}${
 export const isMcpFunctionName = (name: string) => /^mcp_[a-f0-9]{8}_/i.test(name);
 
 /** An MCP connection the account registered, presented as a "user" tier provider. */
-export function mcpManifest(connection: { id: string; name: string; description?: string; url: string }, order = 0): ToolProviderManifest {
+export function mcpManifest(connection: { id: string; name: string; description?: string; url: string; kind?: "user" | "vm" }, order = 0): ToolProviderManifest {
   const description = connection.description || connection.url;
+  // The virtual computer is on by default once registered; other MCP servers are switched on per chat.
   return {
-    id: mcpProviderId(connection.id), origin: "user", section: "mcp", order, icon: "cable", defaultEnabled: false,
+    id: mcpProviderId(connection.id), origin: "user", section: "mcp", order: connection.kind === "vm" ? -1 : order, icon: connection.kind === "vm" ? "monitor" : "cable", defaultEnabled: connection.kind === "vm",
     label: { en: connection.name, ko: connection.name }, description: { en: description, ko: description },
     functions: [], functionPrefix: `mcp_${connection.id.replace(/-/g, "").slice(0, 8)}_`,
   };

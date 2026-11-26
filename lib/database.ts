@@ -656,6 +656,13 @@ function openDatabase() {
     if (!messageColumns.some(column => column.name === "agent_kind")) connection.exec("ALTER TABLE messages ADD COLUMN agent_kind TEXT;");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(32, new Date().toISOString());
   })();
+  const vmVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (vmVersion.version < 33) connection.transaction(() => {
+    // "vm": the account's virtual computer, an MCP connection that does not count toward the plan's MCP limit.
+    const columns = connection.prepare("PRAGMA table_info(mcp_connections)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "kind")) connection.exec("ALTER TABLE mcp_connections ADD COLUMN kind TEXT NOT NULL DEFAULT 'user' CHECK (kind IN ('user', 'vm'));");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(33, new Date().toISOString());
+  })();
   return connection;
 }
 
