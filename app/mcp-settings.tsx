@@ -1,6 +1,6 @@
 "use client";
 
-import { Cable, CirclePlus, Info, LoaderCircle, Pencil, PlugZap, Settings, ShieldCheck, Trash2, X } from "lucide-react";
+import { Cable, CirclePlus, Copy, Info, LoaderCircle, Monitor, Pencil, PlugZap, Settings, ShieldCheck, Trash2, X } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { McpAuthType, McpConnection, McpEntitlement, McpToolInfo, McpToolPolicy } from "@/lib/types";
@@ -70,15 +70,78 @@ function McpConnectionDialog({ ko, initial, onClose, onSaved }: { ko: boolean; i
   </div>,document.body);
 }
 
+type VmInfo = { distribution?: string; os?: string; architecture?: string; environment?: string; gui?: { available: boolean; control: boolean; reason?: string | null }; browser?: { version?: string | null; stealth?: boolean }; workspace?: { home?: string; account?: string | null } };
+
+/** The URL people paste may be the server root or its /mcp endpoint; the connection stores the endpoint. */
+const vmEndpoint = (value: string) => { const trimmed = value.trim().replace(/\/+$/, ""); return !trimmed ? "" : /\/mcp$/.test(trimmed) ? trimmed : `${trimmed}/mcp`; };
+
+/**
+ * The account's virtual computer: one fixed entry above the other MCP servers, outside the plan's MCP allowance.
+ * Shows how to install the server, takes its address and key, and once connected what the computer offers.
+ */
+function VirtualComputerCard({ ko, connection, onChanged, onPermissions, onRemove }: { ko: boolean; connection?: McpConnection; onChanged: () => void; onPermissions: (connection: McpConnection) => void; onRemove: (connection: McpConnection) => void }) {
+  const [editing, setEditing] = useState(!connection);
+  const [url, setUrl] = useState(connection?.url || ""), [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false), [notice, setNotice] = useState(""), [copied, setCopied] = useState(false);
+  const [info, setInfo] = useState<{ info: VmInfo | null; error?: string }>();
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const command = `curl -fsSL ${origin}/api/vm/install | sudo bash -s -- --tunnel-token '<${ko ? "Cloudflare 터널 토큰 또는 명령어" : "Cloudflare tunnel token or command"}>'`;
+  useEffect(() => { if (!connection) return; setInfo(undefined); fetch("/api/vm/info", { cache: "no-store" }).then(response => response.json()).then(setInfo).catch(error => setInfo({ info: null, error: String(error) })); }, [connection]);
+  const payload = () => ({ ...(connection ? { id: connection.id } : {}), kind: "vm", name: ko ? "가상 컴퓨터" : "Virtual computer", description: "", url: vmEndpoint(url), authType: "api_key", credential: key.trim(), enabled: connection?.enabled ?? true, ...(connection ? { toolTimeoutSeconds: connection.toolTimeoutSeconds } : {}) });
+  async function test() {
+    setBusy(true); setNotice("");
+    try { const body = await readApiResponse<{ toolCount: number }>(await fetch("/api/mcp-connections/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()) }), ko ? "ko" : "en"); setNotice(ko ? `연결됨 · 도구 ${body.toolCount}개` : `Connected · ${body.toolCount} tools`); }
+    catch (error) { setNotice(error instanceof Error ? error.message : String(error)); } finally { setBusy(false); }
+  }
+  async function save(event?: FormEvent) {
+    event?.preventDefault(); setBusy(true); setNotice("");
+    try {
+      await readApiResponse(await fetch(connection ? `/api/mcp-connections/${connection.id}` : "/api/mcp-connections", { method: connection ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload()) }), ko ? "ko" : "en");
+      setEditing(false); setKey(""); onChanged();
+    } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); } finally { setBusy(false); }
+  }
+  async function toggle() {
+    if (!connection) return;
+    await fetch(`/api/mcp-connections/${connection.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload(), enabled: !connection.enabled }) }).catch(() => undefined);
+    onChanged();
+  }
+  const detail = info?.info;
+  return <section className={`vm-card ${connection && !connection.enabled ? "disabled" : ""}`}>
+    <header><span className="mcp-connection-mark"><Monitor size={18} /></span><div><strong>{ko ? "가상 컴퓨터" : "Virtual computer"}</strong><small>{ko ? "모델이 셸 명령, 백그라운드 작업, 화면 캡처·마우스·키보드(GUI가 있을 때), 파일 주고받기를 쓸 수 있는 내 컴퓨터입니다. 등록하면 브라우저 도구도 이 컴퓨터에서 실행됩니다. MCP 등록 개수에 포함되지 않습니다." : "Your own computer the model can use: shell commands, background jobs, screen, mouse and keyboard (with a GUI) and file transfer. Once registered, the browser tool runs there too. It does not count toward your MCP limit."}</small></div>
+      {connection && <button type="button" role="switch" aria-checked={connection.enabled} aria-label={ko ? "가상 컴퓨터 사용" : "Use the virtual computer"} className={`toggle ${connection.enabled ? "on" : ""}`} onClick={() => void toggle()}><i /></button>}</header>
+    {connection && !editing && <div className="vm-status">
+      <code>{connection.url}</code>
+      {!info ? <span className="vm-info"><LoaderCircle size={13} className="spin" />{ko ? "확인 중" : "Checking"}</span> : detail ? <span className="vm-info">
+        <span>{detail.distribution || detail.os} · {detail.architecture} · {detail.environment}</span>
+        <span>{detail.gui?.available ? (detail.gui.control ? (ko ? "GUI: 화면·마우스·키보드 사용 가능" : "GUI: screen, mouse and keyboard") : (ko ? "GUI: 화면 캡처만" : "GUI: screenshots only")) : (ko ? "GUI 없음 (셸·파일·브라우저만)" : "No GUI (shell, files, browser)")}</span>
+        <span>{detail.browser?.version ? `${detail.browser.version}${detail.browser.stealth ? " · stealth" : ""}` : (ko ? "브라우저 없음" : "No browser")}</span>
+      </span> : <span className="vm-info error">{info.error || (ko ? "연결할 수 없습니다." : "Not reachable.")}</span>}
+      <span className="vm-actions"><button type="button" className="subtle-action" onClick={() => onPermissions(connection)}><ShieldCheck size={14} />{ko ? "도구 권한" : "Tool permissions"}</button><button type="button" className="subtle-action" onClick={() => setEditing(true)}><Pencil size={14} />{ko ? "수정" : "Edit"}</button><button type="button" className="subtle-action danger" onClick={() => onRemove(connection)}><Trash2 size={14} />{ko ? "삭제" : "Delete"}</button></span>
+    </div>}
+    {editing && <form className="vm-form" onSubmit={save}>
+      <div className="vm-install"><span>{ko ? "1. 가상 컴퓨터로 쓸 리눅스(LXC·Docker·실제 컴퓨터)나 macOS에서 설치합니다. 끝나면 주소와 키가 출력됩니다." : "1. Install on the Linux machine (LXC, Docker or bare metal) or Mac you want to use. It prints an address and a key."}</span>
+        <code>{command}</code>
+        <button type="button" className="subtle-action" onClick={() => { void navigator.clipboard?.writeText(command).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); }}><Copy size={13} />{copied ? (ko ? "복사됨" : "Copied") : (ko ? "명령 복사" : "Copy command")}</button>
+        <small>{ko ? "터널 없이 같은 네트워크에서 쓰려면 --tunnel-token 대신 --bind 0.0.0.0 을, 화면 제어 도구까지 설치하려면 --gui 를 붙입니다. Docker는 저장소의 vm-agent 폴더(docker compose up -d)를 쓰면 됩니다." : "Without a tunnel on the same network, use --bind 0.0.0.0 instead of --tunnel-token; add --gui for screen and input tools. For Docker, use the repository's vm-agent folder (docker compose up -d)."}</small></div>
+      <label className="field"><span>{ko ? "2. 주소" : "2. Address"}</span><input value={url} onChange={event => setUrl(event.target.value)} placeholder="https://vm.example.com/mcp" /></label>
+      <label className="field"><span>{ko ? "3. 키" : "3. Key"}</span><input type="password" value={key} onChange={event => setKey(event.target.value)} placeholder={connection?.hasCredential ? (ko ? "저장된 키 유지" : "Keep the saved key") : ""} /></label>
+      <span className="vm-actions">{connection && <button type="button" className="secondary-button" onClick={() => { setEditing(false); setUrl(connection.url); setKey(""); }}>{ko ? "취소" : "Cancel"}</button>}<button type="button" className="secondary-button" disabled={busy || !url.trim() || (!key.trim() && !connection?.hasCredential)} onClick={() => void test()}><PlugZap size={14} />{ko ? "연결 확인" : "Test"}</button><button type="submit" className="save-button" disabled={busy || !url.trim() || (!key.trim() && !connection?.hasCredential)}>{busy ? <LoaderCircle size={14} className="spin" /> : null}{connection ? (ko ? "저장" : "Save") : (ko ? "등록" : "Register")}</button></span>
+    </form>}
+    {notice && <p className="settings-notice" role="status">{notice}</p>}
+  </section>;
+}
+
 export function McpSettings({ ko, connections: initialConnections, entitlement: initialEntitlement, onChanged }: { ko: boolean; connections: McpConnection[]; entitlement: McpEntitlement; onChanged: (connections: McpConnection[], entitlement: McpEntitlement) => void }) {
   const [connections,setConnections]=useState(initialConnections),[entitlement,setEntitlement]=useState(initialEntitlement),[editing,setEditing]=useState<McpConnection|"new">(),[permissions,setPermissions]=useState<McpConnection>(),[notice,setNotice]=useState("");
   const {dialog,confirm}=useMessageDialog(ko);
   async function refresh(){const response=await fetch("/api/mcp-connections",{cache:"no-store"}),body=await readApiResponse<{connections:McpConnection[];entitlement:McpEntitlement}>(response,ko?"ko":"en");setConnections(body.connections);setEntitlement(body.entitlement);onChanged(body.connections,body.entitlement);}
   async function remove(connection:McpConnection){if(!await confirm({tone:"danger",title:ko?"MCP 연결 삭제":"Delete MCP connection",message:ko?`${connection.name} 연결을 삭제할까요?`:`Delete ${connection.name}?`,detail:ko?"저장된 인증 정보도 함께 삭제되며 되돌릴 수 없습니다.":"Its saved credential will also be deleted. This cannot be undone.",confirmLabel:ko?"삭제":"Delete"}))return;const response=await fetch(`/api/mcp-connections/${connection.id}`,{method:"DELETE"});if(!response.ok){const body=await response.json().catch(()=>({}));setNotice(body.error||"Delete failed.");return;}await refresh();}
   const canAdd=entitlement.enabled&&entitlement.usedConnections<entitlement.maxConnections;
+  const vm=connections.find(connection=>connection.kind==="vm"),userConnections=connections.filter(connection=>connection.kind!=="vm");
   return <div className="settings-section mcp-settings"><SectionTitle icon={<Cable size={19}/>} title={ko?"MCP 연결":"MCP connections"} description={ko?"계정에 연결할 원격 MCP 서버를 등록하고 채팅에서 사용할 도구를 관리합니다.":"Register remote MCP servers for your account and control the tools available in chat."} action={<button className="subtle-action" disabled={!canAdd} onClick={()=>setEditing("new")}><CirclePlus size={15}/>{ko?"MCP 추가":"Add MCP"}</button>}/>
+    <VirtualComputerCard key={vm?.id || "new"} ko={ko} connection={vm} onChanged={()=>void refresh().catch(error=>setNotice(error.message))} onPermissions={setPermissions} onRemove={connection=>void remove(connection)} />
     <div className={`mcp-plan-summary ${entitlement.enabled?"":"disabled"}`}><div><strong>{entitlement.enabled?(ko?"MCP 사용 가능":"MCP available"):(ko?"현재 플랜에서 사용할 수 없음":"Not available on this plan")}</strong><small>{ko?`${entitlement.usedConnections} / ${entitlement.maxConnections}개 등록됨`:`${entitlement.usedConnections} of ${entitlement.maxConnections} registered`}</small></div></div>
-    {connections.length?<div className="mcp-connection-list">{connections.map(connection=><article key={connection.id} className={connection.enabled?"":"disabled"}><span className="mcp-connection-mark"><Cable size={18}/></span><div><strong>{connection.name}</strong><small>{connection.description||connection.url}</small><em>{connection.authType==="none"?(ko?"인증 없음":"No auth"):connection.authType==="oauth"?"OAuth":"API Key"}</em></div><span className="mcp-row-actions"><button disabled={!connection.enabled} aria-label={ko?`${connection.name} 도구 권한`:`${connection.name} tool permissions`} onClick={()=>setPermissions(connection)}><Settings size={16}/></button><button aria-label={ko?`${connection.name} 수정`:`Edit ${connection.name}`} onClick={()=>setEditing(connection)}><Pencil size={16}/></button><button className="danger" aria-label={ko?`${connection.name} 삭제`:`Delete ${connection.name}`} onClick={()=>void remove(connection)}><Trash2 size={16}/></button></span></article>)}</div>:<div className="mcp-empty"><Cable size={25}/><strong>{ko?"등록된 MCP 연결이 없습니다.":"No MCP connections yet."}</strong><small>{entitlement.enabled?(ko?"MCP를 추가하면 채팅의 도구 메뉴에 표시됩니다.":"Add one to show it in the chat tools menu."):(ko?"관리자가 플랜에서 MCP 사용을 활성화해야 합니다.":"An administrator must enable MCP for your plan.")}</small></div>}
+    {userConnections.length?<div className="mcp-connection-list">{userConnections.map(connection=><article key={connection.id} className={connection.enabled?"":"disabled"}><span className="mcp-connection-mark"><Cable size={18}/></span><div><strong>{connection.name}</strong><small>{connection.description||connection.url}</small><em>{connection.authType==="none"?(ko?"인증 없음":"No auth"):connection.authType==="oauth"?"OAuth":"API Key"}</em></div><span className="mcp-row-actions"><button disabled={!connection.enabled} aria-label={ko?`${connection.name} 도구 권한`:`${connection.name} tool permissions`} onClick={()=>setPermissions(connection)}><Settings size={16}/></button><button aria-label={ko?`${connection.name} 수정`:`Edit ${connection.name}`} onClick={()=>setEditing(connection)}><Pencil size={16}/></button><button className="danger" aria-label={ko?`${connection.name} 삭제`:`Delete ${connection.name}`} onClick={()=>void remove(connection)}><Trash2 size={16}/></button></span></article>)}</div>:<div className="mcp-empty"><Cable size={25}/><strong>{ko?"등록된 MCP 연결이 없습니다.":"No MCP connections yet."}</strong><small>{entitlement.enabled?(ko?"MCP를 추가하면 채팅의 도구 메뉴에 표시됩니다.":"Add one to show it in the chat tools menu."):(ko?"관리자가 플랜에서 MCP 사용을 활성화해야 합니다.":"An administrator must enable MCP for your plan.")}</small></div>}
     {notice&&<p className="settings-notice" role="alert">{notice}</p>}
     {editing&&<McpConnectionDialog ko={ko} initial={editing==="new"?undefined:editing} onClose={()=>setEditing(undefined)} onSaved={()=>void refresh().catch(error=>setNotice(error.message))}/>} {permissions&&<McpToolPolicyDialog ko={ko} connection={permissions} onClose={()=>setPermissions(undefined)}/>} {dialog}
   </div>;

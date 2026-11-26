@@ -4,6 +4,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/client";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { vmBaseUrl, vmConnection, vmHeaders, type VmConnection } from "./vm.ts";
 import { dataDir } from "./database.ts";
 import { executableName, fileExists, readExecutableTarget, runExecutable, targetMatchesHost, toolsDir, describeTarget, hostTarget } from "./managed-binaries.ts";
 import { remainingStorageBytes, saveHostFile } from "./uploads.ts";
@@ -86,7 +88,7 @@ type ToolInfo = { name: string; description?: string; inputSchema: Record<string
 type CallResult = { content?: Array<Record<string, unknown>>; isError?: boolean; structuredContent?: unknown };
 type Session = {
   key: string; userId: string; conversationId: string; flags: string;
-  client: Client; transport: StdioClientTransport; ready: Promise<void>;
+  client: Client; transport: StdioClientTransport | StreamableHTTPClientTransport; ready: Promise<void>;
   lastUsed: number; busy: number; queue: Promise<unknown>; closed: boolean;
 };
 type Broker = { sessions: Map<string, Session>; timer?: ReturnType<typeof setInterval>; settings: ObscuraSettings };
@@ -108,7 +110,21 @@ function broker(): Broker {
 const sessionKey = (userId: string, conversationId: string) => `${userId}:${conversationId}`;
 const safeSegment = (value: string) => value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 120) || "_";
 export const obscuraProfileDir = (userId: string, conversationId: string) => path.join(profilesDir, safeSegment(userId), safeSegment(conversationId));
-const flagsFor = (settings: ObscuraSettings) => settings.stealth ? "stealth" : "plain";
+const flagsFor = (settings: ObscuraSettings, vm?: VmConnection) => vm ? `vm:${vm.url}` : settings.stealth ? "stealth" : "plain";
+
+/**
+ * With a virtual computer the browser runs there (Obscura with stealth, as installed with it), one session per
+ * conversation in the account's own workspace; without one it runs on this server as before.
+ */
+function startRemoteSession(userId: string, conversationId: string, vm: VmConnection): Session {
+  const key = sessionKey(userId, conversationId);
+  const transport = new StreamableHTTPClientTransport(new URL(`${vmBaseUrl(vm.url)}/browser/${encodeURIComponent(safeSegment(conversationId))}`), { requestInit: { headers: vmHeaders(vm) } });
+  const client = new Client({ name: "neuralnetui-browser", version: "1.0.0" });
+  const session: Session = { key, userId, conversationId, flags: flagsFor(broker().settings, vm), client, transport, ready: Promise.resolve(), lastUsed: Date.now(), busy: 0, queue: Promise.resolve(), closed: false };
+  session.ready = client.connect(transport);
+  session.ready.catch(() => { void closeSession(session); });
+  return session;
+}
 
 function globalArgs(settings: ObscuraSettings) { return settings.stealth ? ["--stealth"] : []; }
 
@@ -171,9 +187,16 @@ function startSession(userId: string, conversationId: string, settings: ObscuraS
 async function acquireSession(userId: string, conversationId: string): Promise<Session> {
   const state = broker();
   const key = sessionKey(userId, conversationId);
+  const vm = vmConnection(userId);
   const existing = state.sessions.get(key);
-  if (existing && !existing.closed && existing.flags === flagsFor(state.settings)) return existing;
+  if (existing && !existing.closed && existing.flags === flagsFor(state.settings, vm)) return existing;
   if (existing) await closeSession(existing);
+  if (vm) {
+    const remote = startRemoteSession(userId, conversationId, vm);
+    state.sessions.set(key, remote);
+    await remote.ready;
+    return remote;
+  }
   if (!await fileExists(obscuraBinaryPath("obscura"))) throw new Error("The browser is not installed. An administrator has to add the Obscura binaries in Harness settings.");
   while (state.sessions.size >= state.settings.maxSessions) {
     const idle = [...state.sessions.values()].filter(session => session.busy === 0).sort((a, b) => a.lastUsed - b.lastUsed)[0];
@@ -200,7 +223,7 @@ let catalogCache: { flags: string; tools: ToolInfo[] } | undefined;
 
 /** Obscura's tool list. It is the same for every session, so it is read once per binary and kept. */
 export async function obscuraTools(userId: string, conversationId: string): Promise<ToolInfo[]> {
-  const flags = flagsFor(broker().settings);
+  const flags = flagsFor(broker().settings, vmConnection(userId));
   if (catalogCache?.flags === flags) return catalogCache.tools;
   const tools = await withSession(userId, conversationId, async session => (await session.client.listTools()).tools as ToolInfo[]);
   catalogCache = { flags, tools };
@@ -240,6 +263,8 @@ export async function downloadWithObscura(input: { userId: string; conversationI
   if (url.username || url.password) throw new Error("URLs with credentials are not allowed.");
   const limit = remainingStorageBytes(input.userId);
   if (limit <= 0) throw new Error("Private storage is full, so nothing can be downloaded.");
+  const vm = vmConnection(input.userId);
+  if (vm) return downloadThroughVm(vm, input, url, limit);
   const work = path.join(dataDir, "tmp", `obscura-${randomUUID()}`);
   const profile = path.join(work, "profile");
   const output = path.join(work, "download.bin");
@@ -279,6 +304,34 @@ export async function downloadWithObscura(input: { userId: string; conversationI
   } finally {
     await fs.rm(work, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+/** The same download, fetched by Obscura on the virtual computer with the conversation's cookies there. */
+async function downloadThroughVm(vm: VmConnection, input: { userId: string; conversationId: string; name?: string; signal: AbortSignal; onProgress?: (bytes: number, limit: number) => void }, url: URL, limit: number): Promise<ObscuraDownload> {
+  const work = path.join(dataDir, "tmp", `obscura-${randomUUID()}`);
+  const output = path.join(work, "download.bin");
+  await fs.mkdir(work, { recursive: true, mode: 0o700 });
+  try {
+    const response = await fetch(`${vmBaseUrl(vm.url)}/browser-download?session=${encodeURIComponent(safeSegment(input.conversationId))}&url=${encodeURIComponent(url.toString())}`, { headers: vmHeaders(vm), signal: input.signal });
+    if (!response.ok || !response.body) throw new Error((await response.text().catch(() => "")) || `The virtual computer answered ${response.status}.`);
+    const file = createWriteStream(output, { mode: 0o600 });
+    const reader = response.body.getReader(); let received = 0, reported = 0;
+    try {
+      for (;;) {
+        const { value, done } = await reader.read(); if (done) break;
+        received += value.length;
+        if (received > limit) throw new Error(`The file is larger than the ${formatBytes(limit)} left in private storage, so it was not saved.`);
+        if (!file.write(value)) await new Promise<void>(resolve => file.once("drain", () => resolve()));
+        const now = Date.now(); if (now - reported >= 1000) { reported = now; input.onProgress?.(received, limit); }
+      }
+    } catch (error) { reader.cancel().catch(() => undefined); throw error instanceof TypeError ? new Error("The download stopped before it finished.") : error; }
+    finally { await new Promise<void>(resolve => file.end(() => resolve())); }
+    if (!received) throw new Error("The server returned an empty response.");
+    const name = (input.name || "").replace(/[\\/\0]/g, "").trim().slice(0, 200) || filenameFromUrl(url) || `download-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    await assertNotChallengePage(output, url, name);
+    const stored = await saveHostFile(output, input.userId, name);
+    return { id: stored.metadata.id, name: stored.metadata.name, size: received, mimeType: stored.metadata.mimeType, url: stored.metadata.url, markdown: stored.markdown };
+  } finally { await fs.rm(work, { recursive: true, force: true }).catch(() => undefined); }
 }
 
 const PAGE_EXTENSIONS = new Set(["", ".html", ".htm", ".xhtml", ".php", ".asp", ".aspx", ".jsp"]);

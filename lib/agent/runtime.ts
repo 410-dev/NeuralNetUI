@@ -11,6 +11,7 @@ import type { ToolGate } from "../tools/types";
 import type { Conversation, ModelConfig, StoredMessage, UserRole } from "../types";
 import { AGENT_PROVIDER_ID, decideAgentCall, isReadOnlyCall } from "./policy";
 import { agentToolSource } from "./tools";
+import { defaultAgentInstructions } from "./defaults";
 import { isViewingAgent } from "./presence";
 import {
   advanceAgentSchedule, agentRunLoad, AGENT_RUN_LIMITS, createAgentProfile, createAgentRun, dueAgentSchedules, failInterruptedAgentRuns, getAgentRun, listAgentItems,
@@ -60,7 +61,7 @@ export async function ensureAgent(userId: string, language?: "ko" | "en"): Promi
     const stamp = nowIso(), conversationId = id("agent"), branchId = id("branch");
     const conversation: Conversation = { id: conversationId, title: language === "en" ? "Agent" : "에이전트", modelId: "agent", activeBranchId: branchId, createdAt: stamp, updatedAt: stamp, branches: [{ id: branchId, name: "Main", messages: [], createdAt: stamp, updatedAt: stamp }] };
     await writeConversation(conversation, userId);
-    return createAgentProfile(userId, conversationId, { ...DEFAULT_AGENT_SETTINGS, ...(language ? { language } : {}) });
+    return createAgentProfile(userId, conversationId, { ...DEFAULT_AGENT_SETTINGS, instructions: defaultAgentInstructions(language ?? "ko"), ...(language ? { language } : {}) });
   });
 }
 

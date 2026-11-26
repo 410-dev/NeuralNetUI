@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["better-sqlite3"],
   outputFileTracingIncludes: {
     "/api/backup": ["./node_modules/7zip-bin/index.js", "./node_modules/7zip-bin/package.json", `./node_modules/7zip-bin/${sevenZipBinary}`],
+    "/api/vm/install": ["./vm-agent/install.sh"],
+    "/api/vm/server.py": ["./vm-agent/neuralnetui_vm.py"],
   },
   outputFileTracingExcludes: {
     "/*": ["./data/**/*", "./installer/**/*"],

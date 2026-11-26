@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Bell, BellOff, Brain, CalendarClock, Check, ChevronLeft, ChevronRight, Clock, Cog, History, Layers, ListTodo, LoaderCircle, Plus, Repeat, Settings, Square, Timer, Trash2, X } from "lucide-react";
+import { Bell, BellOff, Braces, Brain, Cable, CalendarClock, Check, ChevronLeft, ChevronRight, Clock, Clock3, Code2, Cog, Globe2, HardDrive, History, Layers, Link2, ListChecks, ListTodo, LoaderCircle, MapPin, Monitor, Plus, Repeat, Settings, Square, Timer, Trash2, Video, Wrench, X } from "lucide-react";
+import type { ToolIcon } from "@/lib/tools/catalog";
+import { defaultAgentInstructions } from "@/lib/agent/defaults";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { BUILTIN_TOOL_PROVIDERS } from "@/lib/tools/catalog";
 import type { ModelConfig, StoredMessage } from "@/lib/types";
@@ -10,6 +12,8 @@ import type { ModelConfig, StoredMessage } from "@/lib/types";
 export type AgentDecision = "allow" | "ask";
 export type AgentToolRule = { read?: AgentDecision; write?: AgentDecision; tools?: Record<string, AgentDecision> };
 export type AgentClientSettings = { enabled: boolean; modelId?: string; subagentModelId?: string; heartbeatMinutes: number; instructions: string; compactPercent: number; toolTimeoutMinutes: number; toolRules: Record<string, AgentToolRule> };
+const RULE_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video, monitor: Monitor };
+
 export type AgentRunView = { id: string; kind: "task" | "heartbeat" | "schedule"; title: string; instructions: string; status: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"; result?: string; error?: string; conversationId?: string; createdAt: string; startedAt?: string; finishedAt?: string };
 export type AgentScheduleView = { id: string; kind: "once" | "recurring"; title: string; instructions: string; nextRunAt?: string; intervalMinutes?: number; enabled: boolean; lastRunAt?: string };
 export type AgentState = {
@@ -50,8 +54,8 @@ function Section({ icon, title, children, action }: { icon: ReactNode; title: st
  * work, the next periodic check, the prompt cache, and entry points to settings, subagent history and the context.
  * Floating on the right on wide screens; behind a gear button as an animated dropdown on phones.
  */
-export function AgentControlPanel({ ko, state, cache, onOpen, onChanged }: {
-  ko: boolean; state: AgentState; cache?: { expiresAt: number; label: string };
+export function AgentControlPanel({ ko, state, cache, onOpen, onChanged, docked }: {
+  ko: boolean; state: AgentState; cache?: { expiresAt: number; label: string }; docked: boolean;
   onOpen: (target: "settings" | "runs" | "context" | ItemKind, runId?: string) => void; onChanged: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -89,8 +93,9 @@ export function AgentControlPanel({ ko, state, cache, onOpen, onChanged }: {
       <button type="button" onClick={() => onOpen("context")}><Layers size={15} />{ko ? "컨텍스트 열어보기" : "View context"}<ChevronRight size={14} /></button>
     </div>
   </div>;
+  // Docked beside the chat only on a nearly full-width desktop window; otherwise behind the gear button.
+  if (docked) return <aside className="agent-panel desktop" aria-label={ko ? "에이전트 컨트롤 패널" : "Agent control panel"}>{body}</aside>;
   return <>
-    <aside className="agent-panel desktop" aria-label={ko ? "에이전트 컨트롤 패널" : "Agent control panel"}>{body}</aside>
     <div className="agent-panel-mobile">
       <button type="button" className={`agent-gear ${menuOpen && !closing ? "open" : ""}`} aria-label={ko ? "에이전트 메뉴" : "Agent menu"} aria-expanded={menuOpen && !closing} onClick={() => menuOpen ? closeMenu() : setMenuOpen(true)}><Cog size={18} /></button>
       {menuOpen && <><button type="button" className="agent-menu-scrim" aria-label={ko ? "닫기" : "Close"} onClick={closeMenu} /><div className={`agent-panel dropdown ${closing ? "closing" : ""}`} onClick={event => { if ((event.target as HTMLElement).closest(".agent-panel-links button, .agent-panel-buttons button, .agent-panel-item")) closeMenu(); }}>{body}</div></>}
@@ -169,15 +174,15 @@ function ItemEditor({ ko, item, onSave, onCancel }: { ko: boolean; item: AgentIt
 export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { ko: boolean; state: AgentState; models: ModelConfig[]; onClose: () => void; onSaved: () => void }) {
   const initial = state.settings!;
   const [value, setValue] = useState<AgentClientSettings>(initial);
-  const [mcp, setMcp] = useState<Array<{ id: string; name: string }>>([]);
+  const [mcp, setMcp] = useState<Array<{ id: string; name: string; kind?: "user" | "vm" }>>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [pushState, setPushState] = useState<"unsupported" | "off" | "on" | "denied" | "working">("off");
-  useEffect(() => { api<{ connections: Array<{ id: string; name: string }> }>("/api/mcp-connections").then(body => setMcp(body.connections || [])).catch(() => undefined); }, []);
+  useEffect(() => { api<{ connections: Array<{ id: string; name: string; kind?: "user" | "vm" }> }>("/api/mcp-connections").then(body => setMcp(body.connections || [])).catch(() => undefined); }, []);
   useEffect(() => { void currentPushSubscription().then(subscription => setPushState(subscription === "unsupported" ? "unsupported" : typeof Notification !== "undefined" && Notification.permission === "denied" ? "denied" : subscription ? "on" : "off")); }, []);
   const providers = useMemo(() => [
-    ...BUILTIN_TOOL_PROVIDERS.filter(item => !["code-runner", "location", "multiple-choice"].includes(item.id)).map(item => ({ id: item.id, name: ko ? item.label.ko : item.label.en })),
-    ...mcp.map(item => ({ id: `mcp:${item.id}`, name: `MCP · ${item.name}` })),
+    ...BUILTIN_TOOL_PROVIDERS.filter(item => !["code-runner", "location", "multiple-choice"].includes(item.id)).map(item => ({ id: item.id, name: ko ? item.label.ko : item.label.en, icon: item.icon })),
+    ...mcp.map(item => item.kind === "vm" ? { id: `mcp:${item.id}`, name: ko ? "가상 컴퓨터" : "Virtual computer", icon: "monitor" as ToolIcon } : { id: `mcp:${item.id}`, name: `MCP · ${item.name}`, icon: "cable" as ToolIcon }),
   ], [mcp, ko]);
   const rule = (id: string) => value.toolRules[id] || {};
   const setRule = (id: string, patch: AgentToolRule) => setValue(current => ({ ...current, toolRules: { ...current.toolRules, [id]: { ...current.toolRules[id], ...patch } } }));
@@ -196,7 +201,7 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
   return <Dialog ko={ko} title={ko ? "에이전트 설정" : "Agent settings"} onClose={onClose} wide footer={<>{error && <p className="settings-notice">{error}</p>}<button type="button" className="secondary-button" onClick={onClose}>{ko ? "취소" : "Cancel"}</button><button type="button" className="save-button" disabled={busy} onClick={() => void save()}>{busy ? (ko ? "저장 중…" : "Saving…") : (ko ? "저장" : "Save")}</button></>}>
     <div className="model-visibility-row"><div><strong>{ko ? "자동 실행" : "Automatic runs"}</strong><small>{ko ? "주기 점검과 예약된 작업을 실행합니다. 끄면 채팅으로 요청할 때만 움직입니다." : "Runs the periodic check and scheduled work. When off, the agent acts only when you message it."}</small></div><button type="button" role="switch" aria-checked={value.enabled} aria-label={ko ? "자동 실행" : "Automatic runs"} className={`toggle ${value.enabled ? "on" : ""}`} onClick={() => setValue({ ...value, enabled: !value.enabled })}><i /></button></div>
     <label className="field"><span>{ko ? "주기 점검 간격 (분)" : "Periodic check interval (minutes)"}</span><input type="number" min={state.access.minIntervalMinutes} max={10080} value={value.heartbeatMinutes} onChange={event => setValue({ ...value, heartbeatMinutes: Math.max(1, Math.round(Number(event.target.value) || 0)) })} /><small>{ko ? `플랜이 허용하는 최소 간격은 ${state.access.minIntervalMinutes}분입니다. 더 짧게 정하면 최소 간격으로 실행합니다.` : `Your plan allows at least ${state.access.minIntervalMinutes} minutes; shorter values run at that minimum.`}</small></label>
-    <label className="field"><span>{ko ? "작업 지침" : "Standing instructions"}</span><textarea rows={6} value={value.instructions} onChange={event => setValue({ ...value, instructions: event.target.value })} placeholder={ko ? "예: 받은편지함에서 중요한 메일을 요약해 알려 줘. 캘린더 일정이 겹치면 알려 줘." : "e.g. Summarize important new email. Tell me when calendar events overlap."} /><small>{ko ? "주기 점검마다 서브에이전트가 이 지침과 워크보드를 보고 일하며, 알릴 것이 있을 때만 메시지를 보냅니다." : "Each periodic check, a subagent works from these instructions and the workboard, and messages you only when something needs attention."}</small></label>
+    <label className="field"><span>{ko ? "작업 지침" : "Standing instructions"}</span><textarea rows={6} value={value.instructions} onChange={event => setValue({ ...value, instructions: event.target.value })} placeholder={ko ? "예: 받은편지함에서 중요한 메일을 요약해 알려 줘. 캘린더 일정이 겹치면 알려 줘." : "e.g. Summarize important new email. Tell me when calendar events overlap."} /><button type="button" className="agent-reset-link" onClick={() => setValue({ ...value, instructions: defaultAgentInstructions(ko ? "ko" : "en") })}>{ko ? "기본 값으로 되돌리기" : "Restore the default"}</button><small>{ko ? "주기 점검마다 서브에이전트가 이 지침과 워크보드를 보고 일하며, 알릴 것이 있을 때만 메시지를 보냅니다." : "Each periodic check, a subagent works from these instructions and the workboard, and messages you only when something needs attention."}</small></label>
     <div className="form-grid">
       <label className="field"><span>{ko ? "서브에이전트·자동 실행 모델" : "Subagent and automatic-run model"}</span><select value={value.subagentModelId || ""} onChange={event => setValue({ ...value, subagentModelId: event.target.value || undefined })}><option value="">{ko ? "메인 채팅과 같은 모델" : "Same as the main chat"}</option>{models.filter(model => model.visible !== false && !model.imageGeneration).map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label>
       <label className="field"><span>{ko ? "압축 기준 (컨텍스트의 %)" : "Compact at (% of context)"}</span><input type="number" min={10} max={95} value={value.compactPercent} onChange={event => setValue({ ...value, compactPercent: Math.min(95, Math.max(10, Math.round(Number(event.target.value) || 50))) })} /><small>{ko ? "메인 채팅과 모든 서브에이전트가 이 비율을 넘으면 압축합니다. 하네스 설정과 별개입니다." : "The main chat and every subagent compact past this share; separate from harness settings."}</small></label>
@@ -205,7 +210,7 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
     <div className="field"><span>{ko ? "이 기기 푸시 알림" : "Push notifications on this device"}</span><div className="agent-push-row"><button type="button" className="subtle-action" disabled={pushState === "unsupported" || pushState === "denied" || pushState === "working"} onClick={() => void togglePush()}>{pushState === "on" ? <><BellOff size={14} />{ko ? "이 기기 알림 끄기" : "Turn off on this device"}</> : <><Bell size={14} />{ko ? "이 기기에서 알림 받기" : "Notify this device"}</>}</button><small>{pushState === "unsupported" ? (ko ? "이 브라우저는 푸시 알림을 지원하지 않습니다. HTTPS 주소에서 앱으로 설치하면 쓸 수 있습니다." : "This browser cannot receive push here. Install the app from an HTTPS address.") : pushState === "denied" ? (ko ? "브라우저에서 알림이 차단되어 있습니다." : "Notifications are blocked in the browser.") : (ko ? `등록된 기기 ${state.push?.devices ?? 0}대 · 에이전트 화면을 보고 있지 않을 때만 보내고, 한 기기에서 확인하면 다른 기기 알림도 지웁니다.` : `${state.push?.devices ?? 0} device(s) · sent only while you are not viewing the agent; seeing one clears the others.`)}</small></div></div>
     <div className="field agent-rules"><span>{ko ? "자동 실행 중 도구 사용" : "Tools during automatic runs"}</span><small>{ko ? "사람이 없을 때(서브에이전트, 예약 작업, 에이전트가 스스로 시작한 응답) 승인 없이 쓸 수 있는 범위입니다. '물어보기'인 호출을 만나면 그 작업은 멈추고 알림을 보냅니다. MCP 도구는 서버가 읽기 전용이라고 밝힌 것만 읽기로 봅니다. 코드 실행은 가상 컴퓨터 MCP가 생기기 전까지 쓸 수 없습니다." : "What the agent may do without asking when you are not there (subagents, scheduled work, replies it starts itself). A call set to Ask pauses that work and notifies you. MCP tools count as reads only when the server marks them read-only. Code execution stays off until a virtual computer MCP exists."}</small>
       {providers.map(provider => { const current = rule(provider.id); const exceptions = Object.entries(current.tools || {}); return <div key={provider.id} className="agent-rule-row">
-        <strong>{provider.name}</strong>
+        <strong>{(() => { const Icon = RULE_ICONS[provider.icon] || Wrench; return <Icon size={15} />; })()}{provider.name}</strong>
         <span className="agent-rule-controls">{decisionSelect(current.read, "allow", read => setRule(provider.id, { read }), ko ? "읽기" : "Read")}{decisionSelect(current.write, "ask", write => setRule(provider.id, { write }), ko ? "쓰기" : "Write")}</span>
         {exceptions.length > 0 && <ul className="agent-rule-exceptions">{exceptions.map(([name, decision]) => <li key={name}><code>{name}</code>{decisionSelect(decision, "ask", next => setRule(provider.id, { tools: { ...current.tools, [name]: next } }), "")}<button type="button" className="agent-panel-icon" aria-label={ko ? "예외 삭제" : "Remove exception"} onClick={() => { const tools = { ...current.tools }; delete tools[name]; setRule(provider.id, { tools }); }}><X size={12} /></button></li>)}</ul>}
         <ExceptionAdder ko={ko} onAdd={name => setRule(provider.id, { tools: { ...current.tools, [name]: "allow" } })} />

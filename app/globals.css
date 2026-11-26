@@ -2072,7 +2072,7 @@ select:focus-visible {
 .context-cache b { font-weight: 500; color: #eee; font-variant-numeric: tabular-nums; }
 
 /* ---------------------------------------------------------------- personal agent */
-.chat-surface.agent-mode .conversation-stage { padding-right: 316px; }
+.chat-surface.agent-docked .conversation-stage { padding-right: 316px; }
 .agent-panel { display: flex; flex-direction: column; color: var(--text); }
 .agent-panel.desktop { position: absolute; z-index: 22; top: 64px; right: 16px; max-height: calc(100% - 80px); width: 292px; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(14px); box-shadow: 0 18px 60px #0007; }
 .agent-panel-body { display: flex; flex-direction: column; gap: 12px; }
@@ -2102,7 +2102,6 @@ select:focus-visible {
 .agent-run-status.failed { color: #f08080; }
 .agent-run-status.completed { color: #7cc796; }
 .toggle.small { width: 32px; height: 18px; padding: 2px; }
-.agent-panel-mobile { display: none; }
 .agent-gear { position: absolute; z-index: 23; top: 12px; right: 16px; display: grid; place-items: center; width: 38px; height: 38px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--panel); color: var(--text); transition: transform .25s var(--spring, ease); }
 .agent-gear.open { transform: rotate(60deg); }
 .agent-menu-scrim { position: fixed; inset: 0; z-index: 22; background: transparent; }
@@ -2110,11 +2109,10 @@ select:focus-visible {
 .agent-panel.dropdown.closing { animation: agent-menu-out .16s ease forwards; }
 @keyframes agent-menu-in { from { opacity: 0; transform: translateY(-8px) scale(.96); } to { opacity: 1; transform: none; } }
 @keyframes agent-menu-out { to { opacity: 0; transform: translateY(-6px) scale(.97); } }
-@media (max-width: 900px) {
-  .chat-surface.agent-mode .conversation-stage { padding-right: 0; }
-  .agent-panel.desktop { display: none; }
-  .agent-panel-mobile { display: block; }
-}
+.agent-panel-mobile { display: block; }
+.agent-empty { margin: auto 0; padding: 12vh 0 4vh; text-align: center; }
+.agent-reset-link { align-self: flex-start; margin-top: 6px; padding: 0 2px; background: none; color: var(--dim); font-size: 10.5px; text-decoration: underline; text-underline-offset: 2px; }
+.agent-reset-link:hover { color: var(--muted); }
 .agent-notice-badge { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; padding: 2px 8px; border-radius: var(--radius-pill); color: #e0a84a; background: rgba(224,168,74,.12); font-size: 10.5px; }
 .agent-dialog.wide { width: min(820px, 100%); }
 .agent-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
@@ -2161,8 +2159,9 @@ select:focus-visible {
 .agent-rules { display: flex; flex-direction: column; gap: 8px; }
 .agent-rule-row { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius-md); background: rgba(255,255,255,.035); }
 .agent-rule-row > strong { font-size: 12.5px; }
-.agent-rule-controls { display: flex; gap: 12px; flex-wrap: wrap; }
-.agent-rule-select { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; }
+.agent-rule-controls { display: flex; gap: 14px; }
+.agent-rule-select { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11.5px; }
+.agent-rule-select > span { flex: none; white-space: nowrap; }
 .agent-rule-select select, .agent-dialog select { height: 30px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: var(--field); color: var(--text); font-size: 12px; }
 .agent-dialog .field select { height: 40px; width: 100%; }
 .agent-rule-exceptions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -2175,3 +2174,28 @@ select:focus-visible {
 .tool-cancel:hover:not(:disabled) { color: #f6a6a6; border-color: rgba(240,128,128,.5); }
 .tool-cancel:disabled { opacity: .5; }
 .tool-activity-group > summary .tool-cancel { margin-right: 6px; }
+/* ---------------------------------------------------------------- virtual computer */
+.vm-card { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; padding: 14px 16px; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: rgba(255,255,255,.03); }
+.vm-card.disabled { opacity: .7; }
+.vm-card > header { display: flex; align-items: flex-start; gap: 12px; }
+.vm-card > header > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.vm-card > header strong { font-size: 13.5px; }
+.vm-card > header small { color: var(--muted); font-size: 11.5px; line-height: 1.55; }
+.vm-status { display: flex; flex-direction: column; gap: 8px; }
+.vm-status > code, .vm-install > code { display: block; padding: 8px 11px; border-radius: var(--radius-sm); background: rgba(0,0,0,.35); color: var(--text); font-size: 11.5px; overflow-wrap: anywhere; }
+.vm-info { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 11.5px; }
+.vm-info.error { color: #f6a6a6; }
+.vm-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.subtle-action.danger { color: #f6a6a6; }
+.vm-form { display: flex; flex-direction: column; gap: 4px; }
+.vm-install { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; font-size: 12px; }
+.vm-install > small { color: var(--dim); font-size: 11px; line-height: 1.5; }
+.vm-install > button { align-self: flex-start; }
+.agent-dialog .agent-rule-select select { flex: 1; min-width: 0; width: auto; height: 28px; padding: 0 10px; border-radius: var(--radius-pill); font-size: 11.5px; line-height: 1; }
+.agent-rule-row > strong { display: flex; align-items: center; gap: 7px; }
+.agent-rule-row > strong svg { color: var(--muted); flex: none; }
+.agent-rule-exceptions .agent-rule-select { flex: 1; }
+/* 3. label → content spacing is the same for every field in the agent settings */
+.agent-rules { gap: 8px; }
+.agent-rules > span { margin-bottom: -1px; }
+.agent-rules > small { margin-top: 0; }

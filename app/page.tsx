@@ -427,6 +427,13 @@ export default function Home() {
   const agentWatchingRef = useRef(false);
   const agentSyncRef = useRef<() => void>(() => undefined);
   const agentOpenRef = useRef(false);
+  // The control panel docks beside the chat only when the window is close to full screen width.
+  const [agentDocked, setAgentDocked] = useState(false);
+  useEffect(() => {
+    const measure = () => setAgentDocked(window.innerWidth >= Math.max(901, window.screen.availWidth * .9));
+    measure(); window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
   agentOpenRef.current = agentOpen;
   // While the agent is open: follow its state, and tell the server this device is looking so it does not push here.
   useEffect(() => {
@@ -479,7 +486,8 @@ export default function Home() {
   // Built-in tools this account may use, then the account's own MCP connections. The server enforces the same rules.
   const offeredTools = useMemo(() => {
     const environment = { role: config.account?.role, disabledTools: config.planDisabledToolIds, managedTools: config.managedTools };
-    const connections = config.mcpEntitlement?.enabled ? config.mcpConnections.filter(connection => connection.enabled) : [];
+    // The virtual computer does not depend on the plan's MCP allowance.
+    const connections = config.mcpConnections.filter(connection => connection.enabled && (config.mcpEntitlement?.enabled || connection.kind === "vm"));
     return [...BUILTIN_TOOL_PROVIDERS.filter(manifest => toolRequirementsMet(manifest, environment)), ...connections.map((connection, index) => mcpManifest(connection, index))];
   }, [config.account?.role, config.mcpEntitlement?.enabled, config.mcpConnections, config.planDisabledToolIds, config.managedTools]);
   const pendingToolsRef = useRef<Record<string, unknown>>({});
@@ -1735,7 +1743,7 @@ export default function Home() {
       </aside>
       {mobileOpen && <button className="mobile-scrim" aria-label={c.closeMenu} onClick={() => setMobileOpen(false)} />}
 
-      <section className={`chat-surface ${agentOpen && agentState?.access.enabled ? "agent-mode" : ""}`}>
+      <section className={`chat-surface ${agentOpen && agentState?.access.enabled ? `agent-mode ${agentDocked ? "agent-docked" : ""}` : ""}`}>
         <div className="ambient-glow" />
         <div className="model-switcher">
           <button className="model-trigger" onClick={() => { if (!modelMenuOpen) setModelControlNotice(null); setModelMenuOpen((value) => !value); }}><span>{serversOffline ? c.serverOffline : selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
@@ -1744,7 +1752,7 @@ export default function Home() {
         </div>
 
         {agentOpen && !agentState?.access.enabled ? <div className="conversation-stage agent-stage"><div className="idle-center"><div className="welcome">{agentState ? <><h1>{locale === "ko" ? "에이전트를 쓸 수 없습니다" : "The agent is not available"}</h1><p>{locale === "ko" ? "지금 플랜에서는 에이전트가 꺼져 있습니다. 관리자에게 문의해 주세요." : "Your plan does not include the agent. Ask an administrator."}</p></> : <LoaderCircle className="spin" size={22} />}</div></div></div> : <>
-        {agentOpen && agentState && <AgentControlPanel ko={locale === "ko"} state={agentState} cache={lmfCache && lmfCache.conversationId === conversation?.id ? lmfCache : undefined} onChanged={() => { agentRevisionRef.current = undefined; agentSyncRef.current(); }} onOpen={(target, runId) => { if (target === "context") { setContextViewOpen(true); void refreshContextState(); } else setAgentDialog({ kind: target, runId }); }} />}
+        {agentOpen && agentState && <AgentControlPanel docked={agentDocked} ko={locale === "ko"} state={agentState} cache={lmfCache && lmfCache.conversationId === conversation?.id ? lmfCache : undefined} onChanged={() => { agentRevisionRef.current = undefined; agentSyncRef.current(); }} onOpen={(target, runId) => { if (target === "context") { setContextViewOpen(true); void refreshContextState(); } else setAgentDialog({ kind: target, runId }); }} />}
         {!agentOpen && <div className="surface-actions">
           {temporaryActive
             ? conversation?.temporary !== true && messages.length === 0
@@ -1757,10 +1765,11 @@ export default function Home() {
         </div>}
 
         <div className="conversation-stage">
-          {!messages.length ? <div className="idle-center"><div className="welcome"><h1>{agentOpen ? (locale === "ko" ? "무엇을 맡길까요?" : "What should I take care of?") : temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{agentOpen ? (locale === "ko" ? "일정·메일 확인, 알림 예약, 사이트·채널 추적처럼 계속 돌봐야 하는 일을 맡겨 보세요." : "Hand over ongoing work: checking schedules and mail, reminders, watching sites and channels.") : temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} organizationNotice={config.organizationMode === true && !temporaryActive} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} lmfCache={lmfCache && lmfCache.modelId === selectedModel?.id && lmfCache.conversationId === conversation?.id ? lmfCache : undefined} onContextOpen={() => { if (!isGenerating) void refreshRouting(selectedModel?.id, selectedAliasBase?.id, conversation?.id, "next"); }} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} notice={notice} clearNotice={() => setNotice("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingApproval={pendingApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} /></div> : <>
+          {!messages.length && !agentOpen ? <div className="idle-center"><div className="welcome"><h1>{agentOpen ? (locale === "ko" ? "무엇을 맡길까요?" : "What should I take care of?") : temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{agentOpen ? (locale === "ko" ? "일정·메일 확인, 알림 예약, 사이트·채널 추적처럼 계속 돌봐야 하는 일을 맡겨 보세요." : "Hand over ongoing work: checking schedules and mail, reminders, watching sites and channels.") : temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer c={c} organizationNotice={config.organizationMode === true && !temporaryActive} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} lmfCache={lmfCache && lmfCache.modelId === selectedModel?.id && lmfCache.conversationId === conversation?.id ? lmfCache : undefined} onContextOpen={() => { if (!isGenerating) void refreshRouting(selectedModel?.id, selectedAliasBase?.id, conversation?.id, "next"); }} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} notice={notice} clearNotice={() => setNotice("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingApproval={pendingApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} /></div> : <>
             <div className="thread-shell">
               <div className={`thread ${activityHidden ? "activity-hidden" : ""}`} ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
                 {contextViewOpen ? <ContextView ko={locale === "ko"} messages={messages} state={branchContext} includeReasoning={rememberReasoning} systemPrompt={selectedSystemPrompt} summaryEditing={contextSummaryEditing} setSummaryEditing={setContextSummaryEditing} onSave={saveContextState} confirm={askConfirm} onClose={() => setContextViewOpen(false)} /> : <>
+                {agentOpen && !visibleTranscript.length && <div className="agent-empty welcome"><h1>{locale === "ko" ? "무엇을 맡길까요?" : "What should I take care of?"}</h1><p>{locale === "ko" ? "일정·메일 확인, 알림 예약, 사이트·채널 추적처럼 계속 돌봐야 하는 일을 맡겨 보세요." : "Hand over ongoing work: checking schedules and mail, reminders, watching sites and channels."}</p></div>}
                 {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
                 {renderedMessages.map((message) => <Message agentMode={agentOpen} c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} waitStartedAt={pendingWait?.messageId === message.id ? pendingWait.startedAt : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={editUserRequest} onEditAssistant={editAssistantResponse} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
                 {manualCompaction && manualCompaction.key === `${conversation?.id}:${activeBranch?.id}` && <div className="message-row assistant-message manual-compaction"><CompactionStep c={c} locale={locale} step={manualCompaction.step} live={manualCompaction.live} /></div>}
@@ -2675,7 +2684,7 @@ function SettingsPanel({ initial, serverStates, onClose, onSaved, onLogout, onAc
     { id: "general", icon: <Settings2 size={17}/>, label: c.general },
     { id: "appearance", icon: <Palette size={17}/>, label: c.appearance },
     ...(admin ? [{ id: "connection" as const, icon: <Server size={17}/>, label: c.connection }] : []),
-    ...(draft.mcpEntitlement.enabled ? [{ id: "mcp" as const, icon: <Cable size={17}/>, label: ko ? "MCP 연결" : "MCP connections" }] : []),
+    { id: "mcp" as const, icon: <Cable size={17}/>, label: ko ? "MCP·가상 컴퓨터" : "MCP & virtual computer" },
     ...(admin ? [{ id: "tools" as const, icon: <Wrench size={17}/>, label: c.toolsSettings }] : []),
     { id: "models", icon: <NeuralMark size={18}/>, label: c.models },
     { id: "reasoning", icon: <Lightbulb size={17}/>, label: c.reasoningLevel },
@@ -2761,7 +2770,7 @@ ${c.detectFailedDetail}: ${failure.detail}` : ""}` });
           {tab==="general"&&<GeneralSettings c={c} draft={draft} setDraft={setDraft} admin={admin} onExport={exportSettings} onImport={importSettings} importing={saving}/>}
           {tab==="appearance"&&<AppearanceSettings c={c} draft={draft} setDraft={setDraft} admin={admin}/>}
           {tab==="connection"&&admin&&<ConnectionSettings c={c} draft={draft} setDraft={setDraft} onDetect={detect} detectingConnectionId={detectingConnectionId} statusNonce={statusNonce} initialServerStates={serverStates} onServerStates={setDraftServerStates}/>}
-          {tab==="mcp"&&draft.mcpEntitlement.enabled&&<McpSettings ko={draft.preferences.language==="ko"} connections={draft.mcpConnections} entitlement={draft.mcpEntitlement} onChanged={(connections,entitlement)=>{setDraft(current=>({...current,mcpConnections:connections,mcpEntitlement:entitlement}));onSaved({...initial,mcpConnections:connections,mcpEntitlement:entitlement});}}/>}
+          {tab==="mcp"&&<McpSettings ko={draft.preferences.language==="ko"} connections={draft.mcpConnections} entitlement={draft.mcpEntitlement} onChanged={(connections,entitlement)=>{setDraft(current=>({...current,mcpConnections:connections,mcpEntitlement:entitlement}));onSaved({...initial,mcpConnections:connections,mcpEntitlement:entitlement});}}/>}
           {tab==="tools"&&admin&&<><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><div className="harness-settings"><BrowserHarnessSection draft={draft} setDraft={setDraft}/><YoutubeHarnessSection draft={draft} setDraft={setDraft}/></div><ToolsSettings c={c} draft={draft} setDraft={setDraft}/><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}
           {tab==="models"&&<ModelSettings c={c} draft={draft} availableModels={availableDraftModels} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account}/>}
           {tab==="reasoning"&&<ReasoningSettings c={c} draft={draft} availableModels={availableDraftModels} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account}/>}

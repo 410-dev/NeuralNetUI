@@ -671,7 +671,7 @@ async function run(job: ChatJob) {
       history: () => [...job.conversation.branches.flatMap(branch => branch.messages), job.message].flatMap(message => message.toolEvents || []),
       services: { complete: (modelId, effort, prompt, input, maxTokens) => harnessCompletion(harnessContext, modelId || job.input.modelId, effort, prompt, input, maxTokens) },
       disabledTools: planDisabledToolIds(job.userId),
-      managedTools: managedToolsInstalled(),
+      managedTools: managedToolsInstalled(job.userId),
       ...(job.agent ? { gate: job.agent.gate, agent: { userId: job.userId, mode: job.agent.mode, runId: job.agent.runId, autonomous: job.agent.autonomous } } : {}),
     };
     // Every provider the request switched on and the server allows, fixed for the whole reply.
