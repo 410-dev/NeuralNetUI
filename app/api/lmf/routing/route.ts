@@ -4,7 +4,7 @@ import { db } from "@/lib/database";
 import { aliasBaseModel } from "@/lib/alias-base-model";
 import { baseModelForAlias } from "@/lib/model-context";
 import { connectionForModel, connectionHeaders, envApiKey } from "@/lib/connection-drivers";
-import { lmfEndpoint, lmfRouteLabel, routingFrom, storedLmfSession } from "@/lib/lmf";
+import { lmfEndpoint, lmfRouteLabel, lmfSessionTtlMs, routingFrom, storedLmfSession } from "@/lib/lmf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     if (!base || !connection || connection.driver !== "lmf" || !base.routerModel) return Response.json({ routing: null });
     const conversationId = query.get("conversationId") || "";
     const owned = conversationId && db.prepare("SELECT 1 FROM conversations WHERE id = ? AND user_id = ?").get(conversationId, user.id);
-    const sessionId = owned ? storedLmfSession(conversationId, connection.id, base.sourceModel) : undefined;
+    const sessionId = owned ? storedLmfSession(conversationId, connection.id, base.sourceModel, lmfSessionTtlMs(connection)) : undefined;
     const headers = connectionHeaders(connection, envApiKey(connection.driver));
     const fetchJson = async (path: string) => {
       const response = await fetch(lmfEndpoint(connection.baseUrl, path), { headers, signal: AbortSignal.timeout(5_000), cache: "no-store" });

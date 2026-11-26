@@ -128,6 +128,8 @@ export interface ConnectionConfig {
   lmfCacheDiscount?: boolean;
   /** LMFuseFramework only: how much of each cached prompt token is waived, in percent. Missing means 90. */
   lmfCacheDiscountPercent?: number;
+  /** LMFuseFramework only: a chat's session is deleted on the server after this many hours without a request. Missing means 24. */
+  lmfSessionTtlHours?: number;
   models: ModelConfig[];
 }
 

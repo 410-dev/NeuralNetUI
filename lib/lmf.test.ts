@@ -55,3 +55,32 @@ test("a plan weight overrides the model default weight, which overrides 1", () =
   assert.equal(weightedTokenUsage([{ modelId: "a", inputTokens: 10, outputTokens: 0 }, { modelId: "b", inputTokens: 10, outputTokens: 0 }, { modelId: "z", inputTokens: 10, outputTokens: 0 }], "input", weights), 60);
   assert.equal(effectiveModelWeights({ a: 1.5 }, defaults).a, 1.5);
 });
+
+test("sessions expire after the connection TTL, and deleted chats' sessions are swept", async () => {
+  const { db } = await import("./database.ts");
+  const stamp = new Date().toISOString();
+  const user = crypto.randomUUID();
+  db.prepare("INSERT INTO users(id,username,display_name,password_hash,role,preferences,created_at,updated_at) VALUES(?,?,?,?,?,'{}',?,?)").run(user, `u-${user}`, "U", "x", "user", stamp, stamp);
+  const conversation = (id: string, deleted?: string) => {
+    db.pragma("foreign_keys = OFF");
+    db.prepare("INSERT INTO conversations(id,title,model_id,active_branch_id,created_at,updated_at,user_id,deleted_at) VALUES(?,?,?,?,?,?,?,?)").run(id, "t", "auto", `b-${id}`, stamp, stamp, user, deleted ?? null);
+    db.pragma("foreign_keys = ON");
+  };
+  conversation("live"); conversation("trashed", stamp);
+  const now = Date.parse("2026-11-26T12:00:00Z"), hours = (n: number) => new Date(now - n * 3600_000).toISOString();
+  const put = (conv: string, connection: string, sid: string, at: string) => db.prepare("INSERT OR REPLACE INTO lmf_sessions(conversation_id,connection_id,model,session_id,updated_at) VALUES(?,?,?,?,?)").run(conv, connection, "auto", sid, at);
+  put("live", "lmf", "fresh", hours(2)); put("live", "lmf-short", "idle", hours(3)); put("trashed", "lmf", "trashed", hours(1)); put("missing", "lmf", "orphan", hours(1)); put("live", "removed", "unknown-connection", hours(1));
+  const connections = [{ id: "lmf", driver: "lmf" as const }, { id: "lmf-short", driver: "lmf" as const, lmfSessionTtlHours: 2 }];
+  assert.deepEqual(lmf.staleLmfSessions(connections, now).map(row => row.sessionId).sort(), ["idle", "orphan", "trashed", "unknown-connection"]);
+  assert.equal(lmf.storedLmfSession("live", "lmf-short", "auto", lmf.lmfSessionTtlMs(connections[1]), now), undefined);
+  assert.equal(lmf.storedLmfSession("live", "lmf", "auto", lmf.lmfSessionTtlMs(connections[0]), now), "fresh");
+  // A row replaced by a newer session is not removed by a sweep that read the old one.
+  lmf.dropLmfSessionRow({ conversationId: "live", connectionId: "lmf", model: "auto", sessionId: "other" });
+  assert.equal(lmf.storedLmfSession("live", "lmf", "auto"), "fresh");
+  const calls: string[] = [];
+  const request = (async (url: string, init: RequestInit) => { calls.push(`${init.method} ${url}`); return new Response("", { status: url.includes("gone") ? 404 : url.includes("down") ? 503 : 200 }); }) as typeof fetch;
+  assert.equal(await lmf.deleteRemoteLmfSession({ baseUrl: "http://h/v1" }, {}, "s 1", request), true);
+  assert.equal(await lmf.deleteRemoteLmfSession({ baseUrl: "http://h/v1" }, {}, "gone", request), true);
+  assert.equal(await lmf.deleteRemoteLmfSession({ baseUrl: "http://h/v1" }, {}, "down", request), false);
+  assert.equal(calls[0], "DELETE http://h/v1/lmf/sessions/s%201?purge=1");
+});

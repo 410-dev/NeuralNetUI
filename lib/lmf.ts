@@ -4,6 +4,7 @@ import type { ConnectionConfig, ModelConfig } from "./types.ts";
 /** Request and response header that names the LMFuseFramework session a chat continues; "new" opens one. */
 export const LMF_SESSION_HEADER = "X-LMF-Session";
 export const LMF_DEFAULT_DISCOUNT_PERCENT = 90;
+export const LMF_DEFAULT_SESSION_TTL_HOURS = 24;
 
 /** One provider a routing model may pick (`/v1/lmf/route` providers, `route.current`, `route.next.next`). */
 export type LmfRouteEntry = { provider: string; model?: string; effort?: string; template?: string; position?: number };
@@ -59,9 +60,14 @@ export function lmfSessionFrom(headers: Headers | undefined, payload?: unknown) 
   return text(headers?.get(LMF_SESSION_HEADER)) || text(record(record(payload)?.lmf)?.session);
 }
 
-export function storedLmfSession(conversationId: string, connectionId: string, model: string) {
-  const row = db.prepare("SELECT session_id FROM lmf_sessions WHERE conversation_id = ? AND connection_id = ? AND model = ?").get(conversationId, connectionId, model) as { session_id: string } | undefined;
-  return row?.session_id;
+export function lmfSessionTtlMs(connection: Pick<ConnectionConfig, "lmfSessionTtlHours">) {
+  return Math.min(8760, Math.max(1, connection.lmfSessionTtlHours ?? LMF_DEFAULT_SESSION_TTL_HOURS)) * 3600_000;
+}
+
+/** The session a chat continues; one unused for longer than the TTL is not offered (the sweeper deletes it). */
+export function storedLmfSession(conversationId: string, connectionId: string, model: string, ttlMs = Infinity, now = Date.now()) {
+  const row = db.prepare("SELECT session_id, updated_at FROM lmf_sessions WHERE conversation_id = ? AND connection_id = ? AND model = ?").get(conversationId, connectionId, model) as { session_id: string; updated_at: string } | undefined;
+  return row && now - Date.parse(row.updated_at) <= ttlMs ? row.session_id : undefined;
 }
 
 export function saveLmfSession(conversationId: string, connectionId: string, model: string, sessionId: string) {
@@ -72,6 +78,30 @@ export function saveLmfSession(conversationId: string, connectionId: string, mod
 
 export function forgetLmfSession(conversationId: string, connectionId: string, model: string) {
   db.prepare("DELETE FROM lmf_sessions WHERE conversation_id = ? AND connection_id = ? AND model = ?").run(conversationId, connectionId, model);
+}
+
+export type LmfSessionRow = { conversationId: string; connectionId: string; model: string; sessionId: string; updatedAt: string; conversationGone: boolean };
+
+/** Sessions whose chat was deleted (to the trash or for good), or that went unused for longer than their connection's TTL. */
+export function staleLmfSessions(connections: Array<Pick<ConnectionConfig, "id" | "driver" | "lmfSessionTtlHours">>, now = Date.now()): LmfSessionRow[] {
+  const rows = db.prepare(`SELECT s.conversation_id AS conversationId, s.connection_id AS connectionId, s.model, s.session_id AS sessionId, s.updated_at AS updatedAt,
+      (c.id IS NULL OR c.deleted_at IS NOT NULL) AS gone FROM lmf_sessions s LEFT JOIN conversations c ON c.id = s.conversation_id`).all() as Array<Omit<LmfSessionRow, "conversationGone"> & { gone: number }>;
+  return rows.map(({ gone, ...row }) => ({ ...row, conversationGone: gone === 1 })).filter(row => {
+    const connection = connections.find(item => item.id === row.connectionId);
+    return row.conversationGone || !connection || connection.driver !== "lmf" || now - Date.parse(row.updatedAt) > lmfSessionTtlMs(connection);
+  });
+}
+
+/** Removes the local record only if it still names this session (a newer turn may have replaced it meanwhile). */
+export function dropLmfSessionRow(row: Pick<LmfSessionRow, "conversationId" | "connectionId" | "model" | "sessionId">) {
+  db.prepare("DELETE FROM lmf_sessions WHERE conversation_id = ? AND connection_id = ? AND model = ? AND session_id = ?").run(row.conversationId, row.connectionId, row.model, row.sessionId);
+}
+
+/** `DELETE /v1/lmf/sessions/{id}?purge=1`: closes the session and asks the server to delete its records. A session already gone counts as done. */
+export async function deleteRemoteLmfSession(connection: Pick<ConnectionConfig, "baseUrl">, headers: Record<string, string>, sessionId: string, request: typeof fetch = fetch) {
+  const response = await request(`${lmfEndpoint(connection.baseUrl, `sessions/${encodeURIComponent(sessionId)}`)}?purge=1`, { method: "DELETE", headers, signal: AbortSignal.timeout(15_000), cache: "no-store" });
+  await response.body?.cancel().catch(() => undefined);
+  return response.ok || response.status === 404;
 }
 
 /** A closed or expired session is answered with 404 `session_not_found`; the chat then opens a new one. */

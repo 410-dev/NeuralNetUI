@@ -20,7 +20,7 @@ import { readUpload, readUploadModelContent, saveGeneratedImage } from "./upload
 import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, envApiKey, hasModelResidency } from "./connection-drivers";
 import { chatFetcher, providerRequestBody } from "./provider-requests.ts";
 import type { ConnectionConfig, ConnectionDriver } from "./types";
-import { forgetLmfSession, isLmfSessionGone, LMF_SESSION_HEADER, lmfChargedInput, lmfSessionFrom, saveLmfSession, storedLmfSession } from "./lmf";
+import { deleteRemoteLmfSession, forgetLmfSession, isLmfSessionGone, LMF_SESSION_HEADER, lmfChargedInput, lmfSessionFrom, lmfSessionTtlMs, saveLmfSession, storedLmfSession } from "./lmf";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
 import { readPersonalSampling, resolveSampling, samplingRequestFields, type SamplingParams } from "./sampling-params";
 import { createResidencyAdapter } from "./residency-adapter";
@@ -142,7 +142,8 @@ function usageFrom(payload: Record<string, unknown>) {
 
 /** Keeps the session id LMFuseFramework named for this chat, for the next turn and the next request. */
 function rememberLmfSession(job: ChatJob, sessionId: string | undefined) {
-  if (!job.lmf || !sessionId || job.lmf.sessionId === sessionId) return;
+  // Saving on every turn also marks the session as used now, which restarts its TTL.
+  if (!job.lmf || !sessionId) return;
   job.lmf.sessionId = sessionId;
   try { saveLmfSession(job.input.conversationId, job.lmf.connection.id, job.lmf.model, sessionId); }
   catch (error) { console.error("Unable to store the LMFuseFramework session", error); }
@@ -670,7 +671,14 @@ async function run(job: ChatJob) {
     const managedServer = nativeServer;
     // Hosted providers have nothing to load or unload; only the local servers get a residency adapter.
     const adapter = !cloud && (config.preferences.onDemand || limit > 0 || managedServer) ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase), fetch, managedServer && progressEnabled ? progress => setWaitProgress(job, "loading-model", progress) : undefined) : undefined;
-    job.lmf = connection.driver === "lmf" ? { connection, model: model.sourceModel, sessionId: storedLmfSession(job.input.conversationId, connection.id, model.sourceModel) } : undefined;
+    job.lmf = undefined;
+    if (connection.driver === "lmf") {
+      const stored = storedLmfSession(job.input.conversationId, connection.id, model.sourceModel);
+      const sessionId = storedLmfSession(job.input.conversationId, connection.id, model.sourceModel, lmfSessionTtlMs(connection));
+      // A session idle past the TTL is deleted on the server and replaced; the chat continues from its full history.
+      if (stored && !sessionId) void deleteRemoteLmfSession(connection, headers, stored).catch(() => undefined);
+      job.lmf = { connection, model: model.sourceModel, sessionId };
+    }
     const acquireModel = () => modelResidency.acquire({ server: serverKey, model: model.sourceModel, limit, policy, adapter, signal: job.controller.signal, onPhase: phase => setWaitPhase(job, phase) });
     releaseModel = await acquireModel();
     let compactionResumes = 0;
