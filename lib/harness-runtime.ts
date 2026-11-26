@@ -1,6 +1,6 @@
 import { DEFAULT_HARNESS_SETTINGS, compactionMessages, dropDetails, dropDetailsBeforeLatestTools, estimateTokens, projectedInputTokens, rollingMessages, resumePrompt } from "./harness";
 import { canUseModel } from "./config";
-import { connectionForModel, chatHeaders, connectionRoot, chatEndpoint, envApiKey, isCloudDriver } from "./connection-drivers";
+import { connectionForModel, chatHeaders, connectionRoot, chatEndpoint, envApiKey, hasModelResidency } from "./connection-drivers";
 import { chatFetcher, providerRequestBody } from "./provider-requests.ts";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
 import { readPersonalSampling, resolveSampling, samplingRequestFields } from "./sampling-params";
@@ -76,7 +76,7 @@ export async function harnessCompletion(ctx: Context, id: string, effortValue: s
   const signal = AbortSignal.any([ctx.signal, timeoutController.signal]);
   const release = await modelResidency.acquire({ server, model: model.sourceModel, limit,
     policy: peers.some(c => c.modelWaitPolicy === "serial") ? "serial" : "capacity", signal, onPhase: ctx.onPhase,
-    adapter: !isCloudDriver(connection.driver) && (ctx.config.preferences.onDemand || limit) || connection.driver === "lmstudio" ? createResidencyAdapter(connection, headers, model.contextWindowTokens, ctx.onPhase) : undefined }).catch(error => { if (timeout) clearTimeout(timeout); route.release(); throw error; });
+    adapter: hasModelResidency(connection.driver) && (ctx.config.preferences.onDemand || limit) || connection.driver === "lmstudio" ? createResidencyAdapter(connection, headers, model.contextWindowTokens, ctx.onPhase) : undefined }).catch(error => { if (timeout) clearTimeout(timeout); route.release(); throw error; });
   const harnessSettings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
   const isCompaction = kind === "compaction" || prompt === harnessSettings.compactPrompt;
   const requestMessages = isCompaction ? compactionMessages(prompt, content, harnessSettings.compactPromptPosition) : [{role:"system", content:prompt}, {role:"user", content}];

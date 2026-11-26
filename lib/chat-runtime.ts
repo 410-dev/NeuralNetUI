@@ -17,9 +17,10 @@ import { aliasBaseModel, aliasWithBaseModel } from "./alias-base-model";
 import { readConversation, writeConversation, renameConversation } from "./conversations";
 import { detectTextRepetition, detectToolCallRepetition, normalizeRepetitionSettings, toolArgumentText, type RepetitionFinding, type RepetitionSettings } from "./repetition.ts";
 import { readUpload, readUploadModelContent, saveGeneratedImage } from "./uploads";
-import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, envApiKey, isCloudDriver } from "./connection-drivers";
+import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, envApiKey, hasModelResidency } from "./connection-drivers";
 import { chatFetcher, providerRequestBody } from "./provider-requests.ts";
-import type { ConnectionDriver } from "./types";
+import type { ConnectionConfig, ConnectionDriver } from "./types";
+import { forgetLmfSession, isLmfSessionGone, LMF_SESSION_HEADER, lmfChargedInput, lmfSessionFrom, saveLmfSession, storedLmfSession } from "./lmf";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
 import { readPersonalSampling, resolveSampling, samplingRequestFields, type SamplingParams } from "./sampling-params";
 import { createResidencyAdapter } from "./residency-adapter";
@@ -88,6 +89,8 @@ export function runtimeModel(config: Awaited<ReturnType<typeof readConfig>>, inp
 }
 
 type ChatJob = {
+  /** Set for LMFuseFramework connections: the session this chat continues, created on the first turn. */
+  lmf?: { connection: ConnectionConfig; model: string; sessionId?: string };
   userId: string;
   userRole: UserRole;
   input: StartChatJobInput;
@@ -133,7 +136,16 @@ function usageFrom(payload: Record<string, unknown>) {
   return {
     inputTokens: token(value.prompt_tokens ?? value.input_tokens), outputTokens: token(value.completion_tokens ?? value.output_tokens),
     reasoningTokens: token(details?.reasoning_tokens), totalTokens: token(value.total_tokens),
+    cachedTokens: token((value.prompt_tokens_details as Record<string, unknown> | undefined)?.cached_tokens),
   };
+}
+
+/** Keeps the session id LMFuseFramework named for this chat, for the next turn and the next request. */
+function rememberLmfSession(job: ChatJob, sessionId: string | undefined) {
+  if (!job.lmf || !sessionId || job.lmf.sessionId === sessionId) return;
+  job.lmf.sessionId = sessionId;
+  try { saveLmfSession(job.input.conversationId, job.lmf.connection.id, job.lmf.model, sessionId); }
+  catch (error) { console.error("Unable to store the LMFuseFramework session", error); }
 }
 
 /** Appends streamed text to the open step of the same kind, or opens a new one. */
@@ -369,11 +381,22 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     const httpBody = nativeResponse ? body : await materializeImageFiles(body);
     if (!nativeResponse) startStatusPoll();
     const driver = (typeof body._driver === "string" ? body._driver : "openai") as ConnectionDriver;
-    response = nativeResponse || await progressFetch(String(body._endpoint), {
-      method: "POST", headers, signal,
+    const send = () => progressFetch(String(body._endpoint), {
+      method: "POST", signal,
+      // An LMFuseFramework chat continues its session; the first turn asks the server to open one.
+      headers: job.lmf ? { ...headers, [LMF_SESSION_HEADER]: job.lmf.sessionId || "new" } : headers,
       body: JSON.stringify(providerRequestBody(driver, Object.fromEntries(Object.entries(httpBody).filter(([key]) => key !== "_endpoint" && key !== "_driver"))), (key, value) => key === "_neural_context_tokens" ? undefined : value),
     }, setResponsePhase, "preparing-response", chatFetcher(driver), SERVER_RESPONSE_TIMEOUT_MS, prefillTimerController.signal);
+    response = nativeResponse || await send();
+    if (!response.ok && job.lmf?.sessionId) {
+      const detail = await response.text();
+      // The stored session was closed or expired on the server: start a new one from the full history this request carries.
+      if (!isLmfSessionGone(response.status, detail)) throw new Error(detail || `Model server responded with ${response.status}`);
+      forgetLmfSession(job.input.conversationId, job.lmf.connection.id, job.lmf.model); job.lmf.sessionId = undefined;
+      response = await send();
+    }
     if (!response.ok) throw new Error((await response.text()) || `Model server responded with ${response.status}`);
+    rememberLmfSession(job, lmfSessionFrom(response.headers));
     if (!response.body) throw new Error("The model server returned no response stream.");
   } catch (error) { stopStatusPoll(); throw error; }
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
@@ -401,6 +424,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
   };
   const readPayload = (payload: Record<string, unknown>) => {
     sawPayload = true;
+    if (job.lmf) rememberLmfSession(job, lmfSessionFrom(undefined, payload));
     const progress = allowProgress ? progressEvent(payload) : undefined;
     if (progress && !content && !reasoning && !calls.size) {
       if (progress.phase === "processing-prompt") { prefillSeen = true; prefillTimerController.abort(); stopStatusPoll(); }
@@ -436,7 +460,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     if (rawContent || rawReasoning || Array.isArray(delta.tool_calls)) inspectRepetition(job, [...calls.values()]);
     const outputEstimate = estimateTokens(content) + estimateTokens(reasoning) + estimateTokens([...calls.values()]);
     const used = Math.max(inputEstimate, usage.inputTokens ?? 0) + Math.max(outputEstimate, usage.outputTokens ?? 0, usage.reasoningTokens ?? 0);
-    chargedUsage = { inputTokens: usage.inputTokens ?? inputEstimate, outputTokens: usage.outputTokens ?? outputEstimate };
+    chargedUsage = { inputTokens: job.lmf ? lmfChargedInput(job.lmf.connection, usage.inputTokens ?? inputEstimate, usage.cachedTokens) : usage.inputTokens ?? inputEstimate, outputTokens: usage.outputTokens ?? outputEstimate };
     if (chargeModelId) setLiveTokenUsage(job.userId, job.message.id, chargeModelId, chargedUsage.inputTokens, chargedUsage.outputTokens);
     job.message.contextTokens = used;
     if (threshold && used >= threshold) { compact = true; terminated = true; turnController.abort(); }
@@ -634,7 +658,7 @@ async function run(job: ChatJob) {
     job.message.contextTokens = estimateTokens(messages); broadcast(job, true);
     const sessionId = job.input.conversationId;
     const headers = chatHeaders(connection, envApiKey(connection.driver), sessionId);
-    const cloud = isCloudDriver(connection.driver);
+    const cloud = !hasModelResidency(connection.driver);
     // Load and prompt progress comes from LM Studio's native API only.
     const progressEnabled = connection.driver === "lmstudio";
     const nativeServer = connection.driver === "lmstudio";
@@ -646,6 +670,7 @@ async function run(job: ChatJob) {
     const managedServer = nativeServer;
     // Hosted providers have nothing to load or unload; only the local servers get a residency adapter.
     const adapter = !cloud && (config.preferences.onDemand || limit > 0 || managedServer) ? createResidencyAdapter(connection, headers, model.contextWindowTokens, phase => setWaitPhase(job, phase), fetch, managedServer && progressEnabled ? progress => setWaitProgress(job, "loading-model", progress) : undefined) : undefined;
+    job.lmf = connection.driver === "lmf" ? { connection, model: model.sourceModel, sessionId: storedLmfSession(job.input.conversationId, connection.id, model.sourceModel) } : undefined;
     const acquireModel = () => modelResidency.acquire({ server: serverKey, model: model.sourceModel, limit, policy, adapter, signal: job.controller.signal, onPhase: phase => setWaitPhase(job, phase) });
     releaseModel = await acquireModel();
     let compactionResumes = 0;

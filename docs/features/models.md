@@ -10,8 +10,22 @@
 | LM Studio | `http://localhost:1234` | `/api/v1/models` | 네이티브 SDK 추론, 미지원 요청은 `/v1/chat/completions` | `/api/v1/models/load`, `/unload` |
 | Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `/models` | `/chat/completions` (OpenAI 호환) | 없음 (호스팅) |
 | Anthropic Claude | `https://api.anthropic.com/v1` | `/models` | 공식 SDK로 Messages API 호출 후 Chat Completions로 변환 | 없음 (호스팅) |
+| LMFuseFramework | `http://localhost:8700/v1` | `/models` | `/v1/chat/completions` 스트림에 `X-LMF-Session` 세션 연동 | 없음 (서버가 공급자·모델을 고름) |
 
 LM Studio 채팅은 도구 호출과 전체 대화 이력을 보존해야 하는 경우 호환 스트림을 사용합니다. 명명된 reasoning effort와 이전 추론 분리 전달은 SDK 1.5.0이 표현할 수 없어 Chat Completions 경로를 유지합니다.
+
+### LMFuseFramework
+
+OpenAI API의 확장입니다. 채팅마다 LMFuseFramework 세션을 하나씩 이어 씁니다.
+
+- 첫 요청은 `X-LMF-Session: new`로 세션을 만들고, 응답 헤더나 첫 스트림 조각의 `lmf.session`으로 받은 id를 채팅·연결·모델별로 저장합니다(마이그레이션 30, `lmf_sessions`). 이후 요청은 그 id를 보냅니다. 대화 전체를 보내도 서버가 마지막 답 이후의 새 메시지만 이어 붙이고, 재생성·편집으로 기록이 어긋나면 서버가 스스로 문맥을 다시 맞춥니다.
+- 서버가 세션을 닫았거나 없다고(404 `session_not_found`) 답하면 저장된 id를 지우고 새 세션으로 한 번 다시 보냅니다.
+- **세션·캐시 사용량 할인**(관리자, 연결 설정): 서버가 캐시에서 읽었다고 알린 입력 토큰(`prompt_tokens_details.cached_tokens`)을 플랜 사용량에서 정한 비율(기본 90%)만큼 덜 계산합니다. 끄면 모든 입력 토큰을 그대로 계산합니다.
+- **라우팅 모델**: 모델 설정에서 켭니다(감지할 때 `auto`는 자동으로 켜짐). 모델 선택기 아래에 "현재 … 로 라우팅 중"이 회색 작은 글씨로 표시됩니다. 요청을 보내기 직전에는 다음 요청이 갈 공급자를, 응답이 끝나면 방금 쓴 공급자를 `/v1/lmf/sessions/{id}`(세션이 없으면 `/v1/lmf/route`)에서 읽습니다. 표시 이름은 라우팅 모델의 설정 화면에서 `/v1/lmf/route`가 알려 주는 공급자·모델마다 정하고, 비워 두면 공급자와 모델 이름을 그대로 씁니다.
+
+### 기본 사용량 가중치
+
+모델 설정의 **기본 사용량 가중치**(관리자, 기본값 1)는 제공자와 상관없이 그 모델의 토큰 사용량에 곱해집니다. 플랜에서 그 모델의 가중치를 따로 정하면 플랜 값이 우선하고, 플랜 설정의 **기본값** 버튼으로 다시 모델 기본값을 따르게 할 수 있습니다. 별칭은 기본 모델의 가중치를 씁니다.
 
 ### 우선순위
 

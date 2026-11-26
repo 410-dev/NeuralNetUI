@@ -26,23 +26,27 @@ const DETAILS: Partial<Record<CapabilityId, Partial<Record<ConnectionDriver, [st
     lmstudio: ["Native inventory with reasoning capabilities and loaded instances", "추론 capability와 로드된 인스턴스까지 포함한 네이티브 목록"],
     google: ["Gemini models from the OpenAI-compatible model list (embedding and media models are skipped)", "OpenAI 호환 목록에서 Gemini 모델을 감지합니다 (임베딩·미디어 모델 제외)"],
     anthropic: ["Claude models with names and context windows from the Models API", "Models API에서 Claude 모델의 이름과 컨텍스트 길이까지 감지합니다"],
+    lmf: ["Accounts, templates and the auto routing model from the OpenAI-compatible list", "OpenAI 호환 목록에서 계정·템플릿과 auto 라우팅 모델을 감지합니다"],
   },
   management: {
     google: ["Hosted service; there is nothing to load or unload", "호스팅 서비스라 로드·언로드할 대상이 없습니다"],
     anthropic: ["Hosted service; there is nothing to load or unload", "호스팅 서비스라 로드·언로드할 대상이 없습니다"],
     openai: ["Probes LM Studio management, otherwise falls back to /api/inference", "LM Studio 관리 API를 먼저 시도하고, 없으면 /api/inference로 대체합니다"],
     lmstudio: ["Native load and unload endpoints", "네이티브 로드·언로드 엔드포인트"],
+    lmf: ["Each chat keeps an LMFuseFramework session instead; the server picks provider and model", "대신 채팅마다 LMFuseFramework 세션을 이어 쓰고, 공급자와 모델은 서버가 고릅니다"],
   },
   progress: {
     lmstudio: ["SDK percentages for supported requests; other requests can show polled model-level prompt processing without a percentage", "지원되는 요청은 SDK 퍼센트를 표시합니다. 추론 강도 단계나 이전 생각 기록으로 폴백해도 모델 상태 조회가 가능하면 퍼센트 없이 프롬프트 처리 상태를 표시합니다"],
   },
   effort: {
+    lmf: ["Sent as reasoning_effort to account models; the auto routing model uses each route entry's own effort", "계정 모델에는 reasoning_effort로 전달하고, auto 라우팅 모델은 라우팅 항목마다 정해진 강도를 씁니다"],
     google: ["Sent as reasoning_effort (none, low, medium, high) to Gemini 2.5 and later", "Gemini 2.5 이상에 reasoning_effort(none·low·medium·high)로 전달합니다"],
     anthropic: ["Sent as output_config.effort with adaptive thinking; Temperature and other sampling values are not sent because current Claude models reject them", "적응형 사고와 함께 output_config.effort로 전달합니다. 최신 Claude 모델은 Temperature 등 샘플링 값을 받지 않으므로 전송하지 않습니다"],
   },
   reasoningHistory: {
     google: ["Earlier reasoning text is not accepted by the Gemini compatibility endpoint", "Gemini 호환 엔드포인트는 이전 생각 기록을 받지 않습니다"],
     anthropic: ["Earlier thinking is not replayed; Claude reasons afresh each turn", "이전 생각은 다시 보내지 않으며, Claude가 매 턴 새로 추론합니다"],
+    lmf: ["The server ignores earlier reasoning text", "서버가 이전 생각 기록을 무시합니다"],
   },
 };
 
@@ -54,6 +58,7 @@ const STATES: Record<ConnectionDriver, Record<CapabilityId, CapabilityState>> = 
   lmstudio: { discovery: "yes", management: "yes", progress: "partial", effort: "yes", reasoningHistory: "yes" },
   google: { discovery: "yes", management: "no", progress: "no", effort: "yes", reasoningHistory: "no" },
   anthropic: { discovery: "yes", management: "no", progress: "no", effort: "yes", reasoningHistory: "no" },
+  lmf: { discovery: "yes", management: "no", progress: "no", effort: "partial", reasoningHistory: "no" },
 };
 
 /** What a driver can and cannot do, for the picker that chooses it. */

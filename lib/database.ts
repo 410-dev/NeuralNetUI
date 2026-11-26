@@ -554,6 +554,19 @@ function openDatabase() {
       CREATE INDEX IF NOT EXISTS audit_unlocks_target_idx ON audit_unlocks(target_user_id, created_at DESC);`);
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(29, new Date().toISOString());
   })();
+  const lmfSessionVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (lmfSessionVersion.version < 30) connection.transaction(() => {
+    // The LMFuseFramework session each chat continues, per connection and model (a session is bound to one model).
+    connection.exec(`CREATE TABLE IF NOT EXISTS lmf_sessions (
+        conversation_id TEXT NOT NULL,
+        connection_id TEXT NOT NULL,
+        model TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (conversation_id, connection_id, model)
+      );`);
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(30, new Date().toISOString());
+  })();
   return connection;
 }
 

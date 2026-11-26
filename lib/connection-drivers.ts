@@ -14,12 +14,18 @@ export function isCloudDriver(driver: ConnectionDriver) {
   return driver === "google" || driver === "anthropic";
 }
 
+/** Servers whose models NeuralNetUI may load, unload and keep resident. Hosted providers and LMFuseFramework route on their own. */
+export function hasModelResidency(driver: ConnectionDriver) {
+  return driver === "openai" || driver === "lmstudio";
+}
+
 /** Default API addresses for each driver, used when a connection is created or its driver changes. */
 export const DRIVER_DEFAULT_URLS: Record<ConnectionDriver, string> = {
   openai: "http://localhost:8888/v1",
   lmstudio: "http://localhost:1234",
   google: "https://generativelanguage.googleapis.com/v1beta/openai",
   anthropic: "https://api.anthropic.com/v1",
+  lmf: "http://localhost:8700/v1",
 };
 
 /** The environment variable a connection without its own key falls back to (server side only). */
@@ -28,6 +34,7 @@ export function envApiKey(driver: ConnectionDriver): string {
   if (driver === "openai") return process.env.OPENAI_API_KEY || "";
   if (driver === "google") return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
   if (driver === "anthropic") return process.env.ANTHROPIC_API_KEY || "";
+  if (driver === "lmf") return process.env.LMF_API_KEY || "";
   return "";
 }
 

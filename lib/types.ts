@@ -6,7 +6,7 @@ import type { RepetitionSettings } from "./repetition.ts";
 export type ReasoningKind = "builtin" | "custom";
 export type SystemPromptMode = "replace" | "prepend" | "append";
 export type Locale = "en" | "ko";
-export type ConnectionDriver = "openai" | "lmstudio" | "google" | "anthropic";
+export type ConnectionDriver = "openai" | "lmstudio" | "google" | "anthropic" | "lmf";
 export type McpAuthType = "oauth" | "api_key" | "none";
 export type McpToolPolicy = "blocked" | "always_ask" | "session_ask" | "always_allow";
 export type ArtifactKind = "html" | "csv" | "json" | "xml" | "markdown";
@@ -101,6 +101,12 @@ export interface ModelConfig {
   samplingParams?: SamplingParams;
   /** What the server reported as its defaults at the last model refresh, if it could be read. */
   samplingDefaults?: SamplingParams;
+  /** Default token usage weight, applied wherever a plan does not set one for this model. Missing means 1. */
+  usageWeight?: number;
+  /** LMFuseFramework routing model (usually "auto"): the provider changes per request and is shown under the picker. */
+  routerModel?: boolean;
+  /** Display names for the providers a routing model may pick, keyed by `lmfRouteKey` ("provider/model"). */
+  routeDisplayNames?: Record<string, string>;
 }
 
 export interface ConnectionConfig {
@@ -118,6 +124,10 @@ export interface ConnectionConfig {
   /** Zero or absent means unlimited. A positive limit enables managed loading. */
   maxResidentModels?: number;
   modelWaitPolicy?: ModelWaitPolicy;
+  /** LMFuseFramework only: count cached prompt tokens at a discount in plan usage. Missing means on. */
+  lmfCacheDiscount?: boolean;
+  /** LMFuseFramework only: how much of each cached prompt token is waived, in percent. Missing means 90. */
+  lmfCacheDiscountPercent?: number;
   models: ModelConfig[];
 }
 

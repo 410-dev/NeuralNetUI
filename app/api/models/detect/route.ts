@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     const items = await discoverModelRecords(driver, baseUrl, apiKey);
     // Server defaults for the inference parameters; a model whose defaults cannot be read gets none.
     const ids = items.map(item => String(item.key || item.id || "")).filter(Boolean);
-    const defaults = isCloudDriver(driver) ? new Map() : driver === "lmstudio" ? await lmStudioSamplingDefaults(baseUrl, apiKey ? `Bearer ${apiKey}` : undefined) : await discoverPropsSamplingDefaults(baseUrl, apiKey, ids);
+    const defaults = isCloudDriver(driver) || driver === "lmf" ? new Map() : driver === "lmstudio" ? await lmStudioSamplingDefaults(baseUrl, apiKey ? `Bearer ${apiKey}` : undefined) : await discoverPropsSamplingDefaults(baseUrl, apiKey, ids);
     for (const item of items) { const found = defaults.get(String(item.key || item.id || "")); if (found) item._samplingDefaults = found; }
     return NextResponse.json({ models: items.map((item: Record<string, unknown>) => inferModel(item, driver, String(body.id || saved?.id || ""))) });
   } catch (error) {

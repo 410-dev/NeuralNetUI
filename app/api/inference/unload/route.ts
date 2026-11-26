@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { authErrorResponse, requireAdmin } from "@/lib/auth";
 import { readConfig } from "@/lib/config";
 import { inferenceEndpoint, loadedModelIdentifier } from "@/lib/inference-control";
-import { connectionForModel, connectionHeaders, envApiKey, isCloudDriver, lmStudioEndpoint, modelsEndpoint } from "@/lib/connection-drivers";
+import { connectionForModel, connectionHeaders, envApiKey, hasModelResidency, lmStudioEndpoint, modelsEndpoint } from "@/lib/connection-drivers";
 import { aliasBaseModel } from "@/lib/alias-base-model";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const connection = connectionForModel(config.connections, model);
     if (!connection) throw new Error("The model connection is unavailable.");
     // Hosted providers keep nothing loaded on our behalf.
-    if (isCloudDriver(connection.driver)) return NextResponse.json({ ok: true, alreadyUnloaded: true });
+    if (!hasModelResidency(connection.driver)) return NextResponse.json({ ok: true, alreadyUnloaded: true });
     const headers = { Accept: "application/json", ...connectionHeaders(connection, envApiKey(connection.driver)) };
     if (connection.driver === "lmstudio") {
       const listResponse = await fetch(modelsEndpoint("lmstudio", connection.baseUrl), { headers, signal: AbortSignal.timeout(30_000), cache: "no-store" });

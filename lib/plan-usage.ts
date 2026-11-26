@@ -5,6 +5,12 @@ export const MAX_MODEL_WEIGHT=2_147_483_647;
 
 export function modelAllowedByPlan(servedModelIds:string[],modelId:string,sourceModelId?:string){return servedModelIds.includes(modelId)||Boolean(sourceModelId&&servedModelIds.includes(sourceModelId));}
 
+/** A plan's own weight wins; otherwise the model's default weight applies, and 1 when neither is set. */
+export function effectiveModelWeights(planWeights:Record<string,number>,defaults:Record<string,number>){return{...defaults,...planWeights};}
+
+/** Default weights of served models, read from the stored model list (aliases are charged to their base model). */
+export function defaultModelWeights(models:Array<{id:string;isAlias?:boolean;usageWeight?:number}>){return Object.fromEntries(models.filter(model=>!model.isAlias&&typeof model.usageWeight==="number"&&model.usageWeight!==1).map(model=>[model.id,normalizeModelWeight(model.usageWeight)]));}
+
 export function weightedTokenUsage(events:TokenUsageEvent[],scope:TokenScope,weights:Record<string,number>){return Math.ceil(events.reduce((sum,event)=>{const raw=scope==="input"?event.inputTokens:scope==="output"?event.outputTokens:event.inputTokens+event.outputTokens;return sum+Math.max(0,raw)*Math.max(.01,weights[event.modelId]||1);},0));}
 
 export function anchoredWindow(firstUseMs:number,nowMs:number,durationSeconds:number){const duration=Math.max(3600,durationSeconds)*1000;const elapsed=Math.max(0,nowMs-firstUseMs);const startsAt=firstUseMs+Math.floor(elapsed/duration)*duration;return{startsAt,resetsAt:startsAt+duration};}

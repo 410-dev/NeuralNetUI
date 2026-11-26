@@ -12,7 +12,7 @@ import { AdminConversationsDialog, AdminFilesDialog } from "./admin-user-audit";
 import { ImageLightbox } from "./image-lightbox";
 import { StorageUsageMeter } from "./storage-usage-meter";
 import { AccountBackupSettings, DataManagementSettings } from "./backup-settings";
-import { PlanSettings } from "./plan-settings";
+import { PlanSettings, WeightInput } from "./plan-settings";
 import { McpSettings } from "./mcp-settings";
 import { ArtifactCard } from "./artifact-viewer";
 import { SyntaxHighlightedCode } from "./syntax-highlighted-code";
@@ -46,7 +46,7 @@ import {
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
   Braces, Layers, LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Power, Upload, HardDrive,
   Palette, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Repeat2, Settings, Type, Zap, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge, Cable, Code2, Unlock,
-  RotateCcw, Video, LockKeyhole, ShieldAlert } from "lucide-react";
+  RotateCcw, Video, LockKeyhole, ShieldAlert, Bot } from "lucide-react";
 import { Children, cloneElement, createContext, CSSProperties, FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -125,7 +125,7 @@ const SettingsDetailContext = createContext<(open: boolean) => void>(() => undef
 
 const translations = {
   en: {
-    newChat: "New Chat", search: "Search", storageManager: "Storage manager", searchChats: "Search chats…", histories: "Chat histories", pinChat: "Pin chat", unpinChat: "Unpin chat", pinnedChat: "Pinned", exportChat: "Export chat", deleteChat: "Delete chat", deleteAllChats: "Delete all chats", confirmDeleteChat: "Delete this chat?", confirmDeleteAllChats: "Delete all chat histories?",
+    newChat: "New Chat", search: "Search", storageManager: "Storage manager", agent: "Agent", searchChats: "Search chats…", histories: "Chat histories", pinChat: "Pin chat", unpinChat: "Unpin chat", pinnedChat: "Pinned", exportChat: "Export chat", deleteChat: "Delete chat", deleteAllChats: "Delete all chats", confirmDeleteChat: "Delete this chat?", confirmDeleteAllChats: "Delete all chat histories?",
     historyEmpty: "Your conversations will appear here.", settingsConnections: "Settings & connections", selectModel: "Select a model",
     availableModels: "Available models", checkingModelServers: "Checking model servers", noOnlineModels: "No model server is online.", modelServerOffline: "The server serving this model is offline", modelServerError: "The server serving this model is answering with an error", serverOffline: "Server offline", modelWeightHint: "Uses tokens {weight}x faster", showModelWeights: "Show model weights", showModelWeightsDesc: "Show every account, including administrators, a weight badge on models whose plan weight is not 1. This is a workspace setting.", showModelConnectionNames:"Show model server names", showModelConnectionNamesDesc:"Show connection server names in the model picker for every account. This workspace setting is off by default.", unloadModel: "Unload loaded model", unloadingModel: "Unloading…", modelUnloaded: "The model was unloaded.", modelUnloadUnsupported: "This server does not support unloading models.", modelUnloadFailed: "Unable to unload the model.", welcome: "What would you like to explore?",
     messagePlaceholder: "Message to send", reasoningPreset: "Reasoning preset", native: "Native", template: "Template", default: "default",
@@ -173,7 +173,7 @@ const translations = {
     outputTokens: "output tokens", reasoningTokens: "reasoning", tokensPerSecond: "tok/s", timeToFirstToken: "Time to first token", promptProcessingTime: "Prompt processing", reasoningTime: "Thinking", toolTime: "Tool use", totalResponseTime: "Whole response", chatBackgroundGlow: "Show background color in chats", chatBackgroundGlowHelp: "Carries the accent glow from the new chat screen into open chats as a dim wash along the bottom.", thinkingTimingTitle: "Thinking time", thinkingTimingHelp: "Choose how prompt processing shows up next to the time a model spent thinking.", thinkingIncludesPrompt: "Count prompt processing as thinking time", thinkingIncludesPromptDesc: "While a later prompt stage runs, the thinking time above it keeps rising too, and the finished time includes prompt processing.", thinkingShowsPrompt: "Show prompt processing time alongside", thinkingShowsPromptDesc: "Shows e.g. “Thought for 12 sec (prompt processed for 3 sec)”.",
   },
   ko: {
-    newChat: "새 채팅", search: "검색", storageManager: "저장소 관리", searchChats: "채팅 검색…", histories: "채팅 기록", pinChat: "상단 고정", unpinChat: "고정 해제", pinnedChat: "고정됨", exportChat: "채팅 내보내기", deleteChat: "대화 삭제", deleteAllChats: "전체 대화 삭제", confirmDeleteChat: "이 대화를 삭제할까요?", confirmDeleteAllChats: "모든 대화 기록을 삭제할까요?",
+    newChat: "새 채팅", search: "검색", agent: "에이전트", storageManager: "저장소 관리", searchChats: "채팅 검색…", histories: "채팅 기록", pinChat: "상단 고정", unpinChat: "고정 해제", pinnedChat: "고정됨", exportChat: "채팅 내보내기", deleteChat: "대화 삭제", deleteAllChats: "전체 대화 삭제", confirmDeleteChat: "이 대화를 삭제할까요?", confirmDeleteAllChats: "모든 대화 기록을 삭제할까요?",
     historyEmpty: "대화를 시작하면 여기에 표시됩니다.", settingsConnections: "설정 및 연결", selectModel: "모델 선택",
     availableModels: "사용 가능한 모델", checkingModelServers: "모델 서버 확인 중", noOnlineModels: "온라인 상태인 모델 서버가 없습니다.", modelServerOffline: "모델을 서빙하는 서버가 오프라인입니다", modelServerError: "모델을 서빙하는 서버에서 오류가 발생했습니다", serverOffline: "서버 오프라인", modelWeightHint: "토큰을 {weight}배 더 빨리 소모합니다", showModelWeights: "모델 가중치 표시", showModelWeightsDesc: "플랜 가중치가 1이 아닌 모델에 가중치 딱지를 표시합니다. 전역 설정이며 관리자를 포함한 모든 사용자에게 적용됩니다.", showModelConnectionNames:"모델 서버 이름 표시", showModelConnectionNamesDesc:"모델 선택 드롭다운에 연결 서버 이름을 표시합니다. 기본값은 꺼짐이며 모든 사용자에게 적용되는 전역 설정입니다.", unloadModel: "로드된 모델 언로드", unloadingModel: "언로드 중…", modelUnloaded: "모델을 언로드했습니다.", modelUnloadUnsupported: "이 서버는 모델 언로드를 지원하지 않습니다.", modelUnloadFailed: "모델을 언로드하지 못했습니다.", welcome: "무엇을 함께 살펴볼까요?",
     messagePlaceholder: "보낼 메시지", reasoningPreset: "Reasoning 프리셋", native: "내장", template: "템플릿", default: "기본값",
@@ -223,6 +223,14 @@ const translations = {
 } as const;
 type CopySet = typeof translations.en | typeof translations.ko;
 const copyFor = (locale: Locale): CopySet => translations[locale];
+
+/** "로" after a vowel or ㄹ, "으로" after any other final consonant; Latin text reads as ending in a vowel sound. */
+function koreanDirectionParticle(text: string) {
+  const code = text.trim().slice(-1).charCodeAt(0) - 0xac00;
+  if (code < 0 || code > 11171) return "로";
+  const final = code % 28;
+  return final === 0 || final === 8 ? "로" : "으로";
+}
 
 function attachmentAllowedForModel(model:ModelConfig|undefined,attachment:Pick<StoredAttachment,"mimeType">){
   if(!model)return false;
@@ -416,6 +424,8 @@ export default function Home() {
   const [contextSummaryEditing, setContextSummaryEditing] = useState(false);
   const [searching, setSearching] = useState(false);
   const [storageOpen, setStorageOpen] = useState(false);
+  // The Agent tab is a placeholder until the feature is designed: only the sidebar and model picker remain.
+  const [agentOpen, setAgentOpen] = useState(false);
   const [storagePickerOpen, setStoragePickerOpen] = useState(false);
   const [chatManagerOpen, setChatManagerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -729,6 +739,24 @@ export default function Home() {
   const selectedAliasDefinition = selectedModel?.isAlias ? configuredVisibleModels.find(model => model.id === selectedModel.id) : undefined;
   const selectedAliasResolution = selectedAliasDefinition ? resolveAliasBase(selectedAliasDefinition) : undefined;
   const selectedAliasBase = selectedAliasResolution?.base && connectedBaseModels.some(model => model.id === selectedAliasResolution.base?.id) ? selectedAliasResolution.base : undefined;
+  // LMFuseFramework routing models change provider per request; the picker names the one in use.
+  const [routing, setRouting] = useState<{ modelId: string; label: string } | null>(null);
+  const routingRequestRef = useRef(0);
+  async function refreshRouting(modelId: string | undefined, aliasBaseModelId: string | undefined, conversationId: string | undefined, when: "next" | "current") {
+    const model = config.models.find((item) => item.id === modelId);
+    const base = model?.isAlias ? config.models.find((item) => !item.isAlias && (aliasBaseModelId ? item.id === aliasBaseModelId : item.id === model.sourceModel || item.sourceModel === model.sourceModel)) : model;
+    const request = ++routingRequestRef.current;
+    if (!modelId || !base?.routerModel) { setRouting(null); return; }
+    try {
+      const query = new URLSearchParams({ modelId, when, ...(aliasBaseModelId ? { aliasBaseModelId } : {}), ...(conversationId ? { conversationId } : {}) });
+      const response = await fetch(`/api/lmf/routing?${query}`, { cache: "no-store" });
+      const body = response.ok ? await response.json() as { routing?: { label?: string } | null } : undefined;
+      if (request !== routingRequestRef.current) return;
+      setRouting(body?.routing?.label ? { modelId, label: body.routing.label } : null);
+    } catch { if (request === routingRequestRef.current) setRouting(null); }
+  }
+  useEffect(() => { if (!isGenerating) void refreshRouting(selectedModel?.id, selectedAliasBase?.id, conversation?.id, "next"); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedModel?.id, selectedAliasBase?.id, conversation?.id, config.models]);
   // A model or alias base switched because its server went away is announced once above the reasoning button; the
   // next press of send after that goes ahead with the switched model.
   const automaticSwitch = selectedAliasResolution?.fallback && selectedAliasResolution.intended && selectedAliasBase
@@ -962,6 +990,7 @@ export default function Home() {
   }
 
   function newChat(replaceUrl = false, temporary = false) {
+    setAgentOpen(false);
     setMainVisit(value => value + 1);
     abandonRef.current = true; abortRef.current?.abort();
     clearQueuedPrompts();
@@ -989,6 +1018,7 @@ export default function Home() {
     const abandoned = temporaryIdRef.current;
     // Opening a chat from the new-chat screen glides the composer down like a first send; URL loads dock at once.
     if (navigate && !messages.length) captureComposer();
+    setAgentOpen(false);
     try {
       abandonRef.current = true; abortRef.current?.abort(); clearQueuedPrompts();
       const response = await fetch(`/api/conversations/${id}`); const body = await response.json();
@@ -1230,6 +1260,7 @@ export default function Home() {
         }
         setIsGenerating(false); setPendingWait(null); return null;
       }
+      void refreshRouting(working.modelId, runtimeAliasBaseModelId, working.id, "next");
       const response = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversationId: working.id, branchId, assistantMessageId: placeholder.id, revisionGroupId, modelId: working.modelId, aliasBaseModelId: runtimeAliasBaseModelId, reasoningPresetId: working.reasoningPresetId, systemPromptOverrides: sessionPromptsRef.current,
@@ -1238,7 +1269,7 @@ export default function Home() {
           messages: requestMessages.map((message) => ({ id: message.id, role: message.role, content: message.content, reasoning_content: message.reasoning, toolEvents: message.toolEvents, attachments: message.attachments?.map(({ id }) => ({ id })) })) }),
       });
       if (!response.ok) { const detail = await response.json().catch(() => ({})); throw new Error(detail.error || `요청에 실패했습니다 (${response.status})`); }
-      const completed = await watchChatJob(working, branchId); if (completed) void refreshModelContextWindow(working.modelId, runtimeAliasBaseModelId); return completed;
+      const completed = await watchChatJob(working, branchId); void refreshRouting(working.modelId, runtimeAliasBaseModelId, working.id, "current"); if (completed) void refreshModelContextWindow(working.modelId, runtimeAliasBaseModelId); return completed;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "채팅 요청에 실패했습니다."); setMessages(requestMessages); setIsGenerating(false); setPendingWait(null); return null;
     }
@@ -1617,6 +1648,7 @@ export default function Home() {
           <div className="new-chat-halo"><button className="pill-button primary-nav" title={c.newChat} aria-label={c.newChat} onClick={() => newChat()}><MessageSquarePlus size={19} /> <span>{c.newChat}</span></button></div>
           <button className="pill-button" title={c.search} aria-label={c.search} onClick={() => setSearching(true)}><Search size={18} /> <span>{c.search}</span></button>
           <button className="pill-button" title={c.storageManager} aria-label={c.storageManager} onClick={() => { setStorageOpen(true); setMobileOpen(false); }}><HardDrive size={18} /> <span>{c.storageManager}</span></button>
+          <button className={`pill-button ${agentOpen ? "active" : ""}`} title={c.agent} aria-label={c.agent} aria-pressed={agentOpen} onClick={() => { setAgentOpen(true); setMobileOpen(false); }}><Bot size={18} /> <span>{c.agent}</span></button>
           <div className="history-heading"><p className="section-label">{c.histories}</p><div>{(conversation || histories.length > 0) && <button onClick={() => setExportOpen(true)} title={conversation ? c.exportChat : c.exportAllChats} aria-label={conversation ? c.exportChat : c.exportAllChats}><Download size={15} /></button>}{histories.length > 0 && <button onClick={() => void deleteAllHistories()} title={c.deleteAllChats} aria-label={c.deleteAllChats}><Trash2 size={15} /></button>}</div></div>
           <div className="history-list">
             {visibleHistory.map((item, index) => <HistoryRow key={item.id} item={item} active={item.id === conversation?.id} afterPinned={!item.pinnedAt && index > 0 && Boolean(visibleHistory[index - 1].pinnedAt)} revealed={revealedHistoryId === item.id} onReveal={(value) => setRevealedHistoryId(value ? item.id : "")} c={c} locale={locale} onOpen={() => loadConversation(item.id)} onPin={() => void toggleHistoryPin(item)} onRename={() => setRenameTarget(item)} onDelete={() => void deleteHistory(item.id)} />)}
@@ -1632,9 +1664,11 @@ export default function Home() {
         <div className="ambient-glow" />
         <div className="model-switcher">
           <button className="model-trigger" onClick={() => { if (!modelMenuOpen) setModelControlNotice(null); setModelMenuOpen((value) => !value); }}><span>{serversOffline ? c.serverOffline : selectedModel?.name || c.selectModel}</span><ChevronDown size={16} className={modelMenuOpen ? "rotate" : ""} /></button>
+          {routing && routing.modelId === selectedModel?.id && !serversOffline && <small className="routing-indicator" aria-live="polite">{locale === "ko" ? `현재 ${routing.label}${koreanDirectionParticle(routing.label)} 라우팅 중` : `Routing to ${routing.label}`}</small>}
           {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span>{checkingModelServers ? <LoaderCircle className="spin" size={13} aria-label={c.checkingModelServers} /> : <small>{onlineModels.length}</small>}</div>{!checkingModelServers && serversOffline && <p className="model-popover-empty">{c.noOnlineModels}</p>}{pickerModels.map(renderPickerModel)}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
         </div>
 
+        {agentOpen ? <div className="conversation-stage agent-stage"><div className="idle-center"><div className="welcome"><h1>{locale === "ko" ? "곧 찾아옵니다" : "Coming soon"}</h1></div></div></div> : <>
         <div className="surface-actions">
           {temporaryActive
             ? conversation?.temporary !== true && messages.length === 0
@@ -1660,7 +1694,7 @@ export default function Home() {
             </div>
             <Composer c={c} organizationNotice={config.organizationMode === true && !temporaryActive} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} notice={notice} clearNotice={() => setNotice("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingApproval={pendingApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} />
           </>}
-        </div>
+        </div></>}
       </section>
 
 
@@ -2582,7 +2616,7 @@ function SettingsPanel({ initial, serverStates, onClose, onSaved, onLogout, onAc
       const detected: ModelConfig[] = body!.models!.map((model: ModelConfig) => {
         const baseIdentifier = model.sourceModel.split(":")[0];
         const previous = reconcileConnectionEdits([target], draft.models)[0].models.find((item) => !item.isAlias && item.sourceModel.split(":")[0] === baseIdentifier);
-        return previous ? normalizeReasoning({ ...model, name: previous.name, visible: previous.visible, description: previous.description, systemPrompt: previous.systemPrompt, reasoningPresets: previous.reasoningPresets, reasoningForceApi: previous.reasoningForceApi, contextWindowTokens: previous.contextWindowTokens, visionImageMode: previous.visionImageMode, visionMaxEdgePixels: previous.visionMaxEdgePixels, imageGeneration: previous.imageGeneration, imageInput: previous.imageInput, rememberReasoning: previous.rememberReasoning, systemPromptEditable: previous.systemPromptEditable, thinkingTags: previous.thinkingTags, thinkingTagsCross: previous.thinkingTagsCross, samplingDefaults: model.samplingDefaults ?? previous.samplingDefaults, samplingParams: refreshSamplingDefaults(previous.samplingParams, previous.samplingDefaults, model.samplingDefaults) }) : model;
+        return previous ? normalizeReasoning({ ...model, name: previous.name, visible: previous.visible, description: previous.description, systemPrompt: previous.systemPrompt, reasoningPresets: previous.reasoningPresets, reasoningForceApi: previous.reasoningForceApi, contextWindowTokens: previous.contextWindowTokens, visionImageMode: previous.visionImageMode, visionMaxEdgePixels: previous.visionMaxEdgePixels, imageGeneration: previous.imageGeneration, imageInput: previous.imageInput, rememberReasoning: previous.rememberReasoning, systemPromptEditable: previous.systemPromptEditable, thinkingTags: previous.thinkingTags, thinkingTagsCross: previous.thinkingTagsCross, usageWeight: previous.usageWeight, routerModel: previous.routerModel ?? model.routerModel, routeDisplayNames: previous.routeDisplayNames, samplingDefaults: model.samplingDefaults ?? previous.samplingDefaults, samplingParams: refreshSamplingDefaults(previous.samplingParams, previous.samplingDefaults, model.samplingDefaults) }) : model;
       });
       setDraft((current) => { const connections = current.connections.map((connection) => connection.id === connectionId ? { ...connection, models: detected } : connection); return { ...current, connections, models: resolveConnectionModels(connections as ConnectionConfig[], current.models.filter((model) => model.isAlias), current.models.map((model) => model.id)) }; });
       setActiveModelId(detected[0]?.id || aliases[0]?.id || "");
@@ -2845,7 +2879,7 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
   const actions = <OrderActions c={c} onAdd={addConnection} addLabel={c.addConnection} onUp={() => nudgeConnection(-1)} onDown={() => nudgeConnection(1)} disableUp={activeIndex <= 0} disableDown={activeIndex < 0 || activeIndex === draft.connections.length - 1} />;
   // Each driver carries its own capability table, revealed from the info marker in the picker.
   const locale: Locale = draft.preferences.language === "ko" ? "ko" : "en";
-  const driverOptions = ([["openai", "OpenAI API"], ["lmstudio", "LM Studio"], ["google", "Google Gemini"], ["anthropic", "Anthropic Claude"]] as Array<[ConnectionDriver, string]>).map(([driver, name]) => {
+  const driverOptions = ([["openai", "OpenAI API"], ["lmstudio", "LM Studio"], ["google", "Google Gemini"], ["anthropic", "Anthropic Claude"], ["lmf", "LMFuseFramework"]] as Array<[ConnectionDriver, string]>).map(([driver, name]) => {
     const rows = driverCapabilities(driver, locale);
     return { value: driver, label: name, info: { title: name, rows, summary: `${name} — ${capabilitySummary(rows, locale)}` } };
   });
@@ -2854,15 +2888,16 @@ function ConnectionSettings({ c, draft, setDraft, onDetect, detectingConnectionI
       <ModelColumn c={c} label={c.connection} items={draft.connections.map((connection) => { const state = stateOf(connection); return { id: connection.id, name: connection.name, detail: `${connection.models.length} ${c.models}`, icon: <Server size={13} />, status: state, statusLabel: stateLabel(state) }; })} active={activeConnection?.id || ""} onChange={setActiveConnectionId} onMove={moveConnection} action={actions} />
       <div className="model-editor-pane">{activeConnection ? <div className="editor-card connection-card">{(() => { const detecting = detectingConnectionId === activeConnection.id; return <>
         <div className="connection-card-head"><strong>{activeIndex + 1}. {activeConnection.name}</strong>{activeIndex === 0 && <em>{c.priorityHelp}</em>}<button role="switch" aria-checked={!activeConnection.disabled} aria-label={c.connectionEnabled} title={c.connectionEnabled} className={`toggle ${activeConnection.disabled ? "" : "on"}`} onClick={() => patchConnection(activeConnection.id, { disabled: !activeConnection.disabled })}><i /></button><button className="connection-remove" aria-label={c.removeConnection} title={c.removeConnection} disabled={draft.connections.length < 2} onClick={() => void confirmRemoveConnection(activeConnection)}><Trash2 size={15} /></button></div>
-        <div className="form-grid"><label className="field"><span>{c.connectionName}</span><input value={activeConnection.name} onChange={(event) => patchConnection(activeConnection.id, { name: event.target.value })} /></label><label className="field"><span>{c.driver}</span><SelectMenu label={c.driver} value={activeConnection.driver} options={driverOptions} onChange={(value) => { const driver = value as ConnectionDriver; const defaults = DRIVER_DEFAULT_URLS; const knownDefault = !activeConnection.baseUrl.trim() || Object.values(defaults).includes(activeConnection.baseUrl); const names: Record<ConnectionDriver, string> = { openai: "OpenAI API", lmstudio: "LM Studio", google: "Google Gemini", anthropic: "Anthropic Claude" }; const knownName = Object.values(names).includes(activeConnection.name); patchConnection(activeConnection.id, { driver, ...(knownDefault ? { baseUrl: defaults[driver] } : {}), ...(knownName ? { name: names[driver] } : {}) }); }} /></label></div>
-        <label className="field"><span>{c.baseUrl}</span><input value={activeConnection.baseUrl} onChange={(event) => patchConnection(activeConnection.id, { baseUrl: event.target.value })} placeholder={DRIVER_DEFAULT_URLS[activeConnection.driver]} /><small>{activeConnection.driver === "lmstudio" ? "LM Studio REST API /api/v1" : activeConnection.driver === "google" ? (locale === "ko" ? "Gemini API의 OpenAI 호환 주소 (…/v1beta/openai)" : "Gemini API OpenAI-compatible address (…/v1beta/openai)") : activeConnection.driver === "anthropic" ? (locale === "ko" ? "Anthropic API 주소 (…/v1). 요청은 Messages API로 변환되어 전송됩니다" : "Anthropic API address (…/v1). Requests are sent through the Messages API") : c.baseUrlHelp}</small></label>
+        <div className="form-grid"><label className="field"><span>{c.connectionName}</span><input value={activeConnection.name} onChange={(event) => patchConnection(activeConnection.id, { name: event.target.value })} /></label><label className="field"><span>{c.driver}</span><SelectMenu label={c.driver} value={activeConnection.driver} options={driverOptions} onChange={(value) => { const driver = value as ConnectionDriver; const defaults = DRIVER_DEFAULT_URLS; const knownDefault = !activeConnection.baseUrl.trim() || Object.values(defaults).includes(activeConnection.baseUrl); const names: Record<ConnectionDriver, string> = { openai: "OpenAI API", lmstudio: "LM Studio", google: "Google Gemini", anthropic: "Anthropic Claude", lmf: "LMFuseFramework" }; const knownName = Object.values(names).includes(activeConnection.name); patchConnection(activeConnection.id, { driver, ...(knownDefault ? { baseUrl: defaults[driver] } : {}), ...(knownName ? { name: names[driver] } : {}) }); }} /></label></div>
+        <label className="field"><span>{c.baseUrl}</span><input value={activeConnection.baseUrl} onChange={(event) => patchConnection(activeConnection.id, { baseUrl: event.target.value })} placeholder={DRIVER_DEFAULT_URLS[activeConnection.driver]} /><small>{activeConnection.driver === "lmstudio" ? "LM Studio REST API /api/v1" : activeConnection.driver === "google" ? (locale === "ko" ? "Gemini API의 OpenAI 호환 주소 (…/v1beta/openai)" : "Gemini API OpenAI-compatible address (…/v1beta/openai)") : activeConnection.driver === "anthropic" ? (locale === "ko" ? "Anthropic API 주소 (…/v1). 요청은 Messages API로 변환되어 전송됩니다" : "Anthropic API address (…/v1). Requests are sent through the Messages API") : activeConnection.driver === "lmf" ? (locale === "ko" ? "LMFuseFramework의 OpenAI 호환 주소 (…:8700/v1). 세션·라우팅 확장 API(/v1/lmf)도 같은 주소를 씁니다" : "LMFuseFramework OpenAI-compatible address (…:8700/v1). The session and routing extensions (/v1/lmf) use the same address") : c.baseUrlHelp}</small></label>
         <div className="field backup-urls"><span>{locale === "ko" ? "보조 서버 URL" : "Backup server URLs"}</span>
           {(activeConnection.backupUrls || []).map((url, index) => <div className="backup-url-row" key={index}><input value={url} onChange={(event) => patchConnection(activeConnection.id, { backupUrls: (activeConnection.backupUrls || []).map((item, at) => at === index ? event.target.value : item) })} placeholder={activeConnection.driver === "lmstudio" ? "http://192.168.0.2:1234" : "http://192.168.0.2:8888/v1"} aria-label={`${locale === "ko" ? "보조 서버" : "Backup server"} ${index + 2}`} /><button type="button" className="backup-url-remove" aria-label={locale === "ko" ? "보조 서버 삭제" : "Remove backup server"} title={locale === "ko" ? "보조 서버 삭제" : "Remove backup server"} onClick={() => patchConnection(activeConnection.id, { backupUrls: (activeConnection.backupUrls || []).filter((_, at) => at !== index) })}><Trash2 size={14} /></button></div>)}
           <button type="button" className="backup-url-add" disabled={(activeConnection.backupUrls || []).length >= 16} onClick={() => patchConnection(activeConnection.id, { backupUrls: [...(activeConnection.backupUrls || []), ""] })}>{locale === "ko" ? "+ 보조 서버 추가" : "+ Add backup server"}</button>
           <small>{locale === "ko" ? "같은 모델을 서빙하는 서버를 추가합니다. 모두 온라인이면 작업 중이 아니고 처리한 입출력 토큰이 가장 적은 서버로 보내고, 그렇지 않으면 기본 URL부터 순서대로 온라인인 첫 서버로 보냅니다." : "Add servers that serve the same models. When all are online, requests go to the one that is idle and has handled the fewest input and output tokens; otherwise to the first online server, starting with the base URL."}</small>
         </div>
-        <label className="field"><span>{draft.preferences.language === "ko" ? "최대 모델 상주 한도" : "Maximum resident models"}</span><input type="number" min={0} max={128} step={1} inputMode="numeric" value={activeConnection.maxResidentModels || 0} onChange={(event) => patchConnection(activeConnection.id, { maxResidentModels: Math.min(128, Math.max(0, Math.floor(Number(event.target.value) || 0))) })} /><small>{draft.preferences.language === "ko" ? "0은 제한 없음입니다. 한도를 설정하면 필요할 때 모델을 로드하고, 사용 중이지 않은 모델 중 사용 횟수가 가장 적은 모델부터 교체합니다. 모델 관리 API가 필요합니다." : "0 means unlimited. A positive limit loads models as needed and replaces the least-used idle model. Requires a model-management API."}</small></label>
-        <label className="field"><span>{draft.preferences.language === "ko" ? "다른 세션 실행 중 대기 방식" : "Wait policy while other sessions are running"}</span><SelectMenu label={draft.preferences.language === "ko" ? "다른 세션 실행 중 대기 방식" : "Wait policy while other sessions are running"} value={activeConnection.modelWaitPolicy || "capacity"} options={[{ value: "capacity", label: draft.preferences.language === "ko" ? "교체 후보가 모두 사용 중일 때만 대기" : "Wait only when all eviction candidates are busy" }, { value: "serial", label: draft.preferences.language === "ko" ? "다른 세션이 실행 중이면 항상 대기" : "Always wait for other sessions to finish" }]} onChange={(value) => patchConnection(activeConnection.id, { modelWaitPolicy: value as "capacity" | "serial" })} /><small>{draft.preferences.language === "ko" ? "이 앱의 모든 사용자와 대화에 적용됩니다. Alias는 기반 모델과 상주 공간을 공유합니다." : "Applies across all users and conversations in this app. Aliases share residency with their base model."}</small></label>
+        {activeConnection.driver !== "lmf" && <><label className="field"><span>{draft.preferences.language === "ko" ? "최대 모델 상주 한도" : "Maximum resident models"}</span><input type="number" min={0} max={128} step={1} inputMode="numeric" value={activeConnection.maxResidentModels || 0} onChange={(event) => patchConnection(activeConnection.id, { maxResidentModels: Math.min(128, Math.max(0, Math.floor(Number(event.target.value) || 0))) })} /><small>{draft.preferences.language === "ko" ? "0은 제한 없음입니다. 한도를 설정하면 필요할 때 모델을 로드하고, 사용 중이지 않은 모델 중 사용 횟수가 가장 적은 모델부터 교체합니다. 모델 관리 API가 필요합니다." : "0 means unlimited. A positive limit loads models as needed and replaces the least-used idle model. Requires a model-management API."}</small></label>
+        <label className="field"><span>{draft.preferences.language === "ko" ? "다른 세션 실행 중 대기 방식" : "Wait policy while other sessions are running"}</span><SelectMenu label={draft.preferences.language === "ko" ? "다른 세션 실행 중 대기 방식" : "Wait policy while other sessions are running"} value={activeConnection.modelWaitPolicy || "capacity"} options={[{ value: "capacity", label: draft.preferences.language === "ko" ? "교체 후보가 모두 사용 중일 때만 대기" : "Wait only when all eviction candidates are busy" }, { value: "serial", label: draft.preferences.language === "ko" ? "다른 세션이 실행 중이면 항상 대기" : "Always wait for other sessions to finish" }]} onChange={(value) => patchConnection(activeConnection.id, { modelWaitPolicy: value as "capacity" | "serial" })} /><small>{draft.preferences.language === "ko" ? "이 앱의 모든 사용자와 대화에 적용됩니다. Alias는 기반 모델과 상주 공간을 공유합니다." : "Applies across all users and conversations in this app. Aliases share residency with their base model."}</small></label></>}
+        {activeConnection.driver === "lmf" && (() => { const discountOn = activeConnection.lmfCacheDiscount !== false; return <><div className="model-visibility-row"><div><strong>{draft.preferences.language === "ko" ? "세션·캐시 사용량 할인" : "Session and cache usage discount"}</strong><small>{draft.preferences.language === "ko" ? "채팅마다 LMFuseFramework 세션을 이어 쓰고, 서버가 캐시에서 읽었다고 알린 입력 토큰은 플랜 사용량에서 아래 비율만큼 할인합니다. 끄면 모든 입력 토큰을 그대로 계산합니다." : "Each chat continues an LMFuseFramework session. Input tokens the server reports as read from cache are discounted in plan usage by the rate below. When off, every input token counts in full."}</small></div><button role="switch" aria-label={draft.preferences.language === "ko" ? "세션·캐시 사용량 할인" : "Session and cache usage discount"} aria-checked={discountOn} className={`toggle ${discountOn ? "on" : ""}`} onClick={() => patchConnection(activeConnection.id, { lmfCacheDiscount: !discountOn })}><i /></button></div><label className="field"><span>{draft.preferences.language === "ko" ? "캐시 토큰 할인율 (%)" : "Cached token discount (%)"}</span><input type="number" min={0} max={100} step={1} inputMode="numeric" disabled={!discountOn} value={activeConnection.lmfCacheDiscountPercent ?? 90} onChange={(event) => patchConnection(activeConnection.id, { lmfCacheDiscountPercent: Math.min(100, Math.max(0, Math.round(Number(event.target.value) || 0))) })} /><small>{draft.preferences.language === "ko" ? "캐시에서 읽은 입력 토큰 하나를 몇 % 덜 계산할지 정합니다. 기본값 90%는 캐시 토큰을 10%만 계산합니다." : "How much less each cached input token counts. The default 90% counts cached tokens at 10%."}</small></label></>; })()}
         <label className="field"><span>{c.apiKey}</span><div className="field-with-icon"><KeyRound size={16} /><input type="password" value={activeConnection.apiKey} onChange={(event) => patchConnection(activeConnection.id, { apiKey: event.target.value, clearApiKey: false })} placeholder={activeConnection.hasApiKey ? c.savedKey : activeConnection.driver === "openai" || isCloudDriver(activeConnection.driver) ? c.requiredKey : "Optional"} /></div><small>{c.apiKeyHelp}</small></label>
         <button type="button" className="secondary-button" disabled={activeConnection.clearApiKey || !(activeConnection.hasApiKey || activeConnection.apiKey)} onClick={() => patchConnection(activeConnection.id, { apiKey: "", clearApiKey: true, hasApiKey: false })}>{draft.preferences.language === "ko" ? (activeConnection.clearApiKey ? "API 키 사용 안 함" : "저장된 API 키 삭제") : (activeConnection.clearApiKey ? "API key disabled" : "Remove saved API key")}</button>
         <div className="connection-test"><div><strong>{c.discover}</strong><small>{activeConnection.models.length} {c.models} · {c.discoverDesc}</small></div><button onClick={() => onDetect(activeConnection.id)} disabled={Boolean(detectingConnectionId)}><RefreshCw size={16} className={detecting ? "spin" : ""} />{detecting ? c.detecting : c.detectModels}</button></div>
@@ -2961,6 +2996,9 @@ function ModelSettings({ c, draft, availableModels, setDraft, activeModelId, set
         <label className="field"><span>{c.description}</span><input value={activeModel.description || ""} onChange={(event) => updateModel({ description: event.target.value })} /></label>
         {privileged && (() => { const inherited = activeModel.isAlias ? aliasBaseModel(activeModel, availableModels)?.rememberReasoning === true : false; const remember = activeModel.rememberReasoning ?? inherited; return <div className="model-visibility-row"><div><strong>{c.sendPriorReasoning}</strong><small>{c.rememberReasoningModelDesc}{activeModel.isAlias && activeModel.rememberReasoning === undefined ? ` ${c.aliasInheritsBase}.` : ""}</small></div><button role="switch" aria-label={c.sendPriorReasoning} aria-checked={remember} className={`toggle ${remember ? "on" : ""}`} onClick={() => updateModel({ rememberReasoning: !remember })}><i /></button></div>; })()}
         {privileged && !activeModel.isAlias && <div className="model-visibility-row"><div><strong>{c.systemPromptEditableModel}</strong><small>{c.systemPromptEditableModelDesc}</small></div><button role="switch" aria-label={c.systemPromptEditableModel} aria-checked={activeModel.systemPromptEditable === true} className={`toggle ${activeModel.systemPromptEditable ? "on" : ""}`} onClick={() => updateModel({ systemPromptEditable: activeModel.systemPromptEditable !== true })}><i /></button></div>}
+        {privileged && !activeModel.isAlias && <label className="field model-weight-field"><span>{draft.preferences.language === "ko" ? "기본 사용량 가중치" : "Default usage weight"}</span><span className="weight-input"><WeightInput value={activeModel.usageWeight ?? 1} onChange={(weight) => updateModel({ usageWeight: weight === 1 ? undefined : weight })} /><em>×</em></span><small>{draft.preferences.language === "ko" ? "이 모델의 토큰 사용량에 곱해지는 기본값입니다. 플랜에서 따로 정하면 플랜 값이 우선합니다. 별칭은 기본 모델의 값을 씁니다." : "Multiplies this model's token usage by default. A weight set in a plan takes precedence. Aliases use their base model's weight."}</small></label>}
+        {privileged && !activeModel.isAlias && draft.connections.find((connection) => connection.id === activeModel.connectionId)?.driver === "lmf" && <div className="model-visibility-row"><div><strong>{draft.preferences.language === "ko" ? "라우팅 모델" : "Routing model"}</strong><small>{draft.preferences.language === "ko" ? "요청마다 LMFuseFramework가 공급자와 모델을 고릅니다(대개 auto). 켜면 모델 선택기 아래에 지금 라우팅 중인 모델이 표시됩니다." : "LMFuseFramework picks the provider and model per request (usually auto). When on, the picker shows which model requests are routed to."}</small></div><button role="switch" aria-label={draft.preferences.language === "ko" ? "라우팅 모델" : "Routing model"} aria-checked={activeModel.routerModel === true} className={`toggle ${activeModel.routerModel ? "on" : ""}`} onClick={() => updateModel({ routerModel: activeModel.routerModel !== true })}><i /></button></div>}
+        {privileged && !activeModel.isAlias && activeModel.routerModel && activeModel.connectionId && <LmfRouteNames ko={draft.preferences.language === "ko"} connectionId={activeModel.connectionId} names={activeModel.routeDisplayNames || {}} onChange={(names) => updateModel({ routeDisplayNames: Object.keys(names).length ? names : undefined })} />}
         <div className="model-visibility-row"><div><strong>{c.imageGenerationModel}</strong><small>{c.imageGenerationModelDesc}</small></div><button role="switch" aria-label={c.imageGenerationModel} aria-checked={activeModel.imageGeneration===true} className={`toggle ${activeModel.imageGeneration===true?"on":""}`} onClick={()=>updateModel({imageGeneration:activeModel.imageGeneration!==true})}><i/></button></div>
         <div className="model-visibility-row"><div><strong>{c.imageInputModel}</strong><small>{c.imageInputModelDesc}</small></div><button role="switch" aria-label={c.imageInputModel} aria-checked={activeModel.imageInput!==false} className={`toggle ${activeModel.imageInput!==false?"on":""}`} onClick={()=>updateModel({imageInput:activeModel.imageInput===false})}><i/></button></div>
         <div className="model-image-input-row"><div><strong>{c.visionSettings}</strong><small>{c.visionSettingsDesc}</small></div><label><span>{c.visionMaxResolution}</span><input type="number" min={128} max={8192} step={1} inputMode="numeric" disabled={activeModel.visionImageMode !== "max-resolution"} value={activeModel.visionMaxEdgePixels ?? 1024} onChange={(event) => setVisionMaxEdge(event.target.value)} title={c.visionMaxResolutionHelp}/></label><button role="switch" aria-label={c.visionUseOriginal} aria-checked={activeModel.visionImageMode === "max-resolution"} className={`toggle ${activeModel.visionImageMode === "max-resolution" ? "on" : ""}`} onClick={() => updateModel({ visionImageMode: activeModel.visionImageMode === "max-resolution" ? "original" : "max-resolution" })} title={c.visionUseOriginalDesc}><i /></button></div>
@@ -2969,6 +3007,30 @@ function ModelSettings({ c, draft, availableModels, setDraft, activeModelId, set
         {activeModel.isAlias && <button className="danger-action" onClick={removeModel}><Trash2 size={15} /> {c.deleteAlias}</button>}
       </div> : <EmptyState text={c.noModel} />}</div>
     </div>
+  </div>;
+}
+
+/** Names shown for each provider an LMFuseFramework routing model may pick ("현재 … 로 라우팅 중"). */
+function LmfRouteNames({ ko, connectionId, names, onChange }: { ko: boolean; connectionId: string; names: Record<string, string>; onChange: (names: Record<string, string>) => void }) {
+  const [entries, setEntries] = useState<Array<{ key: string; provider: string; model?: string; template?: string; effort?: string }>>();
+  const [error, setError] = useState("");
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController(); setError("");
+    fetch(`/api/lmf/route-entries?connectionId=${encodeURIComponent(connectionId)}`, { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => { const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(body.error || "Unable to read the routing order."); setEntries(body.entries || []); })
+      .catch((caught) => { if (!controller.signal.aborted) { setEntries([]); setError(caught instanceof Error ? caught.message : String(caught)); } });
+    return () => controller.abort();
+  }, [connectionId, revision]);
+  // Names for providers no longer in the routing order stay listed so they can be removed.
+  const stale = Object.keys(names).filter((key) => entries && !entries.some((entry) => entry.key === key));
+  const setName = (key: string, value: string) => { const next = { ...names }; if (value.trim()) next[key] = value; else delete next[key]; onChange(next); };
+  return <div className="field lmf-route-names"><span>{ko ? "라우팅 모델 표시 이름" : "Routed model display names"}</span>
+    <small>{ko ? "라우팅이 고를 수 있는 공급자·모델마다 모델 선택기 아래 \"현재 … 로 라우팅 중\"에 보일 이름을 정합니다. 비워 두면 공급자와 모델 이름을 그대로 씁니다." : "Name each provider and model the routing can pick, as shown under the picker in \"Routing to …\". Empty names show the provider and model as they are."}</small>
+    {entries === undefined ? <p className="lmf-route-status"><LoaderCircle size={14} className="spin" />{ko ? "라우팅 순서를 불러오는 중" : "Loading the routing order"}</p> : null}
+    {error && <p className="lmf-route-status error">{error} <button type="button" className="subtle-action" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={13} />{ko ? "다시 시도" : "Retry"}</button></p>}
+    {[...(entries || []), ...stale.map((key) => ({ key, provider: key.split("/")[0], model: key.split("/").slice(1).join("/") || undefined, template: undefined, effort: undefined, stale: true }))].map((entry) => <label key={entry.key} className="lmf-route-name-row"><span><strong>{entry.provider}</strong><small>{[entry.model || entry.template, "stale" in entry ? (ko ? "현재 라우팅 순서에 없음" : "not in the current routing order") : ""].filter(Boolean).join(" · ")}</small></span><input value={names[entry.key] || ""} placeholder={[entry.provider, entry.model || entry.template].filter(Boolean).join(" · ")} maxLength={80} onChange={(event) => setName(entry.key, event.target.value)} /></label>)}
+    {entries && !entries.length && !error && <p className="lmf-route-status">{ko ? "라우팅 순서가 비어 있습니다." : "The routing order is empty."}</p>}
   </div>;
 }
 
