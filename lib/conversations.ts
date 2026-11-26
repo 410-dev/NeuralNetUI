@@ -26,6 +26,8 @@ const messageSchema = z.object({
   timeToFirstTokenSeconds: z.number().nonnegative().optional(),
   promptProcessingSeconds: z.number().nonnegative().optional(),
   totalDurationSeconds: z.number().nonnegative().optional(),
+  modelName: z.string().max(200).optional(),
+  routedModel: z.string().max(200).optional(),
   steps: z.array(z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("reasoning"), text: z.string(), seconds: z.number().nonnegative().optional(), startedAt: z.number().nonnegative().optional(), promptSeconds: z.number().nonnegative().optional() }),
     z.object({ kind: z.literal("content"), text: z.string() }),
@@ -158,6 +160,8 @@ function storeConversation(record: Conversation, userId: string, guard?: () => b
           steps: message.steps?.length ? JSON.stringify(message.steps) : null,
         });
         db.prepare("UPDATE messages SET context_tokens = ?, prompt_processing_seconds = ?, total_duration_seconds = ? WHERE id = ? AND conversation_id = ?").run(message.contextTokens ?? null, message.promptProcessingSeconds ?? null, message.totalDurationSeconds ?? null, message.id, record.id);
+        // A save that does not carry the answering model (an older client, an edited copy) keeps the recorded one.
+        if (message.modelName || message.routedModel) db.prepare("UPDATE messages SET model_name = COALESCE(?, model_name), routed_model = COALESCE(?, routed_model) WHERE id = ? AND conversation_id = ?").run(message.modelName ?? null, message.routedModel ?? null, message.id, record.id);
         insertBranchMessage.run(branch.id, message.id, messagePosition);
         for (const [attachmentPosition, attachment] of (message.attachments || []).entries()) {
           insertAttachment.run(message.id, attachment.id, attachmentPosition);
@@ -336,6 +340,8 @@ type MessageRow = {
   time_to_first_token_seconds: number | null;
   prompt_processing_seconds: number | null;
   total_duration_seconds: number | null;
+  model_name: string | null;
+  routed_model: string | null;
   context_tokens: number | null;
   tool_events: string | null;
   steps: string | null;
@@ -360,7 +366,7 @@ async function readConversationRecord(id: string, userId: string, includeDeleted
   const branchRows = db.prepare("SELECT id, name, parent_branch_id, forked_from_message_id, created_at, updated_at FROM branches WHERE conversation_id = ? ORDER BY position").all(id) as BranchRow[];
   const messageRows = db.prepare(`
     SELECT bm.branch_id, m.id, m.revision_group_id, m.role, m.content, m.reasoning, m.reasoning_duration_seconds,
-           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.prompt_processing_seconds, m.total_duration_seconds, m.context_tokens, m.tool_events, m.steps, m.created_at
+           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.prompt_processing_seconds, m.total_duration_seconds, m.model_name, m.routed_model, m.context_tokens, m.tool_events, m.steps, m.created_at
     FROM branch_messages bm
     JOIN messages m ON m.id = bm.message_id
     JOIN branches b ON b.id = bm.branch_id
@@ -405,6 +411,8 @@ async function readConversationRecord(id: string, userId: string, includeDeleted
       timeToFirstTokenSeconds: row.time_to_first_token_seconds ?? undefined,
       promptProcessingSeconds: row.prompt_processing_seconds ?? undefined,
       totalDurationSeconds: row.total_duration_seconds ?? undefined,
+      modelName: row.model_name ?? undefined,
+      routedModel: row.routed_model ?? undefined,
       toolEvents: row.tool_events ? JSON.parse(row.tool_events) : undefined,
       steps: row.steps ? JSON.parse(row.steps) : undefined,
       attachments: attachments.get(row.id),

@@ -20,7 +20,7 @@ import { readUpload, readUploadModelContent, saveGeneratedImage } from "./upload
 import { chatEndpoint, chatHeaders, connectionForModel, connectionRoot, envApiKey, hasModelResidency } from "./connection-drivers";
 import { chatFetcher, providerRequestBody } from "./provider-requests.ts";
 import type { ConnectionConfig, ConnectionDriver } from "./types";
-import { deleteRemoteLmfSession, forgetLmfSession, isLmfSessionGone, LMF_SESSION_HEADER, lmfChargedInput, lmfSessionFrom, lmfSessionTtlMs, saveLmfSession, storedLmfSession } from "./lmf";
+import { routedModelLabel, deleteRemoteLmfSession, forgetLmfSession, isLmfSessionGone, LMF_SESSION_HEADER, lmfChargedInput, lmfSessionFrom, lmfSessionTtlMs, saveLmfSession, storedLmfSession } from "./lmf";
 import { connectionEndpoints, routeConnection } from "./connection-routing";
 import { readPersonalSampling, resolveSampling, samplingRequestFields, type SamplingParams } from "./sampling-params";
 import { createResidencyAdapter } from "./residency-adapter";
@@ -541,6 +541,7 @@ async function run(job: ChatJob) {
     const config = await readConfig();
     if (job.input.messages.some((message) => (message.attachments?.length || 0) > config.toolSettings.maxAttachmentsPerMessage)) throw new Error(`A message exceeds the configured ${config.toolSettings.maxAttachmentsPerMessage}-attachment limit.`);
     const { model, selected, base } = runtimeModel(config, job.input, job.userId);
+    job.message = { ...job.message, modelName: selected.name };
     job.thinkingTags = effectiveThinkingTags(normalizeThinkingTags(model.thinkingTags)); job.thinkingTagsCross = model.thinkingTagsCross === true;
     // Whether earlier reasoning goes back to the model is the administrator's per-model choice, never the request's.
     job.input = { ...job.input, sendReasoning: (selected.rememberReasoning ?? base.rememberReasoning) === true };
@@ -783,6 +784,11 @@ async function run(job: ChatJob) {
       }
       reasoningSeconds += result.reasoningDurationSeconds;
       recordTokenUsage(job.userId,chargeModelId,result.chargedUsage.inputTokens,result.chargedUsage.outputTokens);
+      // A routing model names the provider and model that actually answered this turn.
+      if (job.lmf?.sessionId && base.routerModel) {
+        const routed = await routedModelLabel(job.lmf.connection, headers, job.lmf.sessionId, base).catch(() => undefined);
+        if (routed) { job.message = { ...job.message, routedModel: routed }; broadcast(job, true); }
+      }
       route.record(result.chargedUsage.inputTokens,result.chargedUsage.outputTokens);
       const serverMeasuredInput = result.usage.inputTokens ? result.usage.inputTokens + (result.usage.outputTokens || 0) : undefined;
       if (result.compact) {

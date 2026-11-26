@@ -567,6 +567,14 @@ function openDatabase() {
       );`);
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(30, new Date().toISOString());
   })();
+  const messageModelVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (messageModelVersion.version < 31) connection.transaction(() => {
+    // Which model answered, and for a routing model which provider and model it was routed to.
+    const columns = connection.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "model_name")) connection.exec("ALTER TABLE messages ADD COLUMN model_name TEXT;");
+    if (!columns.some(column => column.name === "routed_model")) connection.exec("ALTER TABLE messages ADD COLUMN routed_model TEXT;");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(31, new Date().toISOString());
+  })();
   return connection;
 }
 

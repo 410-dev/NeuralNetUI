@@ -1936,6 +1936,7 @@ select:focus-visible {
 @media (prefers-reduced-motion: reduce) { .rolling-digit > .roll-in, .rolling-digit > .roll-out { animation: none; } .rolling-digit > .roll-out { display: none; } }
 .token-rate-tooltip small { display: flex; justify-content: space-between; gap: 14px; }
 .token-rate-tooltip small b { color: var(--text); font-weight: 550; font-variant-numeric: tabular-nums; }
+.token-rate-tooltip small.token-model b { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: normal; }
 .thinking-timing-toggle { display: grid; grid-template-columns: minmax(0,1fr) 39px; align-items: center; gap: 12px; margin-top: 14px; }
 .thinking-timing-toggle strong, .thinking-timing-toggle small { display: block; }
 .thinking-timing-toggle strong { font-size: 12px; font-weight: 550; }

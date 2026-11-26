@@ -114,6 +114,14 @@ export async function deleteRemoteLmfSession(connection: Pick<ConnectionConfig, 
   return response.ok || response.status === 404;
 }
 
+/** What a session's last turn used, as its display label (`GET /v1/lmf/sessions/{id}`). */
+export async function routedModelLabel(connection: Pick<ConnectionConfig, "baseUrl">, headers: Record<string, string>, sessionId: string, model: Pick<ModelConfig, "routeDisplayNames">, request: typeof fetch = fetch) {
+  const response = await request(lmfEndpoint(connection.baseUrl, `sessions/${encodeURIComponent(sessionId)}`), { headers, signal: AbortSignal.timeout(5_000), cache: "no-store" });
+  if (!response.ok) { await response.body?.cancel().catch(() => undefined); return undefined; }
+  const entry = routingFrom(await response.json(), "current");
+  return entry ? lmfRouteLabel(model, entry) : undefined;
+}
+
 /** A closed or expired session is answered with 404 `session_not_found`; the chat then opens a new one. */
 export function isLmfSessionGone(status: number, body: string) {
   return status === 404 && /session_not_found|session/i.test(body);

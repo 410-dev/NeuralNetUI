@@ -388,6 +388,10 @@ export interface StoredMessage {
   promptProcessingSeconds?: number;
   /** From the request reaching the server to the response ending. */
   totalDurationSeconds?: number;
+  /** Display name of the model that answered, as it was when the reply was written. */
+  modelName?: string;
+  /** For an LMFuseFramework routing model: the routed provider and model that actually answered. */
+  routedModel?: string;
   /** Absent on messages written before the sequential transcript existed. */
   steps?: MessageStep[];
   toolEvents?: ToolEvent[];
