@@ -2,7 +2,7 @@ import { lmStudioEndpoint, modelsEndpoint } from "./connection-drivers.ts";
 import { inferenceEndpoint } from "./inference-control.ts";
 import { progressFetch, SERVER_RESPONSE_TIMEOUT_MS, withSlowProgress } from "./chat-progress.ts";
 import type { ChatWaitPhase, ConnectionConfig } from "./types.ts";
-import { ModelBusyError, type ResidencyAdapter, type ResidentModel } from "./model-residency.ts";
+import { ModelBusyError, ModelManagementUnavailableError, type ResidencyAdapter, type ResidentModel } from "./model-residency.ts";
 
 function record(value: unknown): Record<string, unknown> | undefined { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function text(value: unknown) { return typeof value === "string" && value.trim() ? value : undefined; }
@@ -46,7 +46,7 @@ export function createResidencyAdapter(connection: ConnectionConfig, headers: Re
     const result = await withSlowProgress(() => response.json(), () => onPhase("waiting-server"), SERVER_RESPONSE_TIMEOUT_MS); onPhase(phase); return result;
   }
   async function ensureOk(response: Response) { if (!response.ok) throw new Error(`Model management failed (${response.status}): ${await response.text()}`); }
-  return {
+  const adapter: ResidencyAdapter = {
     async list(signal) {
       if (mode !== "legacy") {
         const response = await call(modelsEndpoint("lmstudio", connection.baseUrl), signal);
@@ -80,4 +80,19 @@ export function createResidencyAdapter(connection: ConnectionConfig, headers: Re
       await withSlowProgress(() => response.text(), () => onPhase("waiting-server"), SERVER_RESPONSE_TIMEOUT_MS);
     },
   };
+  // LM Studio's native API is part of that driver's contract, so its failures stay fatal.
+  if (connection.driver === "lmstudio") return adapter;
+  // OpenAI-compatible servers implement management endpoints inconsistently. Once any of them fails, the adapter
+  // reports management as unavailable (and stops probing) so the chat request itself still goes through.
+  let unavailable: ModelManagementUnavailableError | undefined;
+  const optional = <A extends unknown[], R>(operation: (...args: A) => Promise<R>) => async (...args: A): Promise<R> => {
+    if (unavailable) throw unavailable;
+    try { return await operation(...args); }
+    catch (error) {
+      if (error instanceof ModelBusyError) throw error;
+      unavailable = new ModelManagementUnavailableError(`Model management is unavailable on this server: ${error instanceof Error ? error.message : String(error)}`);
+      throw unavailable;
+    }
+  };
+  return { list: optional(adapter.list), load: optional(adapter.load), unload: optional(adapter.unload) };
 }

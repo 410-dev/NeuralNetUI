@@ -20,3 +20,21 @@ test('OpenAI compatible LM Studio uses native load/unload and legacy fallback re
   assert.equal((await createResidencyAdapter(connection, {}, undefined, () => {}, legacy).list(signal)).length, 2);
 });
 
+test('OpenAI compatible servers without management endpoints are admitted unmanaged', async () => {
+  const { ModelResidencyManager, ModelManagementUnavailableError } = await import('./model-residency.ts');
+  let calls = 0;
+  const request: typeof fetch = async () => { calls++; return new Response('{"error": "no such endpoint /api/inference/status"}', { status: 404 }); };
+  const connection = { id: 'a', name: 'A', driver: 'openai' as const, baseUrl: 'http://localhost:8000/v1', apiKey: '', models: [] };
+  const adapter = createResidencyAdapter(connection, {}, undefined, () => {}, request);
+  const signal = new AbortController().signal;
+  await assert.rejects(adapter.list(signal), ModelManagementUnavailableError);
+  const before = calls; await assert.rejects(adapter.load('a', signal), ModelManagementUnavailableError); assert.equal(calls, before);
+  const manager = new ModelResidencyManager({ get: () => ({ count: 0, lastUsed: 0 }), record: () => undefined });
+  const release = await manager.acquire({ server: 's', model: 'a', limit: 1, policy: 'capacity', adapter: createResidencyAdapter(connection, {}, undefined, () => {}, request), signal });
+  release();
+});
+test('LM Studio management failures remain fatal', async () => {
+  const request: typeof fetch = async () => new Response('down', { status: 500 });
+  const connection = { id: 'a', name: 'A', driver: 'lmstudio' as const, baseUrl: 'http://localhost:1234', apiKey: '', models: [] };
+  await assert.rejects(createResidencyAdapter(connection, {}, undefined, () => {}, request).list(new AbortController().signal), /Model management failed \(500\)/);
+});

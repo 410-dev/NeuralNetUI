@@ -9,6 +9,11 @@ export type ResidencyAdapter = {
 };
 export type UsageStore = { get(server: string, model: string): { count: number; lastUsed: number }; record(server: string, model: string): unknown };
 export class ModelBusyError extends Error {}
+/**
+ * The server does not offer (or failed on) an optional model-management API. OpenAI-compatible servers vary widely
+ * in which non-chat endpoints they implement, so admission continues without load/unload management.
+ */
+export class ModelManagementUnavailableError extends Error {}
 type ServerState = { tail: Promise<void>; locking: number; pending: number; active: Map<string, number>; serialActive: number; listeners: Set<() => void> };
 type Admission = { server: string; model: string; limit: number; policy: ModelWaitPolicy; adapter?: ResidencyAdapter; signal: AbortSignal; onPhase?: (phase: ChatWaitPhase) => void };
 
@@ -48,7 +53,7 @@ export class ModelResidencyManager {
         if ((policy === "serial" && state.active.size > 0) || state.serialActive > 0) wait = true;
         else {
           let resident: ResidentModel | undefined;
-          if (adapter) {
+          if (adapter) try {
             onPhase("preparing-response");
             let loaded = await adapter.list(AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
             resident = loaded.find(item => item.identifiers.includes(model));
@@ -76,6 +81,10 @@ export class ModelResidencyManager {
                 if (!resident) throw new Error("The model server did not confirm that the requested model is loaded.");
               }
             }
+          } catch (error) {
+            // Optional management endpoints are best-effort: proceed unmanaged, but never swallow a caller abort.
+            if (!(error instanceof ModelManagementUnavailableError)) throw error;
+            signal.throwIfAborted(); resident = undefined; wait = false;
           }
           if (!wait) {
             signal.throwIfAborted();
