@@ -1,6 +1,6 @@
 "use client";
 
-import { Cable, CirclePlus, Copy, Info, LoaderCircle, Monitor, Pencil, PlugZap, Settings, ShieldCheck, Trash2, X } from "lucide-react";
+import { Cable, ChevronDown, CirclePlus, Copy, Info, LoaderCircle, Monitor, Pencil, PlugZap, Settings, ShieldCheck, Trash2, X } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { McpAuthType, McpConnection, McpEntitlement, McpToolInfo, McpToolPolicy } from "@/lib/types";
@@ -81,12 +81,14 @@ const vmEndpoint = (value: string) => { const trimmed = value.trim().replace(/\/
  */
 function VirtualComputerCard({ ko, connection, onChanged, onPermissions, onRemove }: { ko: boolean; connection?: McpConnection; onChanged: () => void; onPermissions: (connection: McpConnection) => void; onRemove: (connection: McpConnection) => void }) {
   const [editing, setEditing] = useState(!connection);
+  // Folded by default: only the title, description and switch show until it is opened.
+  const [open, setOpen] = useState(false);
   const [url, setUrl] = useState(connection?.url || ""), [key, setKey] = useState("");
   const [busy, setBusy] = useState(false), [notice, setNotice] = useState(""), [copied, setCopied] = useState(false);
   const [info, setInfo] = useState<{ info: VmInfo | null; error?: string }>();
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   const command = `curl -fsSL ${origin}/api/vm/install | sudo bash -s -- --tunnel-token '<${ko ? "Cloudflare 터널 토큰 또는 명령어" : "Cloudflare tunnel token or command"}>'`;
-  useEffect(() => { if (!connection) return; setInfo(undefined); fetch("/api/vm/info", { cache: "no-store" }).then(response => response.json()).then(setInfo).catch(error => setInfo({ info: null, error: String(error) })); }, [connection]);
+  useEffect(() => { if (!connection || !open) return; setInfo(undefined); fetch("/api/vm/info", { cache: "no-store" }).then(response => response.json()).then(setInfo).catch(error => setInfo({ info: null, error: String(error) })); }, [connection, open]);
   const payload = () => ({ ...(connection ? { id: connection.id } : {}), kind: "vm", name: ko ? "가상 컴퓨터" : "Virtual computer", description: "", url: vmEndpoint(url), authType: "api_key", credential: key.trim(), enabled: connection?.enabled ?? true, ...(connection ? { toolTimeoutSeconds: connection.toolTimeoutSeconds } : {}) });
   async function test() {
     setBusy(true); setNotice("");
@@ -106,10 +108,11 @@ function VirtualComputerCard({ ko, connection, onChanged, onPermissions, onRemov
     onChanged();
   }
   const detail = info?.info;
-  return <section className={`vm-card ${connection && !connection.enabled ? "disabled" : ""}`}>
+  return <section className={`vm-card ${connection && !connection.enabled ? "disabled" : ""} ${open ? "open" : ""}`}>
     <header><span className="mcp-connection-mark"><Monitor size={18} /></span><div><strong>{ko ? "가상 컴퓨터" : "Virtual computer"}</strong><small>{ko ? "모델이 셸 명령, 백그라운드 작업, 화면 캡처·마우스·키보드(GUI가 있을 때), 파일 주고받기를 쓸 수 있는 내 컴퓨터입니다. 등록하면 브라우저 도구도 이 컴퓨터에서 실행됩니다. MCP 등록 개수에 포함되지 않습니다." : "Your own computer the model can use: shell commands, background jobs, screen, mouse and keyboard (with a GUI) and file transfer. Once registered, the browser tool runs there too. It does not count toward your MCP limit."}</small></div>
-      {connection && <button type="button" role="switch" aria-checked={connection.enabled} aria-label={ko ? "가상 컴퓨터 사용" : "Use the virtual computer"} className={`toggle ${connection.enabled ? "on" : ""}`} onClick={() => void toggle()}><i /></button>}</header>
-    {connection && !editing && <div className="vm-status">
+      {connection && <button type="button" role="switch" aria-checked={connection.enabled} aria-label={ko ? "가상 컴퓨터 사용" : "Use the virtual computer"} className={`toggle ${connection.enabled ? "on" : ""}`} onClick={() => void toggle()}><i /></button>}
+      <button type="button" className="vm-fold" aria-expanded={open} aria-label={open ? (ko ? "접기" : "Collapse") : (ko ? "펼치기" : "Expand")} onClick={() => setOpen(value => !value)}><ChevronDown size={17} /></button></header>
+    {open && connection && !editing && <div className="vm-status">
       <code>{connection.url}</code>
       {!info ? <span className="vm-info"><LoaderCircle size={13} className="spin" />{ko ? "확인 중" : "Checking"}</span> : detail ? <span className="vm-info">
         <span>{detail.distribution || detail.os} · {detail.architecture} · {detail.environment}</span>
@@ -118,7 +121,7 @@ function VirtualComputerCard({ ko, connection, onChanged, onPermissions, onRemov
       </span> : <span className="vm-info error">{info.error || (ko ? "연결할 수 없습니다." : "Not reachable.")}</span>}
       <span className="vm-actions"><button type="button" className="subtle-action" onClick={() => onPermissions(connection)}><ShieldCheck size={14} />{ko ? "도구 권한" : "Tool permissions"}</button><button type="button" className="subtle-action" onClick={() => setEditing(true)}><Pencil size={14} />{ko ? "수정" : "Edit"}</button><button type="button" className="subtle-action danger" onClick={() => onRemove(connection)}><Trash2 size={14} />{ko ? "삭제" : "Delete"}</button></span>
     </div>}
-    {editing && <form className="vm-form" onSubmit={save}>
+    {open && editing && <form className="vm-form" onSubmit={save}>
       <div className="vm-install"><span>{ko ? "1. 가상 컴퓨터로 쓸 리눅스(LXC·Docker·실제 컴퓨터)나 macOS에서 설치합니다. 끝나면 주소와 키가 출력됩니다." : "1. Install on the Linux machine (LXC, Docker or bare metal) or Mac you want to use. It prints an address and a key."}</span>
         <code>{command}</code>
         <button type="button" className="subtle-action" onClick={() => { void navigator.clipboard?.writeText(command).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); }}><Copy size={13} />{copied ? (ko ? "복사됨" : "Copied") : (ko ? "명령 복사" : "Copy command")}</button>
@@ -127,7 +130,7 @@ function VirtualComputerCard({ ko, connection, onChanged, onPermissions, onRemov
       <label className="field"><span>{ko ? "3. 키" : "3. Key"}</span><input type="password" value={key} onChange={event => setKey(event.target.value)} placeholder={connection?.hasCredential ? (ko ? "저장된 키 유지" : "Keep the saved key") : ""} /></label>
       <span className="vm-actions">{connection && <button type="button" className="secondary-button" onClick={() => { setEditing(false); setUrl(connection.url); setKey(""); }}>{ko ? "취소" : "Cancel"}</button>}<button type="button" className="secondary-button" disabled={busy || !url.trim() || (!key.trim() && !connection?.hasCredential)} onClick={() => void test()}><PlugZap size={14} />{ko ? "연결 확인" : "Test"}</button><button type="submit" className="save-button" disabled={busy || !url.trim() || (!key.trim() && !connection?.hasCredential)}>{busy ? <LoaderCircle size={14} className="spin" /> : null}{connection ? (ko ? "저장" : "Save") : (ko ? "등록" : "Register")}</button></span>
     </form>}
-    {notice && <p className="settings-notice" role="status">{notice}</p>}
+    {open && notice && <p className="settings-notice" role="status">{notice}</p>}
   </section>;
 }
 

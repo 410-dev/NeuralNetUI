@@ -427,10 +427,10 @@ export default function Home() {
   const agentWatchingRef = useRef(false);
   const agentSyncRef = useRef<() => void>(() => undefined);
   const agentOpenRef = useRef(false);
-  // The control panel docks beside the chat only when the window is close to full screen width.
+  // The control panel docks beside the chat only when the window takes most of the screen width.
   const [agentDocked, setAgentDocked] = useState(false);
   useEffect(() => {
-    const measure = () => setAgentDocked(window.innerWidth >= Math.max(901, window.screen.availWidth * .9));
+    const measure = () => setAgentDocked(window.innerWidth >= Math.max(901, window.screen.availWidth * .75));
     measure(); window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, []);
@@ -2684,7 +2684,7 @@ function SettingsPanel({ initial, serverStates, onClose, onSaved, onLogout, onAc
     { id: "general", icon: <Settings2 size={17}/>, label: c.general },
     { id: "appearance", icon: <Palette size={17}/>, label: c.appearance },
     ...(admin ? [{ id: "connection" as const, icon: <Server size={17}/>, label: c.connection }] : []),
-    { id: "mcp" as const, icon: <Cable size={17}/>, label: ko ? "MCP·가상 컴퓨터" : "MCP & virtual computer" },
+    { id: "mcp" as const, icon: <Cable size={17}/>, label: ko ? "MCP 연결" : "MCP connections" },
     ...(admin ? [{ id: "tools" as const, icon: <Wrench size={17}/>, label: c.toolsSettings }] : []),
     { id: "models", icon: <NeuralMark size={18}/>, label: c.models },
     { id: "reasoning", icon: <Lightbulb size={17}/>, label: c.reasoningLevel },

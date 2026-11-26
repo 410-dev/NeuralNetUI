@@ -163,7 +163,7 @@ export function mcpManifest(connection: { id: string; name: string; description?
   const description = connection.description || connection.url;
   // The virtual computer is on by default once registered; other MCP servers are switched on per chat.
   return {
-    id: mcpProviderId(connection.id), origin: "user", section: "mcp", order: connection.kind === "vm" ? -1 : order, icon: connection.kind === "vm" ? "monitor" : "cable", defaultEnabled: connection.kind === "vm",
+    id: mcpProviderId(connection.id), origin: "user", section: connection.kind === "vm" ? "agent" : "mcp", order: connection.kind === "vm" ? 30 : order, icon: connection.kind === "vm" ? "monitor" : "cable", defaultEnabled: connection.kind === "vm",
     label: { en: connection.name, ko: connection.name }, description: { en: description, ko: description },
     functions: [], functionPrefix: `mcp_${connection.id.replace(/-/g, "").slice(0, 8)}_`,
   };
