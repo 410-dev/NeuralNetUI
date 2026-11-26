@@ -50,6 +50,16 @@ export function routingFrom(payload: unknown, when: "next" | "current"): LmfRout
   return routeEntry(route?.current) || (last && text(last.provider) ? routeEntry({ provider: last.provider, model: last.model, effort: last.effort }) : undefined);
 }
 
+/** Prompt-cache lifetime of a routing session's current provider: seconds left and the provider's full cache TTL. */
+export function cacheFrom(payload: unknown): { remainingSeconds: number; totalSeconds?: number; entry: LmfRouteEntry } | undefined {
+  const current = record(record(record(payload)?.route)?.current);
+  const entry = routeEntry(current);
+  const remaining = current?.cache_ttl_remaining_seconds;
+  if (!entry || typeof remaining !== "number" || !Number.isFinite(remaining)) return undefined;
+  const minutes = current?.cachettl_minutes;
+  return { remainingSeconds: Math.max(0, remaining), totalSeconds: typeof minutes === "number" && minutes > 0 ? Math.round(minutes * 60) : undefined, entry };
+}
+
 /** `/v1/lmf/...` next to the connection's OpenAI base URL. */
 export function lmfEndpoint(baseUrl: string, path: string) {
   return `${baseUrl.replace(/\/+$/, "")}/lmf/${path.replace(/^\/+/, "")}`;

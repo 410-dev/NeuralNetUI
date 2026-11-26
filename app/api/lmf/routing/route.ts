@@ -4,7 +4,7 @@ import { db } from "@/lib/database";
 import { aliasBaseModel } from "@/lib/alias-base-model";
 import { baseModelForAlias } from "@/lib/model-context";
 import { connectionForModel, connectionHeaders, envApiKey } from "@/lib/connection-drivers";
-import { lmfEndpoint, lmfRouteLabel, lmfSessionTtlMs, routingFrom, storedLmfSession } from "@/lib/lmf";
+import { cacheFrom, lmfEndpoint, lmfRouteLabel, lmfSessionTtlMs, routingFrom, storedLmfSession } from "@/lib/lmf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,9 +32,12 @@ export async function GET(request: Request) {
       return response.ok ? response.json() : undefined;
     };
     // A session the server no longer has falls back to where a fresh request would go.
-    const payload = (sessionId ? await fetchJson(`sessions/${encodeURIComponent(sessionId)}`).catch(() => undefined) : undefined) ?? await fetchJson("route").catch(() => undefined);
+    const session = sessionId ? await fetchJson(`sessions/${encodeURIComponent(sessionId)}`).catch(() => undefined) : undefined;
+    const payload = session ?? await fetchJson("route").catch(() => undefined);
     const entry = routingFrom(payload, when);
-    if (!entry) return Response.json({ routing: null });
-    return Response.json({ routing: { entry, label: lmfRouteLabel(base, entry), when } });
+    // The current provider's prompt cache, while this chat has a routing session on it.
+    const cached = cacheFrom(session);
+    const cache = cached ? { remainingSeconds: cached.remainingSeconds, totalSeconds: cached.totalSeconds, label: lmfRouteLabel(base, cached.entry) } : null;
+    return Response.json({ routing: entry ? { entry, label: lmfRouteLabel(base, entry), when } : null, cache });
   } catch (error) { return authErrorResponse(error); }
 }

@@ -84,3 +84,12 @@ test("sessions expire after the connection TTL, and deleted chats' sessions are 
   assert.equal(await lmf.deleteRemoteLmfSession({ baseUrl: "http://h/v1" }, {}, "down", request), false);
   assert.equal(calls[0], "DELETE http://h/v1/lmf/sessions/s%201?purge=1");
 });
+
+test("the cache lifetime is read from a routing session's current provider only", () => {
+  const session = { object: "lmf.session", route: { current: { provider: "claude", model: "opus", cachettl_minutes: 60, seconds_since_last_request: 600, cache_ttl_remaining_seconds: 3000 } } };
+  assert.deepEqual(lmf.cacheFrom(session), { remainingSeconds: 3000, totalSeconds: 3600, entry: { provider: "claude", model: "opus", effort: undefined, template: undefined, position: undefined } });
+  assert.equal(lmf.cacheFrom({ object: "lmf.session", route: { current: null } }), undefined);
+  assert.equal(lmf.cacheFrom({ object: "lmf.session", next: { account: "claude" } }), undefined);
+  assert.equal(lmf.cacheFrom({ object: "lmf.route", providers: [] }), undefined);
+  assert.equal(lmf.cacheFrom({ route: { current: { provider: "c", cache_ttl_remaining_seconds: -4 } } })?.remainingSeconds, 0);
+});
