@@ -5,5 +5,7 @@ const fs = require("fs");
 module.exports = ({ config }) => {
   const googleServicesFile = process.env.GOOGLE_SERVICES_JSON;
   if (googleServicesFile && !fs.existsSync(googleServicesFile)) throw new Error(`GOOGLE_SERVICES_JSON not found: ${googleServicesFile}`);
-  return { ...config, android: { ...config.android, ...(googleServicesFile ? { googleServicesFile } : {}) } };
+  // The page compares this with the server's key and warns when they belong to different Firebase projects.
+  const firebaseProjectId = googleServicesFile ? JSON.parse(fs.readFileSync(googleServicesFile, "utf8")).project_info?.project_id : undefined;
+  return { ...config, android: { ...config.android, ...(googleServicesFile ? { googleServicesFile } : {}) }, extra: { ...config.extra, firebaseProjectId } };
 };

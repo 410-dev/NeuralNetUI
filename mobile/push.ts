@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 
 /**
  * Agent notifications. The server sends FCM messages on two Android channels: urgent ones ring and pop up, the rest
@@ -39,7 +40,10 @@ export async function ensureChannels() {
   });
 }
 
-export type PushReply = { permission: "granted" | "denied" | "undetermined"; enabled: boolean; token?: string; platform: "android" | "ios"; error?: string };
+export type PushReply = { permission: "granted" | "denied" | "undetermined"; enabled: boolean; token?: string; platform: "android" | "ios"; projectId?: string; error?: string };
+
+/** The Firebase project this build's google-services.json belongs to (app.config.js). */
+const projectId = (Constants.expoConfig?.extra as { firebaseProjectId?: string } | undefined)?.firebaseProjectId;
 
 async function deviceToken() {
   const token = await Notifications.getDevicePushTokenAsync();
@@ -47,6 +51,11 @@ async function deviceToken() {
 }
 
 export async function handlePushRequest(action: "status" | "enable" | "disable"): Promise<PushReply> {
+  const reply = await answer(action);
+  return { ...reply, projectId };
+}
+
+async function answer(action: "status" | "enable" | "disable"): Promise<PushReply> {
   const platform = Platform.OS === "ios" ? "ios" : "android";
   try {
     let { status } = await Notifications.getPermissionsAsync();

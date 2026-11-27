@@ -17,7 +17,7 @@ const WebView = WebViewBase as unknown as React.ComponentType<WebViewProps & { r
 const BACKGROUND = "#0a0a0c";
 const SERVER_KEY = "nnui.server";
 /** The page recognises the app by this token and lets it drive the keyboard layout. */
-const USER_AGENT_TOKEN = "NeuralNetUIApp/0.2.0";
+const USER_AGENT_TOKEN = "NeuralNetUIApp/0.2.1";
 
 export default function App() {
   return <SafeAreaProvider>
