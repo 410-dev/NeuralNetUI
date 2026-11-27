@@ -13,6 +13,7 @@ import { importStreamToStorage } from "./storage-chunk-upload";
 import { McpOAuthError, oauthAccessToken, readOAuthConfig, type McpOAuthConfig } from "./mcp-oauth";
 import { mcpOAuthPreset } from "./mcp-oauth-presets";
 import { TOOL_DEFINITION_MODES, type ToolDefinitionMode } from "./mcp-tool-definitions";
+import { statelessListTools, statelessToolCall, usesStatelessProtocol, type ElicitationAnswer, type ElicitationRequest } from "./mcp-stateless";
 
 const MAX_RESULT_CHARS = 100_000;
 const CONNECTION_TIMEOUT_MS = 20_000;
@@ -156,11 +157,30 @@ async function assertNetworkTarget(userId:string,rawUrl:string){
   if(classes.includes("private")){const role=(db.prepare("SELECT role FROM users WHERE id=?").get(userId) as {role:string}|undefined)?.role;if(role!=="admin"&&role!=="superadmin")throw new AuthError("내부 네트워크 MCP 연결은 관리자 계정에서만 사용할 수 있습니다.",403);}
 }
 
+/** The bearer token for a connection: OAuth connections signed in through NeuralNetUI renew theirs before it expires. */
+function connectionToken(row: McpRow): Promise<string | undefined> {
+  if (row.auth_type === "none") return Promise.resolve(undefined);
+  return row.auth_type === "oauth" && row.oauth && row.id !== "test" ? oauthAccessToken(row.id) : Promise.resolve(row.credential || undefined);
+}
+function guardedFetchFor(userId: string): typeof fetch {
+  return async (input, init) => { const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url; await assertNetworkTarget(userId, url); return fetch(input, { ...init, redirect: "error" }); };
+}
+
+/** The server's tools, through the stateless transport (Google's Workspace servers) or an MCP session. */
+async function listServerTools(row: McpRow, signal?: AbortSignal): Promise<Tool[]> {
+  if (usesStatelessProtocol(row.url)) {
+    await assertNetworkTarget(row.user_id, row.url);
+    return await statelessListTools(row.url, await connectionToken(row), { fetch: guardedFetchFor(row.user_id), signal: requestSignal(signal) }) as unknown as Tool[];
+  }
+  const client = await connectedClient(row, signal);
+  try { return (await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" })).tools; }
+  finally { await client.close().catch(() => undefined); }
+}
+
 async function connectedClient(row: McpRow, signal?: AbortSignal) {
   await assertNetworkTarget(row.user_id,row.url);
-  // OAuth connections signed in through NeuralNetUI renew their access token before it expires.
-  const authProvider: AuthProvider | undefined = row.auth_type === "none" ? undefined : { token: async () => row.auth_type === "oauth" && row.oauth && row.id !== "test" ? oauthAccessToken(row.id) : row.credential || undefined };
-  const guardedFetch:typeof fetch=async(input,init)=>{const url=typeof input==="string"?input:input instanceof URL?input.href:input.url;await assertNetworkTarget(row.user_id,url);return fetch(input,{...init,redirect:"error"});};
+  const authProvider: AuthProvider | undefined = row.auth_type === "none" ? undefined : { token: () => connectionToken(row) };
+  const guardedFetch = guardedFetchFor(row.user_id);
   // A virtual computer keeps one workspace per account, named by an opaque id.
   const requestInit = row.kind === "vm" ? { headers: { "X-NNUI-User": vmCallerId(row.user_id) } } : undefined;
   const transport = new StreamableHTTPClientTransport(new URL(row.url), { ...(authProvider ? { authProvider } : {}),fetch:guardedFetch, ...(requestInit ? { requestInit } : {}) });
@@ -189,12 +209,11 @@ export async function listMcpTools(userId: string, connectionId: string, signal?
   if(!row.enabled)throw new AuthError("이 MCP 연결은 비활성화되어 있습니다.",403);
   const policies=toolPolicies(connectionId);
   return talkToServer(row.url,signal,async()=>{
-    const client=await connectedClient(row,signal);
-    try {
-      const result=await client.listTools(undefined,{signal:requestSignal(signal),cacheMode:"bypass"});
+    {
+      const result={tools:await listServerTools(row,signal)};
       const browser=row.kind==="vm"?[...await vmBrowserToolList(userId).catch(()=>[]),...(await import("./secure-input")).SECURE_INPUT_SPECS]:[];
       return [...result.tools,...(row.kind==="vm"?VM_FILE_TOOLS:[]),...browser].map(tool=>({name:tool.name,description:tool.description,inputSchema:tool.inputSchema,policy:policies.get(tool.name)||(row.kind==="vm"?vmDefaultPolicy(tool.name):DEFAULT_TOOL_POLICY)}));
-    } finally { await client.close().catch(()=>undefined); }
+    }
   });
 }
 
@@ -216,18 +235,16 @@ export async function testMcpConnection(userId: string, input: unknown & { id?: 
   if (value.authType === "oauth" && value.oauth) {
     if (!previous || previous.auth_type !== "oauth" || !readOAuthConfig(previous.oauth)) throw new AuthError("OAuth 연결은 저장한 뒤 로그인하고 나서 테스트할 수 있습니다.", 400);
     return talkToServer(previous.url, signal, async () => {
-      const client = await connectedClient(previous, signal);
-      try { const result = await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" }); return { toolCount: result.tools.length, tools: result.tools.slice(0, 20).map(tool => tool.name) }; }
-      finally { await client.close().catch(() => undefined); }
+      const tools = await listServerTools(previous, signal);
+      return { toolCount: tools.length, tools: tools.slice(0, 20).map(tool => tool.name) };
     });
   }
   const credential = value.authType === "none" ? "" : value.credential.trim() || (previous?.auth_type === value.authType ? previous.credential : "");
   if (value.authType !== "none" && !credential) throw new AuthError("연결 테스트에 사용할 토큰 또는 API 키를 입력해 주세요.", 400);
   const row: McpRow = { id: previous?.id || "test", user_id: userId, name: value.name, description: value.description, url: value.url, auth_type: value.authType, credential, enabled: 1, tool_timeout_seconds: value.toolTimeoutSeconds ?? VM_TOOL_TIMEOUT_SECONDS, kind: value.kind, created_at: "", updated_at: "" };
   return talkToServer(row.url, signal, async () => {
-    const client = await connectedClient(row, signal);
-    try { const result = await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" }); return { toolCount: result.tools.length, tools: result.tools.slice(0, 20).map(tool => tool.name) }; }
-    finally { await client.close().catch(() => undefined); }
+    const tools = await listServerTools(row, signal);
+    return { toolCount: tools.length, tools: tools.slice(0, 20).map(tool => tool.name) };
   });
 }
 
@@ -241,11 +258,7 @@ export async function mcpConnectionBindings(userId: string, connectionId: string
   const row = ownedRow(userId, connectionId);
   if (row.kind !== "vm") assertEntitled(userId);
   if (row.enabled !== 1) return [];
-  const tools = await talkToServer(row.url, signal, async () => {
-    const client = await connectedClient(row, signal);
-    try { return (await client.listTools(undefined, { signal: requestSignal(signal), cacheMode: "bypass" })).tools; }
-    finally { await client.close().catch(() => undefined); }
-  });
+  const tools = await talkToServer(row.url, signal, () => listServerTools(row, signal));
   const policies = toolPolicies(row.id);
   const bindings = new Map<string, McpToolBinding>();
   for (const tool of tools) {
@@ -272,13 +285,18 @@ export type McpToolProgress = { stage: "tool" | "storage"; progress: number; tot
  * notification from the server restarts it, so a long download that keeps reporting is never cut off. Files the
  * server marks for saving (see mcpStorageLink) are then streamed into the caller's private storage the same way.
  */
-export async function executeMcpTool(userId: string, binding: McpToolBinding, args: unknown, signal?: AbortSignal, onProgress?: (update: McpToolProgress) => void): Promise<{ result: unknown; content?: ModelContentPart[] }> {
+export async function executeMcpTool(userId: string, binding: McpToolBinding, args: unknown, signal?: AbortSignal, onProgress?: (update: McpToolProgress) => void, elicit?: (request: ElicitationRequest) => Promise<ElicitationAnswer>): Promise<{ result: unknown; content?: ModelContentPart[] }> {
   const row = ownedRow(userId, binding.connectionId);
   if (row.kind !== "vm") assertEntitled(userId);
   if (!row.enabled) throw new AuthError("이 MCP 연결은 비활성화되어 있습니다.", 403);
   if (row.kind === "vm" && isVmFileTool(binding.toolName)) return runVmFileTool(userId, binding.toolName, (args && typeof args === "object" ? args : {}) as Record<string, unknown>, signal ?? AbortSignal.timeout(row.tool_timeout_seconds * 1000), message => onProgress?.({ stage: "storage", progress: 0, message }));
   const timeoutMs = (row.tool_timeout_seconds || DEFAULT_MCP_TOOL_TIMEOUT_SECONDS) * 1000;
   const response = await talkToServer(row.url, signal, async () => {
+    // Google's Workspace servers: stateless calls, with the person approving data access when the server asks.
+    if (usesStatelessProtocol(row.url)) {
+      await assertNetworkTarget(row.user_id, row.url);
+      return await statelessToolCall(row.url, () => connectionToken(row), binding.toolName, args && typeof args === "object" ? args as Record<string, unknown> : {}, { fetch: guardedFetchFor(row.user_id), signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(Math.max(timeoutMs, 30_000) + 600_000)]) : AbortSignal.timeout(timeoutMs + 600_000), elicit }) as Awaited<ReturnType<Client["callTool"]>>;
+    }
     const client = await connectedClient(row, signal);
     const quiet = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;

@@ -199,8 +199,9 @@ export function functionLabel(name: string, locale: Locale) {
 }
 
 /** Which approval card a waiting call needs, read from what the server recorded on it: installed providers carry an approval request. */
-export function pendingApprovalKind(event: { arguments?: unknown }): "mcp" | undefined {
+export function pendingApprovalKind(event: { arguments?: unknown }): "mcp" | "elicitation" | undefined {
   const args = event.arguments && typeof event.arguments === "object" ? event.arguments as Record<string, unknown> : {};
+  if (args._mcpElicitation && typeof args._mcpElicitation === "object") return "elicitation";
   if (args._mcpApproval && typeof args._mcpApproval === "object") return "mcp";
   return undefined;
 }

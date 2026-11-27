@@ -195,3 +195,11 @@ MCP 연결마다 도구 정의를 모델에 어떻게 보낼지 고릅니다(마
 | 전체 | 서버가 보낸 그대로 |
 
 Google Gmail·Calendar 도구 39개는 전체로 보내면 약 105KB(도구 정의만으로 요청마다 수만 토큰)인데, 그중 81%가 입력 형식이고 절반 이상이 입력 항목 설명입니다.
+
+## MCP 승인 요청 (form elicitation)
+
+Google Workspace MCP 서버(`*.googleapis.com`)는 상태 없는 MCP 방식(프로토콜 `2026-07-28`)으로 부릅니다. 세션 없이 요청마다 `MCP-Protocol-Version`, `Mcp-Method`, (`tools/call`이면) `Mcp-Name` 헤더와 `params._meta`의 `io.modelcontextprotocol/protocolVersion`·`clientInfo`·`clientCapabilities`(`{"elicitation":{"form":{}}}`)를 보냅니다(`lib/mcp-stateless.ts`).
+
+- 승인을 지원한다고 알리지 않으면 Gmail은 메일을 `omittedContent: DATA_PROTECTION_POLICY`로 빼고 돌려줍니다.
+- 서버가 `resultType: "input_required"`와 `inputRequests`를 돌려주면 입력창 위에 승인 카드가 뜹니다. 선택지 하나짜리 질문은 선택지마다 버튼으로, 나머지는 작은 양식으로 보여 줍니다. 고른 답은 `params.requestState`·`params.inputResponses`에 담아 같은 호출을 다시 보냅니다(최대 4번). 답은 서버로만 가고 모델에게는 가지 않습니다.
+- 개인 에이전트는 응답할 사람이 없어 `decline`으로 답합니다. 일반 채팅에서 "이 도구 항상 허용"을 골라 두면 서버가 기억해 이후로는 묻지 않습니다.

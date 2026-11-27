@@ -3,6 +3,7 @@ import { executeMcpTool, listMcpConnections, mcpConnectionBindings, mcpEntitleme
 import { mcpToolAlias } from "../mcp-utils";
 import { vmDefaultPolicy } from "../vm";
 import { maskSecureInput, runSecureInputTool, SECURE_INPUT_SPECS } from "../secure-input";
+import type { ElicitationAnswer, ElicitationRequest } from "../mcp-stateless";
 import { DETAILS_TOOL, summarize, toolsWithDetails, trimDescription, trimSchema } from "../mcp-tool-definitions";
 import type { McpConnection, McpToolPolicy } from "../types";
 import { requestApproval, type ApprovalPolicy } from "./approval";
@@ -117,7 +118,15 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
           : update.message || (ko ? `진행 중 ${amount}` : `Working ${amount}`);
         ctx.updateEvent({ result: { inProgress: true, stage: update.stage, message: text.trim(), ...(update.total ? { progress: update.progress, total: update.total } : {}) } });
       };
-      const output = executeMcpTool(ctx.userId, binding, args, ctx.signal, show);
+      // A server asking the person to approve access (form elicitation) gets a card in the chat; the personal agent
+      // has nobody at the screen, so its requests are declined.
+      const elicit = ctx.agent ? undefined : async (request: ElicitationRequest): Promise<ElicitationAnswer> => {
+        ctx.updateEvent({ arguments: { ...args, _mcpElicitation: { connectionName: binding.connectionName, toolName: binding.toolName, ...request } } });
+        const answer = await ctx.waitForUser() as ElicitationAnswer | undefined;
+        ctx.updateEvent({ arguments: args });
+        return answer && ["accept", "decline", "cancel"].includes(answer.action) ? answer : { action: "cancel" };
+      };
+      const output = executeMcpTool(ctx.userId, binding, args, ctx.signal, show, elicit);
       return connection.kind === "vm" ? output.then(value => maskSecureInput(ctx.conversationId, value)) : output;
     },
   };

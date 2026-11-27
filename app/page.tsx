@@ -65,6 +65,7 @@ import { createClientId } from "@/lib/client-id";
 import { multipleChoiceAnswers, pendingMultipleChoiceEvent } from "@/lib/conversation-messages";
 import { secureInputTool } from "@/lib/secure-input-names";
 import { SecureInputCard } from "./secure-input-card";
+import { McpElicitationComposer } from "./mcp-elicitation-card";
 import { formatReasoningForDisplay, formatToolCallMarkers, getToolGroupLabel, getToolGroupState, getToolStatusLabel } from "@/lib/tool-presentation";
 import { APP_RELEASE_NAME } from "@/lib/version";
 import { followAfterScroll, isNearScrollBottom, SCROLL_INTENT_MS } from "@/lib/chat-scroll";
@@ -1947,7 +1948,7 @@ function Composer(props: { lmfCache?: { expiresAt: number; totalSeconds?: number
     {notice && !error && <div className="error-toast info-toast" role="status"><span>{notice}</span><button aria-label={c.cancel} onClick={clearNotice}><X size={15} /></button></div>}
     {repetition && <RepetitionAlertCard key={repetition.id} c={c} finding={repetition} onStop={onRepetitionStop} onRetry={onRepetitionRetry} onIgnore={onRepetitionIgnore} />}
     {pendingChoice && <MultipleChoiceComposer key={pendingChoice.id} c={c} event={pendingChoice} onSubmit={(value) => onChoiceSubmit(pendingChoice.id, value)} />}
-    {pendingApproval && (pendingApprovalKind(pendingApproval)==="mcp"?<McpApprovalComposer key={pendingApproval.id} c={c} event={pendingApproval} onSubmit={(value)=>onChoiceSubmit(pendingApproval.id,value)}/>:null)}
+    {pendingApproval && (pendingApprovalKind(pendingApproval)==="mcp"?<McpApprovalComposer key={pendingApproval.id} c={c} event={pendingApproval} onSubmit={(value)=>onChoiceSubmit(pendingApproval.id,value)}/>:pendingApprovalKind(pendingApproval)==="elicitation"?<McpElicitationComposer key={pendingApproval.id} ko={c===translations.ko} event={pendingApproval} onSubmit={(value)=>onChoiceSubmit(pendingApproval.id,value)}/>:null)}
     <form ref={formRef} className={`composer ${expanded ? "expanded" : ""}`} onSubmit={sendMessage}>
       <input ref={fileRef} className="visually-hidden" type="file" accept={`image/jpeg,image/png,image/gif,image/webp,image/avif,application/pdf,${TEXT_ATTACHMENT_ACCEPT}`} multiple onChange={(event) => { onFiles(Array.from(event.target.files || [])); event.target.value = ""; }} />
       {queuedPrompts.length > 0 && <div className="queued-prompts"><p><span>{c.queuedMessages}</span><b>{queuedPrompts.length}</b></p>{queuedPrompts.map((prompt, index) => <div key={prompt.id}><b>{index + 1}</b><span><strong>{prompt.content || c.imageChat}</strong>{prompt.attachments.length > 0 && <small>{prompt.attachments.length} {c.imagesAttached}</small>}</span><button type="button" title={c.removeQueuedMessage} aria-label={c.removeQueuedMessage} onClick={() => onRemoveQueuedPrompt(prompt.id)}><X size={13} /></button></div>)}</div>}
