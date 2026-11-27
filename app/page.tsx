@@ -478,6 +478,8 @@ export default function Home() {
   // The Agent tab is a placeholder until the feature is designed: only the sidebar and model picker remain.
   const [agentOpen, setAgentOpen] = useState(false);
   const [agentState, setAgentState] = useState<AgentState | null>(null);
+  // Why the agent screen is still waiting, shown under the spinner while the state cannot be read (it keeps retrying).
+  const [agentError, setAgentError] = useState("");
   const [agentDialog, setAgentDialog] = useState<{ kind: "settings" | "runs" | "memory" | "event" | "todo"; runId?: string } | null>(null);
   const agentRevisionRef = useRef<number | undefined>(undefined);
   const agentWatchingRef = useRef(false);
@@ -654,12 +656,17 @@ export default function Home() {
 
   // Inside the mobile app with notifications on, the app's current token is registered again after each sign-in or
   // launch: Firebase replaces tokens from time to time, and the account may have changed since it was turned on.
+  // The app asks for notification permission on its first launch; when that is answered after the page loaded, it
+  // says so with `nnui-native-push-ready` and the token is registered then.
   useEffect(() => {
     if (!auth?.authenticated || !isNativeShell()) return;
-    nativePush("status").then(reply => {
+    const register = () => nativePush("status").then(reply => {
       if (!reply.enabled || reply.permission !== "granted" || !reply.token) return;
       return fetch("/api/agent/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ native: { token: reply.token, platform: reply.platform, projectId: reply.projectId } }) });
     }).catch(() => undefined);
+    void register();
+    window.addEventListener("nnui-native-push-ready", register);
+    return () => window.removeEventListener("nnui-native-push-ready", register);
   }, [auth?.authenticated]);
 
   // The app is sized to the visible viewport. Every geometry change lands in one animation frame and
@@ -1031,6 +1038,10 @@ export default function Home() {
   }, [conversation]);
   const userFirstName = config.profile.name.trim().split(/\s+/)[0];
   const temporaryActive = temporaryMode || conversation?.temporary === true;
+  // Animate the greeting only when the mode changes on screen, not on every visit to a new chat.
+  const [modeSwapped, setModeSwapped] = useState(false);
+  const previousTemporary = useRef(temporaryActive);
+  useEffect(() => { if (previousTemporary.current !== temporaryActive) setModeSwapped(true); previousTemporary.current = temporaryActive; }, [temporaryActive]);
   const [greeting, setGreeting] = useState("");
   const [mainVisit, setMainVisit] = useState(0);
   const lastGreetings = useRef(new Map<string, string>());
@@ -1196,15 +1207,19 @@ export default function Home() {
   /** Opens the agent: its main chat takes the chat surface, with the control panel beside it. */
   function openAgent(replaceUrl = false) {
     newChat(replaceUrl);
-    agentOpenRef.current = true; setAgentOpen(true); setAgentState(null); agentRevisionRef.current = undefined; agentWatchingRef.current = false;
+    agentOpenRef.current = true; setAgentOpen(true); setAgentState(null); setAgentError(""); agentRevisionRef.current = undefined; agentWatchingRef.current = false;
     window.history.replaceState({}, "", "/?agent=1");
     window.setTimeout(() => agentSyncRef.current(), 0);
   }
 
   /** Reads the agent's state; reloads its chat when something changed and follows a reply while one is being written. */
   async function syncAgent() {
-    const response = await fetch(`/api/agent?language=${locale === "ko" ? "ko" : "en"}`, { cache: "no-store" }).catch(() => undefined);
-    if (!response?.ok) return;
+    try { await readAgent(); setAgentError(""); }
+    catch (error) { setAgentError(error instanceof Error ? error.message : String(error)); }
+  }
+  async function readAgent() {
+    const response = await fetch(`/api/agent?language=${locale === "ko" ? "ko" : "en"}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`${response.status} ${(await response.json().catch(() => ({})) as { error?: string }).error || response.statusText}`.trim());
     const next = await response.json() as AgentState;
     setAgentState(next);
     if (!next.access.enabled || !next.conversationId) return;
@@ -1907,7 +1922,7 @@ export default function Home() {
           {modelMenuMounted && <div className={`popover model-popover ${modelMenuClosing ? "closing" : ""}`}><div className="popover-heading"><span>{c.availableModels}</span>{checkingModelServers ? <LoaderCircle className="spin" size={13} aria-label={c.checkingModelServers} /> : <small>{onlineModels.length}</small>}</div>{!checkingModelServers && serversOffline && <p className="model-popover-empty">{c.noOnlineModels}</p>}{pickerModels.map(renderPickerModel)}<div className="model-popover-actions"><button className="default-choice-action" disabled={!selectedModel || config.preferences.defaultModelId === selectedModel.id} onClick={() => void setDefaultSelection("model")}><Check size={14} />{config.preferences.defaultModelId === selectedModel?.id ? c.defaultModelActive : c.useAsDefault}</button>{canManageInference && <button className="unload-model-action" disabled={unloadingModel} title={c.unloadModel} onClick={() => void unloadModel()}>{unloadingModel ? <LoaderCircle className="spin" size={14} /> : <Power size={14} />}{unloadingModel ? c.unloadingModel : c.unloadModel}</button>}</div>{canManageInference && modelControlNotice && <p className={`model-control-notice ${modelControlNotice.error ? "error" : ""}`} role="status">{modelControlNotice.message}</p>}</div>}
         </div>
 
-        {agentOpen && !agentState?.access.enabled ? <div className="conversation-stage agent-stage"><div className="idle-center"><div className="welcome">{agentState ? <><h1>{locale === "ko" ? "에이전트를 쓸 수 없습니다" : "The agent is not available"}</h1><p>{locale === "ko" ? "지금 플랜에서는 에이전트가 꺼져 있습니다. 관리자에게 문의해 주세요." : "Your plan does not include the agent. Ask an administrator."}</p></> : <LoaderCircle className="spin" size={22} />}</div></div></div> : <>
+        {agentOpen && !agentState?.access.enabled ? <div className="conversation-stage agent-stage"><div className="idle-center"><div className="welcome">{agentState ? <><h1>{locale === "ko" ? "에이전트를 쓸 수 없습니다" : "The agent is not available"}</h1><p>{locale === "ko" ? "지금 플랜에서는 에이전트가 꺼져 있습니다. 관리자에게 문의해 주세요." : "Your plan does not include the agent. Ask an administrator."}</p></> : <><LoaderCircle className="spin" size={22} />{agentError && <p className="agent-load-error">{locale === "ko" ? `에이전트를 불러오지 못했습니다: ${agentError}. 다시 시도하는 중입니다.` : `Could not load the agent: ${agentError}. Retrying.`}</p>}</>}</div></div></div> : <>
         {agentOpen && agentState && <AgentControlPanel docked={agentDocked} ko={locale === "ko"} state={agentState} cache={lmfCache && lmfCache.conversationId === conversation?.id ? lmfCache : undefined} onChanged={() => { agentRevisionRef.current = undefined; agentSyncRef.current(); }} onOpen={(target, runId) => { if (target === "context") { setContextViewOpen(true); void refreshContextState(); } else setAgentDialog({ kind: target, runId }); }} />}
         {!agentOpen && <div className="surface-actions">
           {temporaryActive
@@ -1921,7 +1936,7 @@ export default function Home() {
         </div>}
 
         <div className="conversation-stage">
-          {!messages.length && !agentOpen ? <div className="idle-center"><div className="welcome"><h1>{agentOpen ? (locale === "ko" ? "무엇을 맡길까요?" : "What should I take care of?") : temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{agentOpen ? (locale === "ko" ? "일정·메일 확인, 알림 예약, 사이트·채널 추적처럼 계속 돌봐야 하는 일을 맡겨 보세요." : "Hand over ongoing work: checking schedules and mail, reminders, watching sites and channels.") : temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer hideTools={agentOpen} c={c} organizationNotice={config.organizationMode === true && !temporaryActive} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} lmfCache={lmfCache && lmfCache.modelId === selectedModel?.id && lmfCache.conversationId === conversation?.id ? lmfCache : undefined} onContextOpen={() => { if (!isGenerating) void refreshRouting(selectedModel?.id, selectedAliasBase?.id, conversation?.id, "next"); }} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} notice={notice} clearNotice={() => setNotice("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingApproval={pendingApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} /></div> : <>
+          {!messages.length && !agentOpen ? <div className="idle-center"><div key={temporaryActive ? "temporary" : "regular"} className={`welcome ${modeSwapped ? "mode-swap" : ""}`}><h1>{agentOpen ? (locale === "ko" ? "무엇을 맡길까요?" : "What should I take care of?") : temporaryActive ? c.temporaryGreeting : greeting}</h1><p>{agentOpen ? (locale === "ko" ? "일정·메일 확인, 알림 예약, 사이트·채널 추적처럼 계속 돌봐야 하는 일을 맡겨 보세요." : "Hand over ongoing work: checking schedules and mail, reminders, watching sites and channels.") : temporaryActive ? c.temporaryChatHint : c.welcome}</p></div><Composer hideTools={agentOpen} c={c} organizationNotice={config.organizationMode === true && !temporaryActive} appearance={appearance} draft={draft} setDraft={setDraft} sendMessage={sendMessage} keyDown={handleComposerKeyDown} isGenerating={isGenerating} repetition={visibleRepetition} onRepetitionStop={() => void stopRepeatingResponse(false)} onRepetitionRetry={() => void stopRepeatingResponse(true)} onRepetitionIgnore={ignoreRepetition} queuedPrompts={queuedPrompts} onRemoveQueuedPrompt={removeQueuedPrompt} selectedModel={selectedModel} models={config.models} selectedPreset={selectedPreset} contextBreakdown={contextBreakdown} lmfCache={lmfCache && lmfCache.modelId === selectedModel?.id && lmfCache.conversationId === conversation?.id ? lmfCache : undefined} onContextOpen={() => { if (!isGenerating) void refreshRouting(selectedModel?.id, selectedAliasBase?.id, conversation?.id, "next"); }} harnessSettings={config.harnessSettings} presetOpen={presetMenuOpen} setPresetOpen={setPresetMenuOpen} setPreset={setSelectedPresetId} defaultReasoningPresetId={config.preferences.defaultReasoningPresetId} setDefaultReasoning={() => void setDefaultSelection("reasoning")} rememberReasoning={rememberReasoning} onEditSystemPrompt={canEditSystemPrompt ? () => { setPresetMenuOpen(false); setSystemPromptOpen(true); } : undefined} error={error} clearError={() => setError("")} notice={notice} clearNotice={() => setNotice("")} attachments={draftAttachments} maxAttachments={config.toolSettings.maxAttachmentsPerMessage} uploadingImages={uploadingImages} onFiles={uploadImages} onOpenStorage={()=>setStoragePickerOpen(true)} onRemoveAttachment={removeDraftAttachment} pendingChoice={pendingChoice} pendingApproval={pendingApproval} onChoiceSubmit={submitToolInput} sendHeld={sendHeld} switchNotice={presetMenuOpen ? "" : switchNotice} /></div> : <>
             <div className="thread-shell">
               <div className={`thread ${activityHidden ? "activity-hidden" : ""}`} ref={threadRef} onScroll={handleThreadScroll} aria-live="polite">
                 {contextViewOpen ? <ContextView ko={locale === "ko"} messages={messages} state={branchContext} includeReasoning={rememberReasoning} systemPrompt={selectedSystemPrompt} summaryEditing={contextSummaryEditing} setSummaryEditing={setContextSummaryEditing} onSave={saveContextState} confirm={askConfirm} onClose={() => setContextViewOpen(false)} /> : <>
