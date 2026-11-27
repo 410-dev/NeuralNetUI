@@ -6,6 +6,7 @@ import { connectionEndpoints, routeConnection } from "./connection-routing";
 import { readPersonalSampling, resolveSampling, samplingRequestFields } from "./sampling-params";
 import { readUserPreferences } from "./auth";
 import { effectiveContextWindowTokens } from "./model-context";
+import { keptTurnsStart } from "./context-state";
 import { reasoningEffort } from "./model-edits";
 import { modelResidency } from "./residency-runtime";
 import { createResidencyAdapter } from "./residency-adapter";
@@ -161,16 +162,20 @@ function summarySafe(value: unknown): unknown {
 }
 
 export type ContextPersistence = {
-  /** Stored message id covered when everything before the newest user message is folded or dropped. */
-  throughMessageId?: string;
-  save: (change: { summary?: string; droppedDetails?: boolean }) => void;
+  /** Records a summary or dropped details covering everything before the newest request and its `keptTurns` pairs. */
+  save: (change: { summary?: string; droppedDetails?: boolean; keptTurns: number }) => void;
 };
+
+/** Room a summary takes in the context: its output cap (see summarizeContext). */
+const SUMMARY_ALLOWANCE = 2048;
 
 /**
  * Send-time context handling. The branch's stored state (summary, dropped details, edits) is already applied to
  * `original`. Rolling without Drop Details only trims at the model limit. Otherwise, once usage reaches the threshold:
  * Drop Details first (when on), then the base method if it is still over: rolling trims the oldest turns, compacting
- * summarizes everything before the newest user message. Summaries and dropped details are stored for the branch.
+ * summarizes the earlier turns. Both keep the newest request and the last `compactKeepTurns` question-and-answer pairs
+ * word for word; when those alone would not fit under the threshold, fewer pairs are kept. Summaries and dropped
+ * details are stored for the branch.
  */
 export async function prepareContext(ctx: Context, original: Message[], options: { persistence?: ContextPersistence; overhead?: number; measured?: number; onCompaction?: (record: CompactionRecord) => void; onUpdate?: (record: CompactionUpdate) => void } = {}): Promise<Message[]> {
   const settings = ctx.config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
@@ -181,18 +186,22 @@ export async function prepareContext(ctx: Context, original: Message[], options:
   if (settings.contextMode === "rolling" && !settings.dropDetailsFirst) return rollingMessages(original, budget);
   const trigger = Math.min(budget, window * settings.compactThreshold / 100 - overhead);
   if (projectedInputTokens(estimateTokens(original), options.measured) < trigger) return settings.contextMode === "rolling" ? rollingMessages(original, budget) : original;
-  const latestUser = original.findLastIndex(message => message.role === "user");
+  const keepTurns = Math.max(0, settings.compactKeepTurns ?? DEFAULT_HARNESS_SETTINGS.compactKeepTurns);
   let current = original;
   if (settings.dropDetailsFirst) {
-    current = dropContextDetails(current, latestUser, options.onCompaction);
-    if (current !== original && estimateTokens(current) < estimateTokens(original)) options.persistence?.save({ droppedDetails: true });
+    current = dropContextDetails(current, keptTurnsStart(current, keepTurns, true), options.onCompaction);
+    if (current !== original && estimateTokens(current) < estimateTokens(original)) options.persistence?.save({ droppedDetails: true, keptTurns: keepTurns });
     if (estimateTokens(current) < trigger) return current;
   }
   if (settings.contextMode === "rolling") return rollContext(current, trigger, budget, options.onCompaction);
-  const summarized = await summarizeBefore(ctx, current, current.findLastIndex(message => message.role === "user"), options.onCompaction, options.onUpdate);
+  // Keep as many recent pairs as fit under the threshold next to the summary.
+  const systemTokens = estimateTokens(current.filter(message => message.role === "system"));
+  let kept = keepTurns;
+  while (kept > 0 && systemTokens + SUMMARY_ALLOWANCE + estimateTokens(current.slice(keptTurnsStart(current, kept, true)).filter(message => message.role !== "system")) >= trigger) kept--;
+  const summarized = await summarizeBefore(ctx, current, keptTurnsStart(current, kept, true), options.onCompaction, options.onUpdate);
   if (estimateTokens(summarized.messages) >= trigger) throw new Error("Compacted context still reaches the compaction threshold. Shorten the latest prompt, increase the threshold, or increase the model context window.");
   ctx.signal.throwIfAborted();
-  if (summarized.summary !== undefined) options.persistence?.save({ summary: summarized.summary });
+  if (summarized.summary !== undefined) options.persistence?.save({ summary: summarized.summary, keptTurns: kept });
   return summarized.messages;
 }
 

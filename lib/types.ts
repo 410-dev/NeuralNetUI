@@ -318,6 +318,8 @@ export interface HarnessSettings {
   /** Cap on tokens the model may generate per response. Zero leaves it to the context window. */
   maxOutputTokens: number;
   compactThreshold: number;
+  /** Recent question-and-answer pairs kept word for word when earlier turns are summarized or their details dropped. */
+  compactKeepTurns: number;
   compactModelId: string;
   compactEffort: string;
   compactPrompt: string;

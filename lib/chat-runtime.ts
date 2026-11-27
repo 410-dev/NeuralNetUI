@@ -3,7 +3,7 @@ import { nativeChatResponse, observeLmStudioPrefill } from "./lm-studio-progress
 import { CONTINUE_AFTER_DROP_PROMPT, contextOverflowDetails, DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rollingMessages, contextThresholdReached, usesCompactionThreshold, VISUAL_TOOL_CONTENT_PREFIX } from "./harness";
 import { contextUsage } from "./context-usage";
 import { harnessCompletion, prepareContext, compactForResume, compactToolContext, dropContextDetails, rollContext, HISTORICAL_SUMMARY_PREFIX, type CompactionRecord, type CompactionUpdate } from "./harness-runtime";
-import { applyContextState, messageBeforeLatestUser, type ContextState } from "./context-state";
+import { applyContextState, messageBeforeKeptTurns, type ContextState } from "./context-state";
 import { loadContextState, updateContextState } from "./context-store";
 import { effectiveContextWindowTokens } from "./model-context";
 import { db } from "./database";
@@ -698,11 +698,12 @@ async function run(job: ChatJob) {
     let measuredInput = contextUsage(branchMessages, job.input.sendReasoning === true, "", systemPrompt, 0, contextState).total;
     let compactedBeforeSending = false;
     const messageCountBeforePreparation = messages.length;
-    const throughMessageId = messageBeforeLatestUser(job.input.messages);
     messages = await prepareContext(harnessContext, messages, {
       overhead: estimateTokens(tools), measured: measuredInput,
       onCompaction: record => { compactedBeforeSending = true; completeCompaction(job, record); }, onUpdate: record => updateCompaction(job, record),
-      persistence: { throughMessageId, save: change => {
+      persistence: { save: change => {
+        // The stored messages before the newest request and the pairs the compaction kept.
+        const throughMessageId = messageBeforeKeptTurns(job.input.messages, change.keptTurns, true);
         if (!throughMessageId) return;
         try {
           updateContextState(job.input.branchId, state => ({ ...state,

@@ -149,3 +149,24 @@ export function messageBeforeLatestUser(messages: Array<{ id?: string; role: str
   const latest = messages.findLastIndex(message => message.role === "user");
   return latest > 0 ? messages[latest - 1].id : undefined;
 }
+
+/**
+ * Where the kept part of a conversation starts when earlier turns are compacted: at the user message that opens the
+ * `keepTurns`-th most recent question-and-answer pair. `pending` means the newest user message is the request being
+ * sent now (not yet answered), which is always kept on top of the pairs. With fewer turns than that, as many are kept
+ * as still leaves the oldest turn to fold, so a conversation of a few long turns can still be compacted. Returns the
+ * message count when everything may be folded (nothing kept).
+ */
+export function keptTurnsStart(messages: Array<{ role: string }>, keepTurns: number, pending: boolean): number {
+  const users = messages.flatMap((message, index) => message.role === "user" ? [index] : []);
+  const count = Math.max(0, Math.floor(keepTurns)) + (pending ? 1 : 0);
+  if (!count) return messages.length;
+  if (users.length <= 1) return users.length ? users[0] : messages.length;
+  return users[Math.max(1, users.length - count)];
+}
+
+/** The stored message just before the kept turns: what a compaction keeping `keepTurns` pairs covers. */
+export function messageBeforeKeptTurns(messages: Array<{ id?: string; role: string }>, keepTurns: number, pending: boolean) {
+  const start = keptTurnsStart(messages, keepTurns, pending);
+  return start > 0 ? messages[start - 1].id : undefined;
+}

@@ -57,6 +57,7 @@ const harnessSettingsValuesSchema = z.object({
   resumePrompt: z.string().trim().min(1).max(32000).default(DEFAULT_HARNESS_SETTINGS.resumePrompt),
   maxCompactionResumes: z.number().int().min(0).max(100).default(DEFAULT_HARNESS_SETTINGS.maxCompactionResumes),
   compactThreshold: z.number().int().min(10).max(95),
+  compactKeepTurns: z.number().int().min(0).max(20).default(DEFAULT_HARNESS_SETTINGS.compactKeepTurns),
   compactModelId: z.string().max(500), compactEffort: z.string().max(40), compactPrompt: z.string().trim().min(1).max(32000),
   compactPromptPosition: z.enum(["before", "after"]).default(DEFAULT_HARNESS_SETTINGS.compactPromptPosition),
   titleEnabled: z.boolean(), titleTiming: z.enum(["before", "after"]), titleModelId: z.string().max(500),

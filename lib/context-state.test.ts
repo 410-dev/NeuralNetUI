@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyContextState, isSummarized, messageBeforeLatestUser, normalizeContextState, withoutContentOverride, type ContextSourceMessage } from "./context-state.ts";
+import { applyContextState, isSummarized, keptTurnsStart, messageBeforeKeptTurns, messageBeforeLatestUser, normalizeContextState, withoutContentOverride, type ContextSourceMessage } from "./context-state.ts";
 import { contextUsage } from "./context-usage.ts";
 
 const tool = (id: string) => ({ id, name: "internet_search", status: "completed" as const, arguments: { query: id }, result: { hits: [id] }, startedAt: "2026-11-17T00:00:00Z" });
@@ -61,4 +61,27 @@ test("context usage follows the stored state", () => {
   assert.ok(compacted.total < full.total);
   assert.ok(compacted.summary > 0);
   assert.equal(compacted.tools, 0);
+});
+
+
+test("compaction keeps the last pairs word for word", () => {
+  const turns = (n: number) => Array.from({ length: n }, (_, i) => [{ id: `u${i + 1}`, role: "user" }, { id: `a${i + 1}`, role: "assistant" }]).flat();
+  const five = turns(5);
+  // /compact after an answer: keep the last 3 pairs (u3..a5), fold u1..a2
+  assert.equal(messageBeforeKeptTurns(five, 3, false), "a2");
+  // at send time the newest request is pending on top of the pairs
+  const sending = [...five, { id: "u6", role: "user" }];
+  assert.equal(messageBeforeKeptTurns(sending, 3, true), "a2");
+  assert.equal(keptTurnsStart(sending, 3, true), 4);
+  // 0 pairs: fold everything before the request (the former behaviour)
+  assert.equal(messageBeforeKeptTurns(sending, 0, true), "a5");
+  assert.equal(messageBeforeKeptTurns(five, 0, false), "a5");
+  // shorter than the setting: still fold the oldest turn
+  assert.equal(messageBeforeKeptTurns(turns(2), 3, false), "a1");
+  assert.equal(messageBeforeKeptTurns([...turns(1), { id: "u2", role: "user" }], 3, true), "a1");
+  // nothing earlier to fold
+  assert.equal(messageBeforeKeptTurns(turns(1), 3, false), undefined);
+  // tool and assistant steps between users belong to their pair
+  const withTools = [{ id: "u1", role: "user" }, { id: "a1", role: "assistant" }, { id: "t1", role: "tool" }, { id: "a1b", role: "assistant" }, { id: "u2", role: "user" }, { id: "a2", role: "assistant" }];
+  assert.equal(messageBeforeKeptTurns(withTools, 1, false), "a1b");
 });

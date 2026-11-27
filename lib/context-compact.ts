@@ -1,6 +1,6 @@
 import { AuthError } from "./auth";
 import { getChatJob, runtimeModel } from "./chat-runtime";
-import { applyContextState, type ContextState } from "./context-state";
+import { applyContextState, messageBeforeKeptTurns, type ContextState } from "./context-state";
 import { loadContextState, saveContextState } from "./context-store";
 import { readConfig } from "./config";
 import { readConversation } from "./conversations";
@@ -13,8 +13,10 @@ import type { StoredMessage } from "./types";
 /**
  * /compact from the composer. "default" follows the context settings right away instead of waiting for the threshold:
  * drop details when Drop Details is on or the base method is rolling, then summarize when the base method is
- * compacting (if Drop Details was not enough, or is off). "summarize" always summarizes. Summaries call a model and
- * count toward the account's token usage. The result is stored in the branch's context state.
+ * compacting (if Drop Details was not enough, or is off). "summarize" always summarizes. Both keep the last
+ * `compactKeepTurns` question-and-answer pairs word for word (fewer when the conversation is shorter, so the oldest
+ * turn can still be folded). Summaries call a model and count toward the account's token usage. The result is stored
+ * in the branch's context state.
  */
 export type CompactMode = "default" | "summarize";
 export type CompactResult = { state: ContextState; method: "drop" | "summary" | "none"; savedTokens: number; seconds: number; startedAt: number; summary?: string; reasoning?: string };
@@ -39,10 +41,12 @@ export async function compactConversation(input: { userId: string; conversationI
   const job = getChatJob(input.conversationId, input.userId);
   if (job && (job.status === "running" || job.status === "waiting")) throw new AuthError("응답을 생성하는 동안에는 컨텍스트를 압축할 수 없습니다.", 409);
   const messages = branch.messages;
-  const lastId = messages.at(-1)?.id;
-  if (!lastId) throw new AuthError("압축할 대화가 없습니다.", 400);
+  if (!messages.length) throw new AuthError("압축할 대화가 없습니다.", 400);
   const config = await readConfig();
   const harness = config.harnessSettings || DEFAULT_HARNESS_SETTINGS;
+  // Everything before the kept pairs; the newest answer is complete, so no request is pending.
+  const lastId = messageBeforeKeptTurns(messages, harness.compactKeepTurns ?? DEFAULT_HARNESS_SETTINGS.compactKeepTurns, false);
+  if (!lastId) throw new AuthError("요약할 이전 대화가 없습니다. 최근 대화는 그대로 유지됩니다.", 400);
   const { model, selected, base } = runtimeModel(config, { modelId: input.modelId || conversation.modelId, aliasBaseModelId: input.aliasBaseModelId }, input.userId);
   const includeReasoning = (selected.rememberReasoning ?? base.rememberReasoning) === true;
   const size = (state: ContextState) => estimateTokens(modelView(messages, state, includeReasoning));
@@ -60,7 +64,8 @@ export async function compactConversation(input: { userId: string; conversationI
   const summarize = input.mode === "summarize" || harness.contextMode === "compacting" && (!harness.dropDetailsFirst || !trigger || size(next) >= trigger);
   if (summarize) {
     assertPlanAccess(input.userId, model.id, model.sourceModel);
-    const view = modelView(messages, next, includeReasoning);
+    const through = messages.findIndex(message => message.id === lastId);
+    const view = modelView(messages.slice(0, through + 1), next, includeReasoning);
     if (!view.history.length && !view.summary) throw new AuthError("요약할 대화가 없습니다.", 400);
     const compaction = await summarizeContext({ config, model, userId: input.userId, sessionId: input.conversationId, signal: input.signal, onPhase: () => undefined }, view, input.onUpdate);
     reasoning = compaction.reasoning;
