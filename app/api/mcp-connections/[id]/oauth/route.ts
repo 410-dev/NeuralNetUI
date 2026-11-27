@@ -10,7 +10,10 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const user = requireUser(request); const { id } = await context.params;
-    const redirectUri = `${publicOrigin(request)}${MCP_OAUTH_CALLBACK_PATH}`;
+    // The address the person sees NeuralNetUI at (the browser's Origin), which is what the dialog shows to register.
+    const origin = request.headers.get("origin");
+    const redirectUri = `${origin && /^https?:\/\/[^/\s]+$/.test(origin) ? origin : publicOrigin(request)}${MCP_OAUTH_CALLBACK_PATH}`;
+    console.info(`MCP OAuth sign-in for connection ${id}: redirect_uri ${redirectUri}`);
     return Response.json({ url: startOAuth(user.id, id, redirectUri), redirectUri });
   } catch (error) { return authErrorResponse(error); }
 }

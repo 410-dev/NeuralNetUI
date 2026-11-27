@@ -62,9 +62,9 @@ function McpConnectionDialog({ ko, initial, onClose, onSaved }: { ko: boolean; i
     setSigningIn(true); setNotice("");
     try {
       const connection = await persist();
-      const started = await readApiResponse<{ url: string }>(await fetch(`/api/mcp-connections/${connection.id}/oauth`, { method: "POST" }), ko ? "ko" : "en");
+      const started = await readApiResponse<{ url: string; redirectUri: string }>(await fetch(`/api/mcp-connections/${connection.id}/oauth`, { method: "POST" }), ko ? "ko" : "en");
       if (popup && !popup.closed) popup.location.href = started.url; else window.open(started.url, "_blank");
-      setNotice(ko ? "새 창에서 로그인하고 권한을 허용해 주세요." : "Sign in and allow access in the new window.");
+      setNotice(ko ? `새 창에서 로그인하고 권한을 허용해 주세요. (리디렉션 URI: ${started.redirectUri})` : `Sign in and allow access in the new window. (Redirect URI: ${started.redirectUri})`);
       const before = connection.updatedAt;
       const deadline = Date.now() + 10 * 60_000;
       while (Date.now() < deadline) {
