@@ -681,11 +681,7 @@ export default function Home() {
       frame = 0;
       const composerFocused = document.activeElement instanceof HTMLTextAreaElement && Boolean(document.activeElement.closest(".composer"));
       let height: number, top: number;
-      if (nativeShell) {
-        // Read the full height only while the keyboard is down, in case the WebView also shrinks for it.
-        if (!nativeInset) restingHeight = window.innerHeight;
-        height = Math.max(0, restingHeight - nativeInset); top = 0;
-      }
+      if (nativeShell) { height = Math.max(0, restingHeight - nativeInset); top = 0; }
       else {
         height = Math.round(viewport?.height || window.innerHeight);
         top = Math.round(viewport?.offsetTop || 0);
@@ -700,6 +696,9 @@ export default function Home() {
       last = { height, top, inset, open };
     };
     const schedule = () => { if (!frame) frame = requestAnimationFrame(apply); };
+    // The app also shrinks the WebView once its keyboard is up and grows it back as the keyboard goes down, so the
+    // full height is only read from a resize while no keyboard is reported (a rotation, the WebView growing back).
+    const onWindowResize = () => { if (nativeShell && !nativeInset) restingHeight = window.innerHeight; schedule(); };
     const onNativeKeyboard = (event: Event) => {
       const detail = (event as CustomEvent<{ height?: number; duration?: number }>).detail || {};
       nativeInset = Math.max(0, Math.round(Number(detail.height) || 0));
@@ -715,7 +714,7 @@ export default function Home() {
     apply();
     viewport?.addEventListener("resize", schedule);
     viewport?.addEventListener("scroll", schedule);
-    window.addEventListener("resize", schedule);
+    window.addEventListener("resize", onWindowResize);
     document.addEventListener("focusin", schedule);
     document.addEventListener("focusout", schedule);
     return () => {
@@ -725,7 +724,7 @@ export default function Home() {
       root.classList.remove("native-shell", "native-keyboard-moving");
       viewport?.removeEventListener("resize", schedule);
       viewport?.removeEventListener("scroll", schedule);
-      window.removeEventListener("resize", schedule);
+      window.removeEventListener("resize", onWindowResize);
       document.removeEventListener("focusin", schedule);
       document.removeEventListener("focusout", schedule);
       root.classList.remove("keyboard-open");
