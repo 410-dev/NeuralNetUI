@@ -54,7 +54,7 @@ export interface ToolProviderManifest {
    */
   clientRenderer?: "multiple-choice" | "location" | "code-runner";
   /** Wait phase shown while the model is still streaming this tool's arguments. */
-  streamingPhase?: "creating-artifact";
+  streamingPhase?: "creating-artifact" | "creating-ui";
   /** Completed calls are drawn as their own card in the transcript instead of in the tool activity list. */
   transcriptCard?: "multiple-choice" | "artifact" | "a2ui";
 }
@@ -145,16 +145,16 @@ export const BUILTIN_TOOL_PROVIDERS: readonly ToolProviderManifest[] = [
     streamingPhase: "creating-artifact", transcriptCard: "artifact",
   },
   {
-    id: "a2ui", origin: "builtin", section: "skill", order: 10, icon: "layout", defaultEnabled: false,
+    id: "a2ui", origin: "builtin", section: "skill", order: 20, icon: "layout", defaultEnabled: false,
     label: text("Generative UI (A2UI)", "생성형 UI (A2UI)"), description: text("The model draws cards, forms, lists and dialogs you can use", "모델이 카드·폼·목록·대화상자를 직접 그려 보여줌"),
     functions: [{ name: "render_ui", label: text("Render UI", "UI 그리기"), description: text("Shows A2UI v1.0 surfaces in the chat", "채팅에 A2UI v1.0 화면 표시") }],
-    transcriptCard: "a2ui",
+    streamingPhase: "creating-ui", transcriptCard: "a2ui",
   },
   {
-    id: "a2ui-express", origin: "builtin", section: "skill", order: 20, icon: "layout", defaultEnabled: false,
+    id: "a2ui-express", origin: "builtin", section: "skill", order: 10, icon: "layout", defaultEnabled: true,
     label: text("Generative UI (A2UI Express)", "생성형 UI (A2UI Express)"), description: text("Same UI from Google's compact Express DSL: far fewer output tokens", "구글의 압축 문법 Express로 같은 UI를 그림 · 출력 토큰이 훨씬 적음"),
     functions: [{ name: "render_ui_express", label: text("Render UI (Express)", "UI 그리기 (Express)"), description: text("Compiles A2UI Express to v1.0 and shows it", "A2UI Express를 v1.0으로 컴파일해 표시") }],
-    transcriptCard: "a2ui",
+    streamingPhase: "creating-ui", transcriptCard: "a2ui",
   },
 ];
 

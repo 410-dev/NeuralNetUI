@@ -40,7 +40,7 @@ export function A2uiEventCard({ event }: { event: ToolEvent }) {
   const conversation = useContext(ConversationContext);
   const ko = conversation?.ko ?? true;
   const result = event.result && typeof event.result === "object" ? event.result as { ok?: boolean; errors?: string[] } : undefined;
-  if (event.status === "calling" || event.status === "waiting") return <div className="a2ui-status"><LoaderCircle size={14} className="spin" />{ko ? "UI를 그리는 중…" : "Drawing the UI…"}</div>;
+  if (event.status === "calling" || event.status === "waiting") return <A2uiDrawing ko={ko} />;
   if (event.status !== "completed" || !result) return null;
   if (result.ok !== true) return <details className="a2ui-status a2ui-rejected"><summary><CircleAlert size={14} />{ko ? `UI 오류 ${result.errors?.length ?? 0}건 · 모델이 고쳐서 다시 그립니다` : `${result.errors?.length ?? 0} UI problems · the model redraws it`}</summary><ul>{(result.errors || []).map((error, index) => <li key={index}>{error}</li>)}</ul></details>;
   const created = Object.values(conversation?.surfaces || {}).filter(surface => surface.createdBy === event.id);
@@ -160,7 +160,7 @@ function renderComponent(component: A2uiComponent, scope: EvalScope, depth: numb
     }
     case "Icon": return <A2Icon value={component.name} scope={scope} />;
     case "Video": { const url = resolveString(component.url, scope); return /^https?:/i.test(url) ? <video className="a2ui-media" src={url} poster={resolveString(component.posterUrl, scope) || undefined} controls playsInline preload="metadata" /> : null; }
-    case "AudioPlayer": { const url = resolveString(component.url, scope); return /^https?:/i.test(url) ? <div className="a2ui-audio">{component.description !== undefined && <small>{resolveString(component.description, scope)}</small>}<audio src={url} controls preload="metadata" /></div> : null; }
+    case "AudioPlayer": { const url = resolveString(component.url, scope); return /^https?:/i.test(url) ? <A2Audio url={url} description={component.description !== undefined ? resolveString(component.description, scope) : ""} /> : null; }
     case "Row": case "Column": return <div className={`a2ui-${component.component === "Row" ? "row" : "column"}`} style={{ justifyContent: JUSTIFY[String(component.justify || "start")], alignItems: ALIGN[String(component.align || "stretch")] }}><Children value={component.children} scope={scope} depth={depth} weighted /></div>;
     case "List": return <div className={`a2ui-list ${component.direction === "horizontal" ? "horizontal" : ""}`} style={{ alignItems: ALIGN[String(component.align || "stretch")] }}><Children value={component.children} scope={scope} depth={depth} /></div>;
     case "Card": return <div className="a2ui-card"><Node id={String(component.child)} scope={scope} depth={depth + 1} /></div>;
@@ -201,6 +201,32 @@ function A2Icon({ value, scope }: { value: unknown; scope: EvalScope }) {
   }
   const Icon = ICONS[String(resolved)] || CircleHelp;
   return <Icon className="a2ui-icon" size={18} aria-hidden="true" />;
+}
+
+/** The app's own audio player: play/pause, a seek bar styled like the Slider, elapsed and total time. */
+function A2Audio({ url, description }: { url: string; description: string }) {
+  const surface = useContext(SurfaceContext)!;
+  const audio = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const clock = (seconds: number) => Number.isFinite(seconds) ? `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}` : "0:00";
+  const toggle = () => { const element = audio.current; if (!element) return; if (element.paused) void element.play().catch(() => setFailed(true)); else element.pause(); };
+  const fill = duration > 0 ? `${(time / duration) * 100}%` : "0%";
+  return <div className={`a2ui-audio ${failed ? "failed" : ""}`}>
+    <audio ref={audio} src={url} preload="metadata" onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)}
+      onTimeUpdate={event => setTime(event.currentTarget.currentTime)} onLoadedMetadata={event => setDuration(event.currentTarget.duration)} onError={() => setFailed(true)} />
+    <button type="button" className="a2ui-audio-play" onClick={toggle} disabled={failed} aria-label={playing ? (surface.ko ? "일시정지" : "Pause") : (surface.ko ? "재생" : "Play")}>{playing ? <Pause size={16} /> : <Play size={16} />}</button>
+    <div className="a2ui-audio-body">
+      <span>{failed ? (surface.ko ? "오디오를 불러오지 못했습니다" : "The audio could not be loaded") : description || (surface.ko ? "오디오" : "Audio")}</span>
+      <div className="a2ui-audio-track">
+        <input type="range" min={0} max={duration || 0} step="any" value={Math.min(time, duration || 0)} disabled={!duration} aria-label={surface.ko ? "재생 위치" : "Position"}
+          onChange={event => { const element = audio.current; if (element) { element.currentTime = Number(event.target.value); setTime(element.currentTime); } }} style={{ "--a2ui-fill": fill } as CSSProperties} />
+        <small>{clock(time)} / {clock(duration)}</small>
+      </div>
+    </div>
+  </div>;
 }
 
 function A2Tabs({ component, scope, depth }: { component: A2uiComponent; scope: EvalScope; depth: number }) {
@@ -335,3 +361,55 @@ function A2DateTime({ component, scope }: { component: A2uiComponent; scope: Eva
 }
 
 
+
+/**
+ * Shown while the model is still writing a UI: a dark grid of dots with soft bright patches drifting over it, so a
+ * long generation reads as work in progress rather than a stall. Canvas-drawn; holds still for reduced motion.
+ */
+export function A2uiDrawing({ ko }: { ko: boolean }) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const element = canvas.current;
+    const context = element?.getContext("2d");
+    if (!element || !context) return;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const gap = 16;
+    let frame = 0, width = 0, height = 0;
+    const resize = () => {
+      const ratio = window.devicePixelRatio || 1;
+      width = element.clientWidth; height = element.clientHeight;
+      element.width = Math.round(width * ratio); element.height = Math.round(height * ratio);
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    };
+    // Three patches on slow Lissajous paths; their sum lights the dots under them.
+    const blobs = [
+      { ax: .36, ay: .3, fx: .00021, fy: .00029, px: 0, py: 1.3, r: .085 },
+      { ax: .32, ay: .28, fx: .00017, fy: .00023, px: 2.1, py: .4, r: .07 },
+      { ax: .28, ay: .32, fx: .00025, fy: .00019, px: 4.2, py: 2.6, r: .055 },
+    ];
+    const draw = (time: number) => {
+      context.clearRect(0, 0, width, height);
+      const size = Math.min(width, height * 2.2);
+      const centers = blobs.map(blob => ({ x: width * (.5 + blob.ax * Math.sin(time * blob.fx + blob.px)), y: height * (.5 + blob.ay * Math.sin(time * blob.fy + blob.py)), r: size * blob.r }));
+      for (let y = gap / 2 + 2; y < height; y += gap) {
+        for (let x = gap / 2 + 2; x < width; x += gap) {
+          let light = 0;
+          for (const center of centers) { const dx = x - center.x, dy = y - center.y; light += Math.exp(-(dx * dx + dy * dy) / (2 * center.r * center.r)); }
+          light = Math.min(1, light);
+          context.fillStyle = `rgba(255,255,255,${.11 + light * .75})`;
+          context.beginPath(); context.arc(x, y, .85 + light * .75, 0, Math.PI * 2); context.fill();
+        }
+      }
+      if (!reduced) frame = requestAnimationFrame(draw);
+    };
+    resize();
+    const observer = new ResizeObserver(() => { resize(); if (reduced) draw(4000); });
+    observer.observe(element);
+    frame = requestAnimationFrame(draw);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, []);
+  return <div className="a2ui-drawing" role="status" aria-live="polite">
+    <canvas ref={canvas} aria-hidden="true" />
+    <span>{ko ? "UI를 그리는 중" : "Drawing the UI"}</span>
+  </div>;
+}

@@ -84,7 +84,7 @@ import { refreshSamplingDefaults } from "@/lib/sampling-params";
 import { canPersonalizeSystemPrompt, resolveSystemPrompt, systemPromptEditable, withSystemPromptOverride, type SystemPromptOverrides } from "@/lib/system-prompt";
 import { SystemPromptDialog } from "@/app/system-prompt-dialog";
 import { useKeyboardReturn } from "@/lib/use-keyboard-return";
-import { A2uiConversation, A2uiEventCard, type A2uiAction } from "./a2ui-surface";
+import { A2uiConversation, A2uiDrawing, A2uiEventCard, type A2uiAction } from "./a2ui-surface";
 import { a2uiSurfaces } from "@/lib/a2ui/runtime";
 import { isNativeShell, nativePush } from "@/lib/native-bridge";
 import { describeConnectionFailure, isConnectionFailureCode } from "@/lib/connection-errors";
@@ -578,6 +578,8 @@ export default function Home() {
   const threadRef = useRef<HTMLDivElement>(null);
   // Set when a saved chat is opened: its thread starts with the last request at the top instead of at the bottom.
   const revealLastRequestRef = useRef(false);
+  // Set with it when the agent's chat opens: that thread starts at its end instead of at the last request.
+  const revealBottomRef = useRef(false);
   const revealHoldRef = useRef<(() => void) | undefined>(undefined);
   const autoFollowThreadRef = useRef(true);
   const [threadAutoFollow, setThreadAutoFollow] = useState(true);
@@ -800,7 +802,8 @@ export default function Home() {
     const element = threadRef.current;
     if (!revealLastRequestRef.current || !element) return;
     revealLastRequestRef.current = false;
-    const lastRequest = messages.findLast(message => message.role === "user");
+    const toBottom = revealBottomRef.current; revealBottomRef.current = false;
+    const lastRequest = toBottom ? undefined : messages.findLast(message => message.role === "user");
     const reveal = () => {
       const target = lastRequest ? element.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(lastRequest.id)}"]`) : null;
       if (target) element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top - 12;
@@ -1258,11 +1261,16 @@ export default function Home() {
     if (!next.access.enabled || !next.conversationId) return;
     if (next.settings?.modelId && agentRevisionRef.current === undefined && visibleModels.some(model => model.id === next.settings!.modelId)) { selectedModelIdRef.current = next.settings.modelId; setSelectedModelId(next.settings.modelId); }
     const changed = agentRevisionRef.current !== next.revision;
+    const opening = agentRevisionRef.current === undefined;
     agentRevisionRef.current = next.revision;
     if (agentWatchingRef.current) return;
     if (changed || !conversation) {
       const loaded = await fetch(`/api/conversations/${next.conversationId}`, { cache: "no-store" }).then(item => item.ok ? item.json() as Promise<Conversation> : undefined).catch(() => undefined);
-      if (loaded && agentOpenRef.current) { setConversation(loaded); setMessages((loaded.branches.find(item => item.id === loaded.activeBranchId) || loaded.branches[0])?.messages || []); }
+      if (loaded && agentOpenRef.current) {
+        // Opening the agent shows the latest exchange: the thread starts at the bottom and stays there while it lays out.
+        if (opening) { revealLastRequestRef.current = true; revealBottomRef.current = true; }
+        setConversation(loaded); setMessages((loaded.branches.find(item => item.id === loaded.activeBranchId) || loaded.branches[0])?.messages || []);
+      }
       if (next.mainBusy && loaded && agentOpenRef.current) {
         agentWatchingRef.current = true;
         void watchChatJob(loaded, loaded.activeBranchId, true).finally(() => { agentWatchingRef.current = false; agentRevisionRef.current = undefined; agentSyncRef.current(); });
@@ -2693,7 +2701,9 @@ function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, r
   const lastReasoningIndex = steps.findLastIndex(step => step.kind === "reasoning");
   const promptStageStartedAt = pending && waitPhase === "processing-prompt" && lastReasoningIndex >= 0 && !steps.slice(lastReasoningIndex + 1).some(step => step.kind === "content") ? waitStartedAt ?? Date.now() : undefined;
   const wholeReasoning = reasoningStepIsWhole(message);
-  const waitStatus = pending && waitPhase ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{waitPhase === "processing-prompt" ? <PromptWaitLabel locale={locale} startedAt={waitStartedAt} /> : chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
+  // While a generated UI is written the grid animation stands in for the status line; once the call is made, its own card shows it.
+  const uiCallShown = (message.toolEvents || []).some(event => transcriptCardFor(event.name) === "a2ui" && (event.status === "calling" || event.status === "waiting"));
+  const waitStatus = pending && waitPhase === "creating-ui" ? (uiCallShown ? null : <A2uiDrawing ko={locale === "ko"} />) : pending && waitPhase ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{waitPhase === "processing-prompt" ? <PromptWaitLabel locale={locale} startedAt={waitStartedAt} /> : chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
   return <div className="message-row assistant-message long-press-target" data-message-id={message.id} {...longPress}>
     {message.attachments?.length ? <AssistantAttachmentGallery attachments={message.attachments} /> : null}
     {steps.map((step, index) => {

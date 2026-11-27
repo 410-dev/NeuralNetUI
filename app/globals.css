@@ -2173,7 +2173,7 @@ select:focus-visible {
 @keyframes agent-menu-in { from { opacity: 0; transform: translateY(-8px) scale(.96); } to { opacity: 1; transform: none; } }
 @keyframes agent-menu-out { to { opacity: 0; transform: translateY(-6px) scale(.97); } }
 .agent-panel-mobile { display: block; }
-.agent-empty { margin: auto 0; padding: 12vh 0 4vh; text-align: center; }
+.agent-empty { margin: auto; padding: 12vh 0 4vh; text-align: center; }
 .agent-reset-link { align-self: flex-start; margin-top: 6px; padding: 0 2px; background: none; color: var(--dim); font-size: 10.5px; text-decoration: underline; text-underline-offset: 2px; }
 .agent-reset-link:hover { color: var(--muted); }
 .agent-message-time { margin-right: 4px; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -2364,8 +2364,10 @@ select:focus-visible {
 .a2ui-column { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .a2ui-row > *, .a2ui-column > * { min-width: 0; }
 .a2ui-weighted { display: flex; flex-direction: column; min-width: 0; }
-.a2ui-list { display: flex; flex-direction: column; gap: 8px; max-height: 520px; overflow-y: auto; overscroll-behavior: contain; padding: 2px; }
-.a2ui-list.horizontal { flex-direction: row; overflow-x: auto; overflow-y: hidden; max-height: none; scroll-snap-type: x proximity; padding-bottom: 6px; }
+/* A vertical list grows with the page (no inner scroll box that would catch the wheel); a horizontal one scrolls
+   sideways only and lets vertical scrolling pass to the page. */
+.a2ui-list { display: flex; flex-direction: column; gap: 8px; padding: 2px; }
+.a2ui-list.horizontal { flex-direction: row; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scroll-snap-type: x proximity; padding-bottom: 6px; }
 .a2ui-list.horizontal > * { flex: 0 0 auto; max-width: min(320px, 78vw); scroll-snap-align: start; }
 .a2ui-card { padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--radius-card); background: rgba(255,255,255,.025); min-width: 0; }
 .a2ui-card .a2ui-card { background: rgba(255,255,255,.02); border-radius: 16px; padding: 12px 14px; }
@@ -2383,7 +2385,21 @@ select:focus-visible {
 .a2ui-image.largeFeature { width: 100%; aspect-ratio: 16/9; }
 .a2ui-image.header { width: 100%; aspect-ratio: 3/1; border-radius: 16px; }
 .a2ui-media { width: 100%; max-height: 360px; border-radius: var(--radius-md); background: #000; }
-.a2ui-audio { display: grid; gap: 6px; } .a2ui-audio audio { width: 100%; } .a2ui-audio small { color: var(--muted); }
+.a2ui-audio { display: flex; align-items: center; gap: 12px; padding: 10px 14px 10px 10px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: rgba(255,255,255,.03); min-width: 0; }
+.a2ui-audio audio { display: none; }
+.a2ui-audio-play { width: 38px; height: 38px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: white; transition: transform .2s var(--spring), filter .16s; }
+.a2ui-audio-play:hover:not(:disabled) { filter: brightness(1.1); } .a2ui-audio-play:active:not(:disabled) { transform: scale(.93); } .a2ui-audio-play:disabled { opacity: .4; }
+.a2ui-audio-body { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.a2ui-audio-body > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 12.5px; }
+.a2ui-audio-track { display: flex; align-items: center; gap: 10px; }
+.a2ui-audio-track small { flex: none; color: var(--dim); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.a2ui-audio.failed .a2ui-audio-body > span { color: var(--dim); }
+.a2ui-audio-track input[type=range], .a2ui-slider input[type=range] { flex: 1; min-width: 0; height: 22px; padding: 0 !important; border: 0 !important; background: transparent !important; appearance: none; -webkit-appearance: none; }
+.a2ui-audio-track input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 99px; background: linear-gradient(90deg, var(--accent) var(--a2ui-fill, 0%), rgba(255,255,255,.12) var(--a2ui-fill, 0%)); }
+.a2ui-audio-track input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 50%; background: white; }
+.a2ui-audio-track input[type=range]::-moz-range-track { height: 4px; border-radius: 99px; background: rgba(255,255,255,.12); }
+.a2ui-audio-track input[type=range]::-moz-range-progress { height: 4px; border-radius: 99px; background: var(--accent); }
+.a2ui-audio-track input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: white; }
 .a2ui-divider { border: 0; border-top: 1px solid var(--border); margin: 2px 0; width: 100%; }
 .a2ui-divider.vertical { border-top: 0; border-left: 1px solid var(--border); width: 0; align-self: stretch; margin: 0 2px; }
 .a2ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; cursor: pointer; }
@@ -2426,6 +2442,9 @@ select:focus-visible {
 .a2ui-modal { width: min(560px, 100%); max-height: 85dvh; overflow: auto; }
 .a2ui-modal > header { display: flex; justify-content: flex-end; }
 .a2ui-modal .a2ui-surface { margin: 0; }
+.a2ui-drawing { position: relative; width: min(560px, 100%); height: 168px; margin: 6px 0 10px; border: 1px solid var(--border); border-radius: var(--radius-card); background: #0c0c0f; overflow: hidden; animation: message-enter .32s cubic-bezier(.22,.8,.28,1) both; }
+.a2ui-drawing canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.a2ui-drawing > span { position: absolute; right: 14px; bottom: 12px; padding: 6px 13px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill); background: rgba(30,30,35,.92); color: var(--text); font-size: 11.5px; }
 .a2ui-status { display: inline-flex; align-items: center; gap: 7px; margin: 4px 0 8px; padding: 6px 12px; border-radius: var(--radius-pill); background: rgba(255,255,255,.04); color: var(--muted); font-size: 11.5px; }
 .a2ui-rejected { display: block; border-radius: 14px; color: #e0a84a; background: rgba(224,168,74,.06); }
 .a2ui-rejected summary { display: flex; align-items: center; gap: 7px; cursor: pointer; list-style: none; }

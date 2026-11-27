@@ -495,6 +495,12 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
       outputStarted = true; stopStatusPoll();
       setWaitPhase(job, streamingPhaseFor(String(payload.name || ""))); return;
     }
+    // LMF writes an emulated tool call whole at the end; meanwhile it names the tool being written.
+    const lmfToolCall = (payload.lmf as { tool_call?: { name?: unknown } } | undefined)?.tool_call;
+    if (lmfToolCall && typeof lmfToolCall.name === "string") {
+      outputStarted = true; stopStatusPoll();
+      setWaitPhase(job, streamingPhaseFor(lmfToolCall.name)); return;
+    }
     if (!prefillSeen && !outputStarted) setWaitPhase(job, "preparing-response");
     usage = { ...usage, ...usageFrom(payload) };
     const choices = Array.isArray(payload.choices) ? payload.choices as Array<{ delta?: Record<string, unknown>; finish_reason?: string | null }> : [];
