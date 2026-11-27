@@ -168,7 +168,7 @@ const toolSource = agentToolSource({
     return { id: run.id, status: run.status };
   },
   reportFailure: (_userId, input) => { reportedFailures.set(input.runId, input.reason); },
-  notifyUser: async (userId, input) => { await postToMain(userId, { content: input.message.trim().slice(0, 20_000), kind: "notice", runId: input.runId }); },
+  notifyUser: async (userId, input) => { await postToMain(userId, { content: input.message.trim().slice(0, 20_000), kind: "notice", runId: input.runId, urgent: input.urgent }); },
 });
 
 // ------------------------------------------------------------------ the main chat
@@ -186,7 +186,7 @@ function mainBusy(profile: AgentProfile) {
  * Adds to the main chat: a notice the person sees, or a context message only the model reads (which also starts a
  * turn so the agent can respond). While a reply is being written, additions wait and follow it.
  */
-export async function postToMain(userId: string, input: { content: string; kind: "notice" | "context" | "user"; attachments?: StoredMessage["attachments"]; prefix?: string; runId?: string }) {
+export async function postToMain(userId: string, input: { content: string; kind: "notice" | "context" | "user"; attachments?: StoredMessage["attachments"]; prefix?: string; runId?: string; urgent?: boolean }) {
   if (!input.content.trim() && !input.attachments?.length) return;
   const message: StoredMessage = { id: id("msg"), role: input.kind === "notice" ? "assistant" : "user", content: input.content, createdAt: nowIso(), ...(input.prefix ? { contextPrefix: input.prefix } : {}), ...(input.runId ? { agentRunId: input.runId } : {}), ...(input.kind === "user" ? {} : { agentKind: input.kind }), ...(input.attachments?.length ? { attachments: input.attachments } : {}) };
   const pending = state.pending.get(userId) ?? { messages: [], trigger: false, autonomous: true };
@@ -194,7 +194,7 @@ export async function postToMain(userId: string, input: { content: string; kind:
   if (input.kind !== "notice") pending.trigger = true;
   if (input.kind === "user") pending.autonomous = false;
   state.pending.set(userId, pending);
-  if (input.kind === "notice") void notifyDevices(userId, input.content);
+  if (input.kind === "notice") void notifyDevices(userId, input.content, input.urgent);
   await flushMain(userId);
 }
 
@@ -225,7 +225,7 @@ async function startMainTurn(profile: AgentProfile, conversation: Conversation, 
   const { model, aliasBaseModelId } = await agentModel(userId, settings.modelId, settings.aliasBaseModelId);
   const options: AgentJobOptions = {
     mode: "main", autonomous, systemPrompt: mainPrompt(settings), compactPercent: settings.compactPercent, toolState: settings.toolState, sources: [toolSource], toolTimeoutMs: toolTimeout(settings),
-    gate: gateFor(userId, settings, autonomous, tool => void postToMain(userId, { content: ko(settings) ? `도구 사용 승인이 필요합니다: ${tool}. 에이전트 채팅에서 승인해 주세요.` : `Approval needed for ${tool}. Approve it in the agent chat.`, kind: "notice" })),
+    gate: gateFor(userId, settings, autonomous, tool => void postToMain(userId, { content: ko(settings) ? `도구 사용 승인이 필요합니다: ${tool}. 에이전트 채팅에서 승인해 주세요.` : `Approval needed for ${tool}. Approve it in the agent chat.`, kind: "notice", urgent: true })),
     onSettled: result => {
       markAgentChanged(userId);
       if (result.looped) {
@@ -370,7 +370,7 @@ async function startRunJob(run: AgentRun, profile: AgentProfile, conversationId:
     mode: "sub", runId: run.id, autonomous: true, systemPrompt: subPrompt(settings, run), compactPercent: settings.compactPercent, toolState: settings.toolState, sources: [toolSource], toolTimeoutMs: toolTimeout(settings),
     gate: gateFor(userId, settings, true, tool => {
       updateAgentRun(run.id, { status: "waiting" }); markAgentChanged(userId);
-      void postToMain(userId, { content: ko(settings) ? `작업 "${run.title}"이(가) 도구 사용 승인을 기다립니다: ${tool}. 서브에이전트 기록에서 승인하거나 거절해 주세요.` : `Task "${run.title}" is waiting for approval to use ${tool}. Approve or reject it in the subagent history.`, kind: "notice" });
+      void postToMain(userId, { content: ko(settings) ? `작업 "${run.title}"이(가) 도구 사용 승인을 기다립니다: ${tool}. 서브에이전트 기록에서 승인하거나 거절해 주세요.` : `Task "${run.title}" is waiting for approval to use ${tool}. Approve or reject it in the subagent history.`, kind: "notice", urgent: true });
     }),
     onSettled: result => {
       if (result.looped && attempt < LOOP_RETRIES) { markAgentChanged(userId); void startRunJob(run, readAgentProfile(userId) ?? profile, conversationId, branchId, history, attempt + 1).catch(error => void finishRun(run, { status: "error", content: "", error: error instanceof Error ? error.message : String(error) })); return; }
@@ -483,8 +483,11 @@ export function ensureAgentScheduler() {
 // ------------------------------------------------------------------ notifications
 
 /** Sends a push notification to every registered device, unless the person is looking at the agent somewhere. */
-async function notifyDevices(userId: string, text: string) {
+async function notifyDevices(userId: string, text: string, urgent = false) {
   if (isViewingAgent(userId)) return;
-  try { const { markPushPending, pushToUser } = await import("./push"); markPushPending(userId); await pushToUser(userId, { title: "Agent", body: text.replace(/\s+/g, " ").trim().slice(0, 180) }); }
+  const settings = readAgentProfile(userId)?.settings;
+  const korean = settings ? ko(settings) : true;
+  const title = korean ? (urgent ? "에이전트 · 긴급" : "에이전트") : (urgent ? "Agent · urgent" : "Agent");
+  try { const { markPushPending, pushToUser } = await import("./push"); markPushPending(userId); await pushToUser(userId, { title, body: text.replace(/\s+/g, " ").trim().slice(0, 600), urgent }); }
   catch (error) { console.warn("Agent push failed", error instanceof Error ? error.message : error); }
 }

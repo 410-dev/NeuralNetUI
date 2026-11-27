@@ -15,3 +15,4 @@ installer/output/
 installer/*/bin/
 installer/*/obj/
 .wix/
+secrets/

@@ -84,6 +84,7 @@ import { refreshSamplingDefaults } from "@/lib/sampling-params";
 import { canPersonalizeSystemPrompt, resolveSystemPrompt, systemPromptEditable, withSystemPromptOverride, type SystemPromptOverrides } from "@/lib/system-prompt";
 import { SystemPromptDialog } from "@/app/system-prompt-dialog";
 import { useKeyboardReturn } from "@/lib/use-keyboard-return";
+import { isNativeShell, nativePush } from "@/lib/native-bridge";
 import { describeConnectionFailure, isConnectionFailureCode } from "@/lib/connection-errors";
 import { moveItemById, nudgeItemById } from "@/lib/ordered-list";
 import { duplicateConversation } from "@/lib/conversation-duplicate";
@@ -378,9 +379,6 @@ async function createThumbnail(file: File) {
   return { thumbnail: new File([blob], `${file.name}.thumbnail.jpg`, { type: "image/jpeg" }), width: Math.round(width / scale), height: Math.round(height / scale) };
 }
 
-/** True inside the NeuralNetUI mobile app, whose WebView appends its own token to the user agent. */
-function isNativeShell() { return typeof navigator !== "undefined" && /\bNeuralNetUIApp\//.test(navigator.userAgent); }
-
 export default function Home() {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [config, setConfig] = useState<PublicConfig>(emptyConfig);
@@ -643,9 +641,25 @@ export default function Home() {
     };
     // A tapped agent notification asks an open window to show the agent.
     const fromWorker = (event: MessageEvent) => { if (event.data?.type === "open-agent") openAgent(); };
+    // So does a notification tapped while the mobile app already shows this page.
+    const fromApp = (event: Event) => {
+      const url = String((event as CustomEvent<{ url?: string }>).detail?.url || "");
+      if (/[?&]agent=1\b/.test(url)) openAgent();
+    };
     window.addEventListener("popstate", navigateHistory);
+    window.addEventListener("nnui-native-open", fromApp);
     navigator.serviceWorker?.addEventListener("message", fromWorker);
-    return () => { window.removeEventListener("popstate", navigateHistory); navigator.serviceWorker?.removeEventListener("message", fromWorker); };
+    return () => { window.removeEventListener("popstate", navigateHistory); window.removeEventListener("nnui-native-open", fromApp); navigator.serviceWorker?.removeEventListener("message", fromWorker); };
+  }, [auth?.authenticated]);
+
+  // Inside the mobile app with notifications on, the app's current token is registered again after each sign-in or
+  // launch: Firebase replaces tokens from time to time, and the account may have changed since it was turned on.
+  useEffect(() => {
+    if (!auth?.authenticated || !isNativeShell()) return;
+    nativePush("status").then(reply => {
+      if (!reply.enabled || reply.permission !== "granted" || !reply.token) return;
+      return fetch("/api/agent/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ native: { token: reply.token, platform: reply.platform } }) });
+    }).catch(() => undefined);
   }, [auth?.authenticated]);
 
   // The app is sized to the visible viewport. Every geometry change lands in one animation frame and

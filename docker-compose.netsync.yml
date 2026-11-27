@@ -17,8 +17,11 @@ services:
       HOSTNAME: 0.0.0.0
       PORT: "${NEURAL_CHAT_PORT:-3000}"
       NEURAL_CHAT_DATA_DIR: /app/data
+      NEURAL_CHAT_SECRETS_DIR: /app/secrets
     volumes:
       - "${NEURAL_CHAT_DATA_PATH:-./data}:/app/data"
+      # Keys kept out of data backups, e.g. firebase-admin.json for the mobile app's notifications.
+      - "${NEURAL_CHAT_SECRETS_PATH:-./secrets}:/app/secrets:ro"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:' + process.env.PORT).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s

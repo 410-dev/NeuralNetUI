@@ -647,7 +647,15 @@ function openDatabase() {
         created_at TEXT NOT NULL,
         last_used_at TEXT
       );
-      CREATE TABLE IF NOT EXISTS app_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS app_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS native_push_tokens (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        platform TEXT NOT NULL,
+        user_agent TEXT,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT
+      );`);
     const planColumns = connection.prepare("PRAGMA table_info(plans)").all() as Array<{ name: string }>;
     if (!planColumns.some(column => column.name === "agent_enabled")) connection.exec("ALTER TABLE plans ADD COLUMN agent_enabled INTEGER NOT NULL DEFAULT 0 CHECK (agent_enabled IN (0, 1));");
     if (!planColumns.some(column => column.name === "agent_min_interval_minutes")) connection.exec("ALTER TABLE plans ADD COLUMN agent_min_interval_minutes INTEGER NOT NULL DEFAULT 30 CHECK (agent_min_interval_minutes >= 1);");

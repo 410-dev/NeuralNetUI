@@ -13,3 +13,4 @@ installer/output
 *.log
 tsconfig.tsbuildinfo
 mobile
+secrets
