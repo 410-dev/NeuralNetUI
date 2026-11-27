@@ -12,6 +12,7 @@ import { classifyMcpAddress, describeMcpFailure, mcpStorageLink, mcpToolAlias, t
 import { importStreamToStorage } from "./storage-chunk-upload";
 import { McpOAuthError, oauthAccessToken, readOAuthConfig, type McpOAuthConfig } from "./mcp-oauth";
 import { mcpOAuthPreset } from "./mcp-oauth-presets";
+import { TOOL_DEFINITION_MODES, type ToolDefinitionMode } from "./mcp-tool-definitions";
 
 const MAX_RESULT_CHARS = 100_000;
 const CONNECTION_TIMEOUT_MS = 20_000;
@@ -23,7 +24,7 @@ const DEFAULT_TOOL_POLICY: McpToolPolicy = "session_ask";
 
 type McpRow = {
   id: string; user_id: string; name: string; description: string; url: string;
-  auth_type: McpAuthType; credential: string; enabled: number; tool_timeout_seconds: number; kind?: "user" | "vm"; oauth?: string | null; created_at: string; updated_at: string;
+  auth_type: McpAuthType; credential: string; enabled: number; tool_timeout_seconds: number; kind?: "user" | "vm"; oauth?: string | null; tool_definitions?: ToolDefinitionMode; created_at: string; updated_at: string;
 };
 
 const oauthSchema = z.object({
@@ -45,13 +46,21 @@ const connectionSchema = z.object({
   toolTimeoutSeconds: z.number().int().min(MIN_MCP_TOOL_TIMEOUT_SECONDS, toolTimeoutMessage).max(MAX_MCP_TOOL_TIMEOUT_SECONDS, toolTimeoutMessage).optional(),
   kind: z.enum(["user", "vm"]).optional().default("user"),
   oauth: oauthSchema.optional(),
+  toolDefinitions: z.enum(TOOL_DEFINITION_MODES as [ToolDefinitionMode, ...ToolDefinitionMode[]]).optional(),
 });
+
+/** New connections: the virtual computer sends everything; Google's Workspace servers on demand; others capped. */
+function defaultToolDefinitions(url: string, kind: "user" | "vm"): ToolDefinitionMode {
+  if (kind === "vm") return "full";
+  try { if (/^(gmailmcp|calendarmcp)\.googleapis\.com$/.test(new URL(url).hostname)) return "on_demand"; } catch { /* invalid URLs are refused by the schema */ }
+  return "trimmed";
+}
 /** Shell commands on a virtual computer can run for minutes; they report progress, but start with a long limit. */
 const VM_TOOL_TIMEOUT_SECONDS = 600;
 
 function publicConnection(row: McpRow): McpConnection {
   const oauth = row.auth_type === "oauth" ? readOAuthConfig(row.oauth) : undefined;
-  return { id: row.id, name: row.name, description: row.description || undefined, url: row.url, authType: row.auth_type, hasCredential: Boolean(row.credential), enabled: row.enabled === 1, toolTimeoutSeconds: row.tool_timeout_seconds, kind: row.kind === "vm" ? "vm" : "user",
+  return { id: row.id, name: row.name, description: row.description || undefined, url: row.url, authType: row.auth_type, hasCredential: Boolean(row.credential), enabled: row.enabled === 1, toolTimeoutSeconds: row.tool_timeout_seconds, kind: row.kind === "vm" ? "vm" : "user", toolDefinitions: row.kind === "vm" ? "full" : row.tool_definitions || "trimmed",
     ...(oauth ? { oauth: { clientId: oauth.clientId, hasClientSecret: Boolean(oauth.clientSecret), authorizationUrl: oauth.authorizationUrl, tokenUrl: oauth.tokenUrl, scopes: oauth.scopes, signedIn: Boolean(row.credential || oauth.refreshToken), canRefresh: Boolean(oauth.refreshToken), ...(oauth.expiresAt ? { expiresAt: new Date(oauth.expiresAt).toISOString() } : {}) } } : {}),
     createdAt: row.created_at, updatedAt: row.updated_at };
 }
@@ -104,8 +113,8 @@ export function createMcpConnection(userId: string, input: unknown): McpConnecti
   if (value.authType !== "none" && !oauth && !value.credential.trim()) throw new AuthError("선택한 인증 방식의 토큰 또는 API 키를 입력해 주세요.", 400);
   const id = randomUUID(), stamp = new Date().toISOString();
   try {
-    db.prepare("INSERT INTO mcp_connections(id,user_id,name,description,url,auth_type,credential,enabled,tool_timeout_seconds,kind,oauth,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .run(id, userId, value.name, value.description, value.url, value.authType, value.authType === "none" || oauth ? "" : value.credential.trim(), value.enabled ? 1 : 0, value.toolTimeoutSeconds ?? (value.kind === "vm" ? VM_TOOL_TIMEOUT_SECONDS : DEFAULT_MCP_TOOL_TIMEOUT_SECONDS), value.kind, oauth?.oauth ?? null, stamp, stamp);
+    db.prepare("INSERT INTO mcp_connections(id,user_id,name,description,url,auth_type,credential,enabled,tool_timeout_seconds,kind,oauth,tool_definitions,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .run(id, userId, value.name, value.description, value.url, value.authType, value.authType === "none" || oauth ? "" : value.credential.trim(), value.enabled ? 1 : 0, value.toolTimeoutSeconds ?? (value.kind === "vm" ? VM_TOOL_TIMEOUT_SECONDS : DEFAULT_MCP_TOOL_TIMEOUT_SECONDS), value.kind, oauth?.oauth ?? null, value.kind === "vm" ? "full" : value.toolDefinitions ?? defaultToolDefinitions(value.url, value.kind), stamp, stamp);
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new AuthError("같은 이름의 MCP 연결이 이미 있습니다.", 409);
     throw error;
@@ -120,8 +129,8 @@ export function updateMcpConnection(userId: string, id: string, input: unknown):
   const credential = value.authType === "none" ? "" : oauth ? (oauth.keepTokens ? previous.credential : "") : value.credential.trim() || (value.authType === previous.auth_type ? previous.credential : "");
   if (value.authType !== "none" && !oauth && !credential) throw new AuthError("선택한 인증 방식의 토큰 또는 API 키를 입력해 주세요.", 400);
   try {
-    db.prepare("UPDATE mcp_connections SET name=?,description=?,url=?,auth_type=?,credential=?,enabled=?,tool_timeout_seconds=?,oauth=?,updated_at=? WHERE id=? AND user_id=?")
-      .run(value.name, value.description, value.url, value.authType, credential, value.enabled ? 1 : 0, value.toolTimeoutSeconds ?? previous.tool_timeout_seconds, oauth ? oauth.oauth : value.authType === "oauth" ? previous.oauth ?? null : null, new Date().toISOString(), id, userId);
+    db.prepare("UPDATE mcp_connections SET name=?,description=?,url=?,auth_type=?,credential=?,enabled=?,tool_timeout_seconds=?,oauth=?,tool_definitions=?,updated_at=? WHERE id=? AND user_id=?")
+      .run(value.name, value.description, value.url, value.authType, credential, value.enabled ? 1 : 0, value.toolTimeoutSeconds ?? previous.tool_timeout_seconds, oauth ? oauth.oauth : value.authType === "oauth" ? previous.oauth ?? null : null, previous.kind === "vm" ? "full" : value.toolDefinitions ?? previous.tool_definitions ?? "trimmed", new Date().toISOString(), id, userId);
   } catch (error) {
     if (String(error).includes("UNIQUE")) throw new AuthError("같은 이름의 MCP 연결이 이미 있습니다.", 409);
     throw error;

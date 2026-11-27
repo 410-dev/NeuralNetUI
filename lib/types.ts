@@ -198,6 +198,8 @@ export interface McpConnection {
   /** "vm" is the account's virtual computer: one per account, not counted toward the plan's MCP limit. */
   kind: "user" | "vm";
   /** OAuth sign-in through NeuralNetUI: the client and whether it is signed in (secrets and tokens never leave the server). */
+  /** How the connection's tool definitions reach the model: as sent, length-capped, or on demand. */
+  toolDefinitions: "full" | "trimmed" | "on_demand";
   oauth?: { clientId: string; hasClientSecret: boolean; authorizationUrl: string; tokenUrl: string; scopes: string[]; signedIn: boolean; canRefresh: boolean; expiresAt?: string };
   createdAt: string;
   updatedAt: string;

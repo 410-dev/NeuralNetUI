@@ -29,7 +29,7 @@ const tableColumns:Record<string,string[]>={
   messages:["id","conversation_id","revision_group_id","role","content","reasoning","reasoning_duration_seconds","created_at","input_tokens","output_tokens","reasoning_tokens","total_tokens","completion_duration_seconds","time_to_first_token_seconds","tool_events","context_tokens","steps","model_name","routed_model","agent_kind"],
   branch_messages:["branch_id","message_id","position"],uploads:["id","name","mime_type","size","width","height","created_at","user_id","retained","deleted_at"],artifact_storage_links:["user_id","conversation_id","artifact_key","upload_id","created_at","updated_at"],message_attachments:["message_id","upload_id","position"],context_summaries:["branch_id","fingerprint","covered_count","summary"],
   users:accountColumns,plans:["id","name","storage_quota_bytes","trash_quota_bytes","served_model_ids","model_weights","mcp_enabled","max_mcp_connections","artifact_html_enabled","disabled_tool_ids","agent_enabled","agent_min_interval_minutes","created_at","updated_at"],plan_token_limits:["id","plan_id","duration_seconds","token_limit","token_scope","position"],reset_credits:["id","target_type","target_id","max_window_seconds","expires_at","title","created_at","created_by"],
-  mcp_connections:["id","user_id","name","description","url","auth_type","credential","enabled","tool_timeout_seconds","oauth","created_at","updated_at"],
+  mcp_connections:["id","user_id","name","description","url","auth_type","credential","enabled","tool_timeout_seconds","oauth","tool_definitions","created_at","updated_at"],
   mcp_tool_policies:["connection_id","tool_name","policy","updated_at"],
   context_states:["branch_id","state","updated_at"],
 };

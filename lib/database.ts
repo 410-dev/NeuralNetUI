@@ -670,6 +670,16 @@ function openDatabase() {
     if (!columns.some(column => column.name === "oauth")) connection.exec("ALTER TABLE mcp_connections ADD COLUMN oauth TEXT;");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(34, new Date().toISOString());
   })();
+  const definitionsVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (definitionsVersion.version < 35) connection.transaction(() => {
+    // How a connection's tool definitions reach the model (lib/mcp-tool-definitions.ts). Google's Workspace MCP
+    // servers describe every field at manual length, so they start out sending definitions on demand.
+    const columns = connection.prepare("PRAGMA table_info(mcp_connections)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "tool_definitions")) connection.exec("ALTER TABLE mcp_connections ADD COLUMN tool_definitions TEXT NOT NULL DEFAULT 'trimmed' CHECK (tool_definitions IN ('full', 'trimmed', 'on_demand'));");
+    connection.exec("UPDATE mcp_connections SET tool_definitions = 'full' WHERE kind = 'vm'");
+    connection.exec("UPDATE mcp_connections SET tool_definitions = 'on_demand' WHERE url LIKE 'https://gmailmcp.googleapis.com/%' OR url LIKE 'https://calendarmcp.googleapis.com/%'");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(35, new Date().toISOString());
+  })();
   return connection;
 }
 
