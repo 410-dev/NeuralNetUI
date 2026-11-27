@@ -378,6 +378,9 @@ async function createThumbnail(file: File) {
   return { thumbnail: new File([blob], `${file.name}.thumbnail.jpg`, { type: "image/jpeg" }), width: Math.round(width / scale), height: Math.round(height / scale) };
 }
 
+/** True inside the NeuralNetUI mobile app, whose WebView appends its own token to the user agent. */
+function isNativeShell() { return typeof navigator !== "undefined" && /\bNeuralNetUIApp\//.test(navigator.userAgent); }
+
 export default function Home() {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [config, setConfig] = useState<PublicConfig>(emptyConfig);
@@ -654,12 +657,22 @@ export default function Home() {
     let restingHeight = Math.max(window.innerHeight, viewport?.height || 0);
     let frame = 0;
     let last = { height: -1, top: -1, inset: -1, open: false };
+    // The Android app keeps its WebView full height and reports the keyboard as it starts to move,
+    // with the height it will end at and how long it takes. The shell then shrinks alongside the
+    // keyboard on the same curve instead of waiting for a resize that only arrives once it is up.
+    const nativeShell = isNativeShell();
+    let nativeInset = 0;
+    let settle = 0;
     const apply = () => {
       frame = 0;
-      const height = Math.round(viewport?.height || window.innerHeight);
-      const top = Math.round(viewport?.offsetTop || 0);
       const composerFocused = document.activeElement instanceof HTMLTextAreaElement && Boolean(document.activeElement.closest(".composer"));
-      if (!composerFocused) restingHeight = Math.max(restingHeight, window.innerHeight, height + top);
+      let height: number, top: number;
+      if (nativeShell) { restingHeight = window.innerHeight; height = Math.max(0, restingHeight - nativeInset); top = 0; }
+      else {
+        height = Math.round(viewport?.height || window.innerHeight);
+        top = Math.round(viewport?.offsetTop || 0);
+        if (!composerFocused) restingHeight = Math.max(restingHeight, window.innerHeight, height + top);
+      }
       const inset = Math.max(0, Math.round(restingHeight - height - top));
       const open = composerFocused && inset > 80;
       if (height !== last.height) root.style.setProperty("--app-height", `${height}px`);
@@ -669,6 +682,18 @@ export default function Home() {
       last = { height, top, inset, open };
     };
     const schedule = () => { if (!frame) frame = requestAnimationFrame(apply); };
+    const onNativeKeyboard = (event: Event) => {
+      const detail = (event as CustomEvent<{ height?: number; duration?: number }>).detail || {};
+      nativeInset = Math.max(0, Math.round(Number(detail.height) || 0));
+      const duration = Math.max(0, Math.min(600, Math.round(Number(detail.duration) || 0)));
+      root.style.setProperty("--keyboard-duration", `${duration}ms`);
+      root.classList.toggle("native-keyboard-moving", duration > 0);
+      window.clearTimeout(settle);
+      settle = window.setTimeout(() => root.classList.remove("native-keyboard-moving"), duration + 60);
+      cancelAnimationFrame(frame);
+      apply();
+    };
+    if (nativeShell) { root.classList.add("native-shell"); window.addEventListener("nnui-native-keyboard", onNativeKeyboard); }
     apply();
     viewport?.addEventListener("resize", schedule);
     viewport?.addEventListener("scroll", schedule);
@@ -677,6 +702,9 @@ export default function Home() {
     document.addEventListener("focusout", schedule);
     return () => {
       cancelAnimationFrame(frame);
+      window.clearTimeout(settle);
+      window.removeEventListener("nnui-native-keyboard", onNativeKeyboard);
+      root.classList.remove("native-shell", "native-keyboard-moving");
       viewport?.removeEventListener("resize", schedule);
       viewport?.removeEventListener("scroll", schedule);
       window.removeEventListener("resize", schedule);
