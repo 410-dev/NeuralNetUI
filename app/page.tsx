@@ -645,39 +645,43 @@ export default function Home() {
     return () => { window.removeEventListener("popstate", navigateHistory); navigator.serviceWorker?.removeEventListener("message", fromWorker); };
   }, [auth?.authenticated]);
 
+  // The app is sized to the visible viewport. Every geometry change lands in one animation frame and
+  // only writes what changed, so the keyboard costs a single layout of the shell instead of a height
+  // change, a later class change and an animated settle on top of it.
   useEffect(() => {
     const root = document.documentElement;
     const viewport = window.visualViewport;
     let restingHeight = Math.max(window.innerHeight, viewport?.height || 0);
     let frame = 0;
-    const updateViewport = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const height = viewport?.height || window.innerHeight;
-        const top = viewport?.offsetTop || 0;
-        const composerFocused = document.activeElement instanceof HTMLTextAreaElement && document.activeElement.closest(".composer");
-        if (!composerFocused) restingHeight = Math.max(restingHeight, window.innerHeight, height + top);
-        const keyboardInset = Math.max(0, restingHeight - height - top);
-        root.style.setProperty("--app-height", `${Math.round(height)}px`);
-        root.style.setProperty("--viewport-top", `${Math.round(top)}px`);
-        root.style.setProperty("--keyboard-inset", `${Math.round(keyboardInset)}px`);
-        root.classList.toggle("keyboard-open", Boolean(composerFocused) && keyboardInset > 80);
-      });
+    let last = { height: -1, top: -1, inset: -1, open: false };
+    const apply = () => {
+      frame = 0;
+      const height = Math.round(viewport?.height || window.innerHeight);
+      const top = Math.round(viewport?.offsetTop || 0);
+      const composerFocused = document.activeElement instanceof HTMLTextAreaElement && Boolean(document.activeElement.closest(".composer"));
+      if (!composerFocused) restingHeight = Math.max(restingHeight, window.innerHeight, height + top);
+      const inset = Math.max(0, Math.round(restingHeight - height - top));
+      const open = composerFocused && inset > 80;
+      if (height !== last.height) root.style.setProperty("--app-height", `${height}px`);
+      if (top !== last.top) root.style.setProperty("--viewport-top", `${top}px`);
+      if (inset !== last.inset) root.style.setProperty("--keyboard-inset", `${inset}px`);
+      if (open !== last.open) root.classList.toggle("keyboard-open", open);
+      last = { height, top, inset, open };
     };
-    const onFocusChange = () => window.setTimeout(updateViewport, 40);
-    updateViewport();
-    viewport?.addEventListener("resize", updateViewport);
-    viewport?.addEventListener("scroll", updateViewport);
-    window.addEventListener("resize", updateViewport);
-    document.addEventListener("focusin", onFocusChange);
-    document.addEventListener("focusout", onFocusChange);
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(apply); };
+    apply();
+    viewport?.addEventListener("resize", schedule);
+    viewport?.addEventListener("scroll", schedule);
+    window.addEventListener("resize", schedule);
+    document.addEventListener("focusin", schedule);
+    document.addEventListener("focusout", schedule);
     return () => {
       cancelAnimationFrame(frame);
-      viewport?.removeEventListener("resize", updateViewport);
-      viewport?.removeEventListener("scroll", updateViewport);
-      window.removeEventListener("resize", updateViewport);
-      document.removeEventListener("focusin", onFocusChange);
-      document.removeEventListener("focusout", onFocusChange);
+      viewport?.removeEventListener("resize", schedule);
+      viewport?.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      document.removeEventListener("focusin", schedule);
+      document.removeEventListener("focusout", schedule);
       root.classList.remove("keyboard-open");
       root.style.removeProperty("--app-height");
       root.style.removeProperty("--viewport-top");

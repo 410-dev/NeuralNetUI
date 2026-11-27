@@ -1,6 +1,7 @@
 "use client";
 import { Check, Cable, X } from "lucide-react";
 import { useState } from "react";
+import { SelectMenu } from "./select-menu";
 import type { ToolEvent } from "@/lib/types";
 import type { ElicitationAnswer, ElicitationField } from "@/lib/mcp-stateless";
 
@@ -24,11 +25,11 @@ export function McpElicitationComposer({ ko, event, onSubmit }: { ko: boolean; e
       {request.message && <p className="mcp-elicitation-message">{request.message.replace(/\*\*|__|`/g, "")}</p>}
       {single ? <>{single.title && <p className="mcp-elicitation-question">{single.title}</p>}
         <div className="mcp-elicitation-options">{(single.options || []).map(option => <button key={option.value} type="button" disabled={busy} className={/^DENY|^DON'?T|^REJECT/i.test(option.value) ? "deny" : ""} onClick={() => void send({ action: "accept", content: { [single.key]: option.value } })}>{option.label}</button>)}</div></>
-        : <div className="mcp-elicitation-form">{fields.map(field => <label key={field.key} className="field"><span>{field.title || field.key}{field.required ? " *" : ""}</span>
-          {field.type === "enum" ? <select value={String(values[field.key] ?? "")} onChange={event => setValues(current => ({ ...current, [field.key]: event.target.value }))}><option value="" disabled>{ko ? "선택" : "Choose"}</option>{(field.options || []).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+        : <div className="mcp-elicitation-form">{fields.map(field => { const Field = field.type === "enum" ? "div" : "label"; return <Field key={field.key} className="field"><span>{field.title || field.key}{field.required ? " *" : ""}</span>
+          {field.type === "enum" ? <SelectMenu label={field.title || field.key} placeholder={ko ? "선택" : "Choose"} value={String(values[field.key] ?? "")} onChange={next => setValues(current => ({ ...current, [field.key]: next }))} options={(field.options || []).map(option => ({ value: option.value, label: option.label }))} />
             : field.type === "boolean" ? <input type="checkbox" checked={values[field.key] === true} onChange={event => setValues(current => ({ ...current, [field.key]: event.target.checked }))} />
             : <input type={field.type === "number" ? "number" : "text"} value={String(values[field.key] ?? "")} onChange={event => setValues(current => ({ ...current, [field.key]: field.type === "number" ? Number(event.target.value) : event.target.value }))} />}
-          {field.description && <small>{field.description}</small>}</label>)}</div>}
+          {field.description && <small>{field.description}</small>}</Field>; })}</div>}
     </div>
     <footer className="host-approval-actions">{!single && <button type="button" disabled={busy || !ready} onClick={() => void send({ action: "accept", content: values })}><Check size={15} />{ko ? "보내기" : "Send"}</button>}<button type="button" disabled={busy} onClick={() => void send({ action: "decline" })}><X size={15} />{ko ? "거절" : "Decline"}</button></footer>
   </section>;
