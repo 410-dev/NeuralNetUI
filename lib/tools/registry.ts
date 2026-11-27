@@ -7,8 +7,8 @@ const FUNCTION_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
 type Binding = { provider: ToolProvider; ctx: ToolContext; spec: ToolSpec };
 
 export interface ResolvedTools {
-  /** OpenAI-compatible `tools` entries, in provider order. */
-  definitions: Array<Record<string, unknown>>;
+  /** OpenAI-compatible `tools` entries, in provider order, as they stand now (a call can redefine some: ToolExecution.define). */
+  readonly definitions: Array<Record<string, unknown>>;
   /** Function names that were offered but dropped, with the reason, for the server log. */
   rejected: Array<{ provider: string; name: string; reason: string }>;
   has(name: string): boolean;
@@ -67,8 +67,15 @@ export async function resolveTools(request: ToolRequestContext, state: ToolState
       bindings.set(spec.name, { provider: entry.provider, ctx: entry.ctx, spec });
     }
   }
+  // A provider may replace its own tools' definitions while the reply runs (never add tools or take another's names).
+  const redefine = (provider: ToolProvider, specs: ToolSpec[] | undefined) => {
+    for (const spec of specs || []) {
+      const current = bindings.get(spec.name);
+      if (current && current.provider === provider) bindings.set(spec.name, { ...current, spec });
+    }
+  };
   return {
-    definitions: [...bindings.values()].map(binding => toModelTool(binding.spec)),
+    get definitions() { return [...bindings.values()].map(binding => toModelTool(binding.spec)); },
     rejected,
     has: name => bindings.has(name),
     releasesModel: name => bindings.get(name)?.provider.releasesModelWhileRunning === true,
@@ -76,12 +83,13 @@ export async function resolveTools(request: ToolRequestContext, state: ToolState
       const binding = bindings.get(name);
       if (!binding) throw new Error(`Tool ${name} is not enabled.`);
       const ctx: ToolCallContext = { ...binding.ctx, ...call, signal: call.signal ?? binding.ctx.signal };
+      const run = async () => { const execution = await binding.provider.execute(name, args, ctx); redefine(binding.provider, execution.define); return execution; };
       const gated = binding.ctx.gate ? await binding.ctx.gate({ providerId: binding.provider.manifest.id, name, sourceName: binding.spec.sourceName ?? name, readOnlyHint: binding.spec.readOnly, args, ctx }) : "provider";
       if (typeof gated === "object") return { result: gated.result };
-      if (gated === "run") return binding.provider.execute(name, args, ctx);
+      if (gated === "run") return run();
       const authorization = await binding.provider.authorize?.(name, args, ctx);
-      if (authorization && !authorization.approved) return { result: authorization.result };
-      return binding.provider.execute(name, args, ctx);
+      if (authorization && !authorization.approved) { redefine(binding.provider, authorization.define); return { result: authorization.result }; }
+      return run();
     },
   };
 }

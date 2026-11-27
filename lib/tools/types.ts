@@ -25,8 +25,12 @@ export interface ToolSpec {
  */
 export type ToolGate = (call: { providerId: string; name: string; sourceName: string; readOnlyHint?: boolean; args: Record<string, unknown>; ctx: ToolCallContext }) => Promise<"run" | "provider" | { result: unknown }>;
 
-/** What a call returns: `result` is kept on the tool event for the transcript, `content` (when present) is what the model reads. */
-export type ToolExecution = { result: unknown; content?: ModelContentPart[] };
+/**
+ * What a call returns: `result` is kept on the tool event for the transcript, `content` (when present) is what the model
+ * reads. `define` replaces the definitions of the same provider's tools (matched by name) for the rest of the reply,
+ * e.g. MCP tools listed as one-line summaries whose full definitions the model just asked for.
+ */
+export type ToolExecution = { result: unknown; content?: ModelContentPart[]; define?: ToolSpec[] };
 
 /** Server facilities a provider may use without importing the chat runtime. */
 export interface ToolServices {
@@ -74,7 +78,7 @@ export interface ToolCallContext extends ToolContext {
   setWaitPhase(phase: ChatWaitPhase | undefined): void;
 }
 
-export type AuthorizationResult = { approved: true } | { approved: false; result: unknown };
+export type AuthorizationResult = { approved: true } | { approved: false; result: unknown; define?: ToolSpec[] };
 
 export interface ToolProvider {
   manifest: ToolProviderManifest;

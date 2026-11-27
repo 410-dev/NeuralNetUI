@@ -1,6 +1,6 @@
 import { progressEvent } from "./inference-progress";
 import { nativeChatResponse, observeLmStudioPrefill } from "./lm-studio-progress";
-import { CONTINUE_AFTER_DROP_PROMPT, contextOverflowDetails, DEFAULT_HARNESS_SETTINGS, estimateTokens, projectedInputTokens, rollingMessages, contextThresholdReached, usesCompactionThreshold, VISUAL_TOOL_CONTENT_PREFIX } from "./harness";
+import { CONTINUE_AFTER_DROP_PROMPT, contextOverflowDetails, DEFAULT_HARNESS_SETTINGS, estimateTokens, measuredContextInput, projectedInputTokens, rollingMessages, contextThresholdReached, usesCompactionThreshold, VISUAL_TOOL_CONTENT_PREFIX } from "./harness";
 import { contextUsage } from "./context-usage";
 import { harnessCompletion, prepareContext, compactForResume, compactToolContext, dropContextDetails, rollContext, HISTORICAL_SUMMARY_PREFIX, type CompactionRecord, type CompactionUpdate } from "./harness-runtime";
 import { applyContextState, messageBeforeKeptTurns, type ContextState } from "./context-state";
@@ -166,6 +166,9 @@ function usageFrom(payload: Record<string, unknown>) {
     inputTokens: token(value.prompt_tokens ?? value.input_tokens), outputTokens: token(value.completion_tokens ?? value.output_tokens),
     reasoningTokens: token(details?.reasoning_tokens), totalTokens: token(value.total_tokens),
     cachedTokens: token((value.prompt_tokens_details as Record<string, unknown> | undefined)?.cached_tokens),
+    // LMFuseFramework (0.3.8+): the conversation's size as the last model call saw it. prompt_tokens adds up every
+    // call the CLI made for this request, so it can be several times the context.
+    contextInputTokens: token(value.context_tokens),
   };
 }
 
@@ -513,7 +516,7 @@ async function streamTurn(job: ChatJob, body: Record<string, unknown>, headers: 
     }
     if (rawContent || rawReasoning || Array.isArray(delta.tool_calls)) inspectRepetition(job, [...calls.values()]);
     const outputEstimate = estimateTokens(content) + estimateTokens(reasoning) + estimateTokens([...calls.values()]);
-    const used = Math.max(inputEstimate, usage.inputTokens ?? 0) + Math.max(outputEstimate, usage.outputTokens ?? 0, usage.reasoningTokens ?? 0);
+    const used = Math.max(inputEstimate, measuredContextInput(usage, inputEstimate, !!job.lmf) ?? 0) + Math.max(outputEstimate, usage.outputTokens ?? 0, usage.reasoningTokens ?? 0);
     chargedUsage = { inputTokens: job.lmf ? lmfChargedInput(job.lmf.connection, usage.inputTokens ?? inputEstimate, usage.cachedTokens) : usage.inputTokens ?? inputEstimate, outputTokens: usage.outputTokens ?? outputEstimate };
     if (chargeModelId) setLiveTokenUsage(job.userId, job.message.id, chargeModelId, chargedUsage.inputTokens, chargedUsage.outputTokens);
     job.message.contextTokens = used;
@@ -677,7 +680,7 @@ async function run(job: ChatJob) {
     // Every provider the request switched on and the server allows, fixed for the whole reply.
     const resolvedTools = await resolveTools(toolRequest, job.agent ? agentToolState(job.agent.toolState ?? requestToolState(job.input.tools), job.agent.autonomous) : requestToolState(job.input.tools), job.agent ? [...toolSources(), ...job.agent.sources] : toolSources());
     for (const dropped of resolvedTools.rejected) console.warn(`Tool ${dropped.name} from ${dropped.provider} was not offered: ${dropped.reason}.`);
-    const tools = resolvedTools.definitions;
+    let tools = resolvedTools.definitions;
     const firstResponse = !job.conversation.branches.some(b => b.messages.some(m => m.role === "assistant" && m.content));
     const generateTitle = async () => {
       if (!harness.titleEnabled || !firstResponse) return;
@@ -848,7 +851,8 @@ async function run(job: ChatJob) {
         if (routed) { job.message = { ...job.message, routedModel: routed }; broadcast(job, true); }
       }
       route.record(result.chargedUsage.inputTokens,result.chargedUsage.outputTokens);
-      const serverMeasuredInput = result.usage.inputTokens ? result.usage.inputTokens + (result.usage.outputTokens || 0) : undefined;
+      const contextInput = measuredContextInput(result.usage, estimateTokens(messages) + estimateTokens(tools), !!job.lmf);
+      const serverMeasuredInput = contextInput ? contextInput + (result.usage.outputTokens || 0) : undefined;
       if (result.compact) {
         job.controller.signal.throwIfAborted();
         releaseModel?.(); releaseModel = undefined;
@@ -885,7 +889,7 @@ async function run(job: ChatJob) {
         closeReasoningStep(job, reasoningSeconds);
         const toolEvents = job.message.toolEvents?.map(event => event.result && typeof event.result === "object" && Number.isFinite(Number((event.result as Record<string, unknown>).contextTokens))
           ? { ...event, result: { ...(event.result as Record<string, unknown>), contextTokensConsumed: true } } : event);
-        job.message = { ...job.message, ...(toolEvents ? { toolEvents } : {}), ...result.usage, contextTokens: (result.usage.inputTokens ?? estimateTokens(messages)) + (result.usage.outputTokens ?? estimateTokens(result.content)), reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,
+        job.message = { ...job.message, ...(toolEvents ? { toolEvents } : {}), ...result.usage, contextTokens: (contextInput ?? estimateTokens(messages)) + (result.usage.outputTokens ?? estimateTokens(result.content)), reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,
           completionDurationSeconds: result.visibleDurationSeconds,
           timeToFirstTokenSeconds: Math.max(0, (performance.now() - requestStartedAt - (result.visibleDurationSeconds || 0) * 1000) / 1000) };
         releaseModel?.(); releaseModel = undefined;
@@ -930,6 +934,8 @@ async function run(job: ChatJob) {
         if (images.length) visualToolContent.push({ type: "text", text: `${VISUAL_TOOL_CONTENT_PREFIX}${call.function.name} tool:` }, ...images);
       }
       if (visualToolContent.length) messages.push({ role: "user", content: visualToolContent });
+      // Tools whose full definitions were just read (MCP on demand) are offered with them from the next request on.
+      tools = resolvedTools.definitions;
     }
     throw new Error("The model repeated tool calls too many times.");
   } catch (error) {

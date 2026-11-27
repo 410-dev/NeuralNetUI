@@ -22,6 +22,15 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
   // shared cookies): NeuralNetUI's browser tools, offered under the computer's name and permissions.
   const browser = new Map<string, { name: string; policy: McpToolPolicy }>();
   const namespace = `mcp_${connection.id.replace(/-/g, "").slice(0, 8)}_`;
+  const label = `[MCP: ${connection.name}]`;
+  const readOnly = (binding: McpToolBinding) => (binding.tool as { annotations?: { readOnlyHint?: boolean } }).annotations?.readOnlyHint === true;
+  const schemaOf = (binding: McpToolBinding) => (binding.tool.inputSchema || { type: "object", properties: {} }) as Record<string, unknown>;
+  const fullSpec = (binding: McpToolBinding) => ({ name: binding.advertisedName, sourceName: binding.toolName, readOnly: readOnly(binding), description: `${label} ${binding.tool.description || binding.toolName}`, inputSchema: schemaOf(binding) });
+  // On demand: a held-back call or a details request puts the full definitions into the tool list (ToolExecution.define).
+  const heldBack = (target: McpToolBinding) => ({
+    result: { executed: false, reason: "This tool's full description and argument schema are now in your tool list. Read them, then call the tool again with arguments that match the schema.", tools: [{ name: target.toolName, call_as: target.advertisedName }] },
+    define: [fullSpec(target)],
+  });
   return {
     manifest: mcpManifest(connection, order),
     async tools(ctx) {
@@ -39,17 +48,16 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
         return [{ ...spec, name, sourceName: spec.name, description: `[MCP: ${connection.name}] ${spec.description}` }];
       });
       const mode = connection.kind === "vm" ? "full" : connection.toolDefinitions || "trimmed";
-      const label = `[MCP: ${connection.name}]`;
-      const readOnly = (binding: McpToolBinding) => (binding.tool as { annotations?: { readOnlyHint?: boolean } }).annotations?.readOnlyHint === true;
-      const schemaOf = (binding: McpToolBinding) => (binding.tool.inputSchema || { type: "object", properties: {} }) as Record<string, unknown>;
       if (mode === "on_demand" && listed.length) {
         // Names and one line each; the full definitions come from the details function when the model needs them.
+        // Tools already read in this conversation keep their full definitions, so compaction cannot take them away.
         const details = mcpToolAlias(connection.id, DETAILS_TOOL);
+        const read = toolsWithDetails(ctx.history(), namespace);
         return [{
           name: details, sourceName: DETAILS_TOOL, readOnly: true,
-          description: `${label} Returns the full description and argument schema of tools of this connection. Call it with the tools you are about to use before calling them; their listed descriptions are one-line summaries and their arguments are not shown until then.`,
+          description: `${label} Adds the full description and argument schema of tools of this connection to your tool list. Call it with the tools you are about to use before calling them; their listed descriptions are one-line summaries and their arguments are not shown until then.`,
           inputSchema: { type: "object", additionalProperties: false, required: ["names"], properties: { names: { type: "array", minItems: 1, maxItems: 20, items: { type: "string" }, description: "Tool names, as listed (with or without the mcp_… prefix)" } } },
-        }, ...listed.map(binding => ({
+        }, ...listed.map(binding => read.has(binding.toolName) ? fullSpec(binding) : ({
           name: binding.advertisedName, sourceName: binding.toolName, readOnly: readOnly(binding),
           description: `${label} ${summarize(binding.tool.description || binding.toolName)} (Arguments: call ${details} first.)`,
           inputSchema: { type: "object", additionalProperties: true, properties: {} },
@@ -66,9 +74,7 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
       // On demand: a tool whose definition the model has not read here is not run; it gets the definition instead.
       if (connection.toolDefinitions === "on_demand" && connection.kind !== "vm") {
         const target = bindings.get(name);
-        if (target && !toolsWithDetails(ctx.history(), namespace).has(target.toolName)) {
-          return { approved: false, result: { executed: false, reason: "Read the tool's definition first. It is below; call the tool again with arguments that match its schema.", tools: [definitionOf(target)] } };
-        }
+        if (target && !toolsWithDetails(ctx.history(), namespace).has(target.toolName)) return { approved: false, ...heldBack(target) };
       }
       const web = browser.get(name);
       if (web) {
@@ -91,12 +97,15 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
         const all = [...bindings.values()];
         const found = wanted.flatMap(item => all.filter(binding => binding.toolName === item || binding.advertisedName === item)).filter((binding, index, list) => list.indexOf(binding) === index);
         const missing = wanted.filter(item => !all.some(binding => binding.toolName === item || binding.advertisedName === item));
-        return { result: { tools: found.map(definitionOf), ...(missing.length ? { unknown: missing } : {}) } };
+        return {
+          result: { tools: found.map(binding => ({ name: binding.toolName, call_as: binding.advertisedName })), ...(found.length ? { note: "Their full descriptions and argument schemas are now in your tool list. Read them there and call the tools directly." } : {}), ...(missing.length ? { unknown: missing } : {}) },
+          define: found.map(fullSpec),
+        };
       }
       // The personal agent's automatic runs skip authorize(): the same check applies here.
       if (connection.toolDefinitions === "on_demand" && connection.kind !== "vm") {
         const target = bindings.get(name);
-        if (target && !toolsWithDetails(ctx.history(), namespace).has(target.toolName)) return { result: { executed: false, reason: "Read the tool's definition first. It is below; call the tool again with arguments that match its schema.", tools: [definitionOf(target)] } };
+        if (target && !toolsWithDetails(ctx.history(), namespace).has(target.toolName)) return heldBack(target);
       }
       const web = browser.get(name);
       if (web) {
@@ -151,9 +160,4 @@ async function vmBrowserSpecs(ctx: Parameters<ToolProvider["tools"]>[0]) {
   const { browserProvider, browserToolSpecs } = await import("./builtin");
   if (!toolRequirementsMet(browserProvider.manifest, { role: ctx.role, disabledTools: ctx.disabledTools, managedTools: ctx.managedTools })) return [];
   return browserToolSpecs(ctx).catch(() => []);
-}
-
-/** A tool's full definition as the server describes it, under the name the model calls it by. */
-function definitionOf(binding: McpToolBinding) {
-  return { name: binding.toolName, call_as: binding.advertisedName, description: binding.tool.description || "", input_schema: binding.tool.inputSchema || { type: "object", properties: {} } };
 }

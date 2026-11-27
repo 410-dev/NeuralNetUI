@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { contextOverflowDetails, contextThresholdReached, projectedInputTokens, DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages } from "./harness.ts";
+import { contextOverflowDetails, contextThresholdReached, measuredContextInput, projectedInputTokens, DEFAULT_HARNESS_SETTINGS, estimateTokens, rollingMessages } from "./harness.ts";
 
 test("resume substitution is literal and non-recursive; threshold includes equality", async () => {
   const { resumePrompt, contextThresholdReached } = await import("./harness.ts");
@@ -123,4 +123,13 @@ test("YouTube links, subtitle tracks and paging", async () => {
   const first = yt.page("alpha beta gamma delta", 0, 12);
   assert.equal(first.text, "alpha beta");
   assert.equal(yt.page("alpha beta gamma delta", first.next!, 100).text, " gamma delta");
+});
+
+test("the context size LMF reports wins over its summed prompt tokens; an implausible LMF sum is not trusted", () => {
+  // codex called its model twice on a 229k conversation: prompt_tokens 458k, context 229k.
+  assert.equal(measuredContextInput({ inputTokens: 458_634, contextInputTokens: 229_500 }, 200_000, true), 229_500);
+  assert.equal(measuredContextInput({ inputTokens: 458_634 }, 200_000, true), undefined);
+  assert.equal(measuredContextInput({ inputTokens: 230_000 }, 200_000, true), 230_000);
+  assert.equal(measuredContextInput({ inputTokens: 458_634 }, 200_000, false), 458_634);
+  assert.equal(measuredContextInput({}, 200_000, true), undefined);
 });

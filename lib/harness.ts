@@ -131,6 +131,16 @@ export function contextThresholdReached(tokens: number, window: number | undefin
  * tokenizer actually charges, so never decide on the smaller of the two numbers: the interface
  * shows the same floor, and compaction has to trigger when that reading crosses the threshold.
  */
+/**
+ * The input size to compare with the context window. A reported context size wins; otherwise an LMF prompt_tokens far
+ * above our own estimate is taken as several model calls added together (older LMF), not a bigger context.
+ */
+export function measuredContextInput(usage: { inputTokens?: number; contextInputTokens?: number }, estimate: number, lmf: boolean) {
+  if (usage.contextInputTokens) return usage.contextInputTokens;
+  if (!usage.inputTokens) return undefined;
+  return lmf && estimate > 0 && usage.inputTokens > estimate * 1.8 ? undefined : usage.inputTokens;
+}
+
 export function projectedInputTokens(estimate: number, measured?: number, estimateAtMeasurement?: number): number {
   const measuredFloor = typeof measured === "number" && Number.isFinite(measured) && measured > 0 ? Math.floor(measured) : 0;
   const anchor = typeof estimateAtMeasurement === "number" && Number.isFinite(estimateAtMeasurement) && estimateAtMeasurement >= 0

@@ -14,8 +14,8 @@ import { McpOAuthError, oauthAccessToken, readOAuthConfig, type McpOAuthConfig }
 import { mcpOAuthPreset } from "./mcp-oauth-presets";
 import { TOOL_DEFINITION_MODES, type ToolDefinitionMode } from "./mcp-tool-definitions";
 import { statelessListTools, statelessToolCall, usesStatelessProtocol, type ElicitationAnswer, type ElicitationRequest } from "./mcp-stateless";
+import { parseJsonText, resultBudget, slimJson, slimText } from "./mcp-result";
 
-const MAX_RESULT_CHARS = 100_000;
 const CONNECTION_TIMEOUT_MS = 20_000;
 export const DEFAULT_MCP_TOOL_TIMEOUT_SECONDS = 20;
 export const MIN_MCP_TOOL_TIMEOUT_SECONDS = 5;
@@ -276,7 +276,6 @@ export async function mcpConnectionBindings(userId: string, connectionId: string
   return [...bindings.values()];
 }
 
-function bounded(value: string) { return value.length <= MAX_RESULT_CHARS ? value : `${value.slice(0, MAX_RESULT_CHARS)}\n[Result truncated]`; }
 
 export type McpToolProgress = { stage: "tool" | "storage"; progress: number; total?: number; message?: string; name?: string };
 
@@ -315,19 +314,25 @@ export async function executeMcpTool(userId: string, binding: McpToolBinding, ar
   });
   const content: ModelContentPart[] = [];
   const summaries: unknown[] = [];
+  const bounded = resultBudget();
+  // Servers that return structuredContent also put the same JSON in a text part (the spec asks them to): send it once.
+  const structured = response.structuredContent !== undefined;
   for (const part of response.content || []) {
     const link = mcpStorageLink(part, row.url);
     if (link) {
       const saved = await saveLinkToStorage(row, userId, link, timeoutMs, signal, onProgress);
       content.push({ type: "text", text: saved.text }); summaries.push(saved.summary);
     }
-    else if (part.type === "text") { const text = bounded(part.text); content.push({ type: "text", text }); summaries.push({ type: "text", text }); }
+    else if (part.type === "text") {
+      if (structured && parseJsonText(part.text)) continue;
+      const text = bounded(slimText(part.text)); content.push({ type: "text", text }); summaries.push({ type: "text", text });
+    }
     else if (part.type === "image") { content.push({ type: "image_url", image_url: { url: `data:${part.mimeType};base64,${part.data}` } }); summaries.push({ type: "image", mimeType: part.mimeType, bytes: Math.ceil(part.data.length * .75) }); }
-    else if (part.type === "resource" && "text" in part.resource) { const text = bounded(part.resource.text); content.push({ type: "text", text }); summaries.push({ type: "resource", uri: part.resource.uri, text }); }
+    else if (part.type === "resource" && "text" in part.resource) { const text = bounded(slimText(part.resource.text)); content.push({ type: "text", text }); summaries.push({ type: "resource", uri: part.resource.uri, text }); }
     else summaries.push({ type: part.type });
   }
-  if (response.structuredContent !== undefined) {
-    const text = bounded(JSON.stringify(response.structuredContent));
+  if (structured) {
+    const text = bounded(JSON.stringify(slimJson(response.structuredContent)));
     content.push({ type: "text", text });
     summaries.push({ type: "structured", text });
   }

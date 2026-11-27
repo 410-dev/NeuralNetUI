@@ -5,9 +5,10 @@
  *
  * - full: as the server sends them.
  * - trimmed: tool descriptions and field descriptions cut at a length; types, required fields and enums stay.
- * - on_demand: only names and a one-line summary are sent, with one extra function that returns the full definitions
- *   of the tools the model is about to use. A call to a tool whose definition was not read in this conversation is
- *   not run: the model gets the definition back instead and calls again.
+ * - on_demand: only names and a one-line summary are sent, with one extra function that puts the full definitions of
+ *   the tools the model is about to use into its tool list (from the next request of the reply on, and in later
+ *   replies of the conversation, so compaction cannot take them away). A call to a tool whose definition was not read
+ *   in this conversation is not run: its definition is added instead and the model calls again.
  */
 export type ToolDefinitionMode = "full" | "trimmed" | "on_demand";
 export const TOOL_DEFINITION_MODES: readonly ToolDefinitionMode[] = ["full", "trimmed", "on_demand"];

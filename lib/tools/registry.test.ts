@@ -83,3 +83,18 @@ test("a plan can switch off a built-in tool", async () => {
   assert.equal(toolRequirementsMet(search, { disabledTools: ["web-search"] }), false);
   assert.equal(toolRequirementsMet({ ...search, origin: "user" }, { disabledTools: ["web-search"] }), true);
 });
+
+test("a call can redefine its own provider's tools for the rest of the reply, never another provider's", async () => {
+  const mine: ToolProvider = {
+    manifest: manifest("mine", { functions: [fn("details"), fn("search")] }),
+    tools: () => [spec("details"), spec("search")],
+    execute: async () => ({ result: "ok", define: [{ name: "search", description: "full", inputSchema: { type: "object", properties: { q: { type: "string" } } } }, { name: "other", description: "taken", inputSchema: {} }] }),
+  };
+  const theirs: ToolProvider = { manifest: manifest("theirs", { functions: [fn("other")] }), tools: () => [spec("other")], execute: async () => ({ result: "x" }) };
+  const resolved = await resolveTools(request(), normalizeToolState(undefined), [source(mine, theirs)]);
+  const describe = (name: string) => (resolved.definitions.find(item => (item.function as { name: string }).name === name)!.function as { description: string }).description;
+  assert.equal(describe("search"), "search");
+  await resolved.execute("details", {}, callBits);
+  assert.equal(describe("search"), "full");
+  assert.equal(describe("other"), "other");
+});
