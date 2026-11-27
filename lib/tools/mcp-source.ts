@@ -2,6 +2,7 @@ import { describeMcpApproval } from "../mcp-approval";
 import { executeMcpTool, listMcpConnections, mcpConnectionBindings, mcpEntitlement, toolPolicies, type McpToolBinding, type McpToolProgress } from "../mcp";
 import { mcpToolAlias } from "../mcp-utils";
 import { vmDefaultPolicy } from "../vm";
+import { maskSecureInput, runSecureInputTool, SECURE_INPUT_SPECS } from "../secure-input";
 import type { McpConnection, McpToolPolicy } from "../types";
 import { requestApproval, type ApprovalPolicy } from "./approval";
 import { mcpManifest, toolRequirementsMet } from "./catalog";
@@ -24,7 +25,8 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
       const listed = await mcpConnectionBindings(ctx.userId, connection.id, ctx.signal);
       bindings.clear(); browser.clear();
       for (const binding of listed) bindings.set(binding.advertisedName, binding);
-      const browserSpecs = connection.kind === "vm" ? await vmBrowserSpecs(ctx) : [];
+      // Input cards need someone at the screen: offered in regular chats, not to the personal agent.
+      const browserSpecs = connection.kind === "vm" ? [...await vmBrowserSpecs(ctx), ...(ctx.agent ? [] : SECURE_INPUT_SPECS)] : [];
       const policies = browserSpecs.length ? toolPolicies(connection.id) : new Map<string, McpToolPolicy>();
       const extra = browserSpecs.flatMap(spec => {
         const policy = policies.get(spec.name) || vmDefaultPolicy(spec.name);
@@ -58,7 +60,12 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
     },
     async execute(name, args, ctx) {
       const web = browser.get(name);
-      if (web) { const { browserProvider } = await import("./builtin"); return browserProvider.execute(web.name, args, ctx); }
+      if (web) {
+        if (SECURE_INPUT_SPECS.some(spec => spec.name === web.name)) return runSecureInputTool(web.name, args, ctx);
+        const { browserProvider } = await import("./builtin");
+        // Values the person typed into an input card are masked wherever a page shows them back.
+        return maskSecureInput(ctx.conversationId, await browserProvider.execute(web.name, args, ctx));
+      }
       const binding = bindings.get(name);
       if (!binding) throw new Error(`MCP tool ${name} is not available.`);
       // Long calls (downloads, saves to storage) show their progress on the tool event while they run.
@@ -72,7 +79,8 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
           : update.message || (ko ? `진행 중 ${amount}` : `Working ${amount}`);
         ctx.updateEvent({ result: { inProgress: true, stage: update.stage, message: text.trim(), ...(update.total ? { progress: update.progress, total: update.total } : {}) } });
       };
-      return executeMcpTool(ctx.userId, binding, args, ctx.signal, show);
+      const output = executeMcpTool(ctx.userId, binding, args, ctx.signal, show);
+      return connection.kind === "vm" ? output.then(value => maskSecureInput(ctx.conversationId, value)) : output;
     },
   };
 }

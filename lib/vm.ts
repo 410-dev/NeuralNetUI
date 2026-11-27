@@ -32,7 +32,7 @@ export function vmBaseUrl(url: string) {
 
 /** Default approval for the virtual computer's own tools: reading is allowed, anything that changes the computer asks. */
 export function vmDefaultPolicy(toolName: string): "always_allow" | "always_ask" | "session_ask" {
-  if (toolName.startsWith("browser_")) return "always_allow";
+  if (toolName.startsWith("browser_") || toolName === "request_user_input" || toolName === "fill_held_input") return "always_allow";
   if (["computer_info", "shell_output", "shell_jobs", "screen_capture", "copy_to_storage"].includes(toolName)) return "always_allow";
   if (toolName === "copy_from_storage") return "session_ask";
   return "always_ask";

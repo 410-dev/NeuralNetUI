@@ -149,7 +149,7 @@ export async function listMcpTools(userId: string, connectionId: string, signal?
     const client=await connectedClient(row,signal);
     try {
       const result=await client.listTools(undefined,{signal:requestSignal(signal),cacheMode:"bypass"});
-      const browser=row.kind==="vm"?await vmBrowserToolList(userId).catch(()=>[]):[];
+      const browser=row.kind==="vm"?[...await vmBrowserToolList(userId).catch(()=>[]),...(await import("./secure-input")).SECURE_INPUT_SPECS]:[];
       return [...result.tools,...(row.kind==="vm"?VM_FILE_TOOLS:[]),...browser].map(tool=>({name:tool.name,description:tool.description,inputSchema:tool.inputSchema,policy:policies.get(tool.name)||(row.kind==="vm"?vmDefaultPolicy(tool.name):DEFAULT_TOOL_POLICY)}));
     } finally { await client.close().catch(()=>undefined); }
   });
