@@ -2291,6 +2291,15 @@ const agentRunSummaries = new Map<string, Promise<AgentRunSummary | undefined>>(
 /** The subagent behind an agent message the person did not ask for: its model, how long it worked, its tokens. */
 function AgentRunStats({ locale, runId }: { locale: Locale; runId: string }) {
   const [run, setRun] = useState<AgentRunSummary | null>();
+  // Touch screens have no hover, and iOS does not focus a tapped label: a tap opens and closes the card.
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: Event) => { if (!box.current?.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
   const ko = locale === "ko";
   const load = () => {
     if (run) return;
@@ -2305,8 +2314,8 @@ function AgentRunStats({ locale, runId }: { locale: Locale; runId: string }) {
   const seconds = run?.startedAt ? ((run.finishedAt ? Date.parse(run.finishedAt) : Date.now()) - Date.parse(run.startedAt)) / 1000 : undefined;
   const tokens = run && (run.inputTokens !== undefined || run.outputTokens !== undefined)
     ? `${formatTokens((run.inputTokens || 0) + (run.outputTokens || 0), locale)} (${ko ? "입력" : "in"} ${formatTokens(run.inputTokens || 0, locale)} · ${ko ? "출력" : "out"} ${formatTokens(run.outputTokens || 0, locale)})` : undefined;
-  return <small className="message-token-stats agent-run-stats" onMouseEnter={load} onFocus={load}>
-    <span className="token-rate" tabIndex={0} aria-label={ko ? "서브에이전트 작업 내역" : "Subagent work"}><span><Bot size={12} /> {ko ? "서브에이전트" : "Subagent"}</span>
+  return <small className="message-token-stats agent-run-stats" ref={box} onMouseEnter={load} onFocus={load}>
+    <span className={`token-rate ${open ? "open" : ""}`} tabIndex={0} role="button" aria-expanded={open} aria-label={ko ? "서브에이전트 작업 내역" : "Subagent work"} onClick={() => { load(); setOpen(value => !value); }} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); load(); setOpen(value => !value); } else if (event.key === "Escape") setOpen(false); }}><span><Bot size={12} /> {ko ? "서브에이전트" : "Subagent"}</span>
       <span className="token-rate-tooltip" role="tooltip">
         {run === undefined ? <small>{ko ? "불러오는 중…" : "Loading…"}</small> : run === null ? <small>{ko ? "작업 기록을 찾을 수 없습니다" : "The run could not be found"}</small> : <>
           <strong>{run.title}</strong>

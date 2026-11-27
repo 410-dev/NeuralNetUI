@@ -438,7 +438,7 @@ button.usage-lmf-name:hover { color:#fff; }
 .token-rate-tooltip strong, .token-rate-tooltip small { display: block; }
 .token-rate-tooltip strong { font-size: 10.5px; font-weight: 650; }
 .token-rate-tooltip small { margin-top: 4px; color: var(--muted); font-size: 9.5px; }
-.token-rate:hover .token-rate-tooltip, .token-rate:focus-visible .token-rate-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
+.token-rate:hover .token-rate-tooltip, .token-rate:focus-visible .token-rate-tooltip, .token-rate.open .token-rate-tooltip { opacity: 1; visibility: visible; transform: translateY(0); }
 .message-action-button { width: 29px; height: 29px; display: grid; place-items: center; padding: 0; background: transparent; color: var(--dim); border-radius: var(--radius-xs); }
 .message-action-button:hover { color: var(--text); background: rgba(255,255,255,.05); }
 .revision-navigator { min-height: 29px; display: flex; align-items: center; gap: 1px; color: var(--dim); font-size: 10.5px; font-variant-numeric: tabular-nums; }
@@ -992,7 +992,8 @@ button.usage-lmf-name:hover { color:#fff; }
    hovering its token stats) was laid out at the 120px placeholder for a moment and the thread jumped up by the difference. */
 .thread .message-row { content-visibility: auto; contain-intrinsic-size: auto 120px; }
 .thread .message-row:has(.token-rate:hover),
-.thread .message-row:has(.token-rate:focus-visible) { position: relative; z-index: 2; content-visibility: visible; }
+.thread .message-row:has(.token-rate:focus-visible),
+.thread .message-row:has(.token-rate.open) { position: relative; z-index: 2; content-visibility: visible; }
 
 @media (max-width: 560px) {
   .user-message-actions { width: min(100%, calc(100vw - 36px)); max-width: calc(100vw - 36px); flex-direction: column; align-items: flex-end; gap: 2px; }

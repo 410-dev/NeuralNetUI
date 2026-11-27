@@ -713,6 +713,24 @@ function openDatabase() {
     if (!runColumns.some(column => column.name === "output_tokens")) connection.exec("ALTER TABLE agent_runs ADD COLUMN output_tokens INTEGER;");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(39, new Date().toISOString());
   })();
+  const runLinkVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (runLinkVersion.version < 40) connection.transaction(() => {
+    // Main-chat messages from before 39 get their subagent run where it is unambiguous: a result names its run and
+    // arrived within a minute of the run finishing; a notice falls inside exactly one run of the same account.
+    const runs = connection.prepare("SELECT id, user_id, title, started_at, finished_at FROM agent_runs WHERE started_at IS NOT NULL").all() as Array<{ id: string; user_id: string; title: string; started_at: string; finished_at: string | null }>;
+    const candidates = connection.prepare(`SELECT m.id, m.agent_kind, m.content, m.created_at, c.user_id FROM messages m JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.agent_run_id IS NULL AND (m.agent_kind = 'notice' OR (m.agent_kind = 'context' AND m.content LIKE '[Subagent result · %'))`).all() as Array<{ id: string; agent_kind: string; content: string; created_at: string; user_id: string }>;
+    const link = connection.prepare("UPDATE messages SET agent_run_id = ? WHERE id = ?");
+    for (const message of candidates) {
+      const at = Date.parse(message.created_at), own = runs.filter(run => run.user_id === message.user_id);
+      const match = message.agent_kind === "context"
+        ? own.filter(run => run.finished_at && message.content.startsWith(`[Subagent result · ${run.title} · `) && Math.abs(Date.parse(run.finished_at) - at) < 60_000)
+          .sort((a, b) => Math.abs(Date.parse(a.finished_at!) - at) - Math.abs(Date.parse(b.finished_at!) - at)).slice(0, 1)
+        : own.filter(run => Date.parse(run.started_at) <= at && (!run.finished_at || at <= Date.parse(run.finished_at)));
+      if (match.length === 1) link.run(match[0].id, message.id);
+    }
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(40, new Date().toISOString());
+  })();
   return connection;
 }
 
