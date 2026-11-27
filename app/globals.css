@@ -61,7 +61,11 @@ input[type="number"]::-webkit-outer-spin-button, input[type="number"]::-webkit-i
 button:disabled { cursor: not-allowed; opacity: .55; }
 ::selection { background: rgb(var(--accent-rgb) / .55); color: white; }
 
-.app-shell { height: var(--app-height, 100dvh); display: flex; gap: 10px; padding: 12px; overflow: hidden; background: radial-gradient(circle at 72% 55%, rgb(var(--background-accent-rgb, var(--accent-rgb)) / .16), transparent 34%), var(--bg); }
+/* The background tint fades between the accent and the temporary chat's grey instead of switching at once:
+   --temporary-mix is a registered number, so it animates and every colour mixed from it follows. */
+@property --temporary-mix { syntax: "<number>"; inherits: true; initial-value: 0; }
+.app-shell { --glow-color: color-mix(in srgb, rgb(var(--background-accent-rgb, var(--accent-rgb))), rgb(128 128 128) calc(var(--temporary-mix) * 100%)); transition: --temporary-mix .55s cubic-bezier(.22,.8,.28,1); }
+.app-shell { height: var(--app-height, 100dvh); display: flex; gap: 10px; padding: 12px; overflow: hidden; background: radial-gradient(circle at 72% 55%, color-mix(in srgb, var(--glow-color) 16%, transparent), transparent 34%), var(--bg); }
 .sidebar { width: 254px; flex: 0 0 254px; display: flex; flex-direction: column; gap: 10px; z-index: 30; transition: width .46s var(--spring), flex-basis .46s var(--spring); }
 .side-panel, .profile-card { background: rgba(22,22,26,.94); border: 1px solid var(--border); box-shadow: inset 0 1px rgba(255,255,255,.025); }
 .side-panel { flex: 1; min-height: 0; overflow: hidden; border-radius: var(--radius-xl); padding: 10px; display: flex; flex-direction: column; transition: padding .46s var(--spring); }
@@ -180,7 +184,7 @@ button.usage-lmf-name:hover { color:#fff; }
 .usage-credit-list button small { color:var(--dim);font-size:10px;margin-top:2px; }
 
 .chat-surface { flex: 1; min-width: 0; position: relative; overflow: hidden; display: flex; flex-direction: column; border-radius: var(--radius-xl); }
-.ambient-glow { pointer-events: none; position: absolute; width: min(960px, 90%); height: min(650px, 82%); left: 50%; top: 52%; transform: translate(-50%, -50%); background: radial-gradient(ellipse, rgb(var(--background-accent-rgb, var(--accent-rgb)) / .38) 0%, rgb(var(--background-accent-rgb, var(--accent-rgb)) / .2) 29%, transparent 69%); filter: blur(4px); --glow-ease: cubic-bezier(.22,.8,.28,1); transition: opacity .6s ease, top .64s var(--glow-ease), width .64s var(--glow-ease), height .64s var(--glow-ease); }
+.ambient-glow { pointer-events: none; position: absolute; width: min(960px, 90%); height: min(650px, 82%); left: 50%; top: 52%; transform: translate(-50%, -50%); background: radial-gradient(ellipse, color-mix(in srgb, var(--glow-color, rgb(var(--accent-rgb))) 38%, transparent) 0%, color-mix(in srgb, var(--glow-color, rgb(var(--accent-rgb))) 20%, transparent) 29%, transparent 69%); filter: blur(4px); --glow-ease: cubic-bezier(.22,.8,.28,1); transition: opacity .6s ease, top .64s var(--glow-ease), width .64s var(--glow-ease), height .64s var(--glow-ease); }
 .chat-surface { transition: background-color .5s ease; }
 .app-shell.chat-active .chat-surface { background: #08080a; }
 /* In an open chat the glow sinks to the bottom edge and spreads wide, dimmer and shallower than the
@@ -273,6 +277,7 @@ button.usage-lmf-name:hover { color:#fff; }
 .conversation-stage { min-height: 0; flex: 1; display: flex; flex-direction: column; justify-content: center; position: relative; z-index: 10; }
 .chat-active .conversation-stage { justify-content: flex-start; }
 .welcome { text-align: center; margin: auto auto 30px; }
+.agent-load-error { margin-top: 12px; color: #f6a6a6; font-size: 12px; overflow-wrap: anywhere; }
 .welcome h1 { margin: 0; font-size: clamp(31px, 4vw, 42px); font-weight: 430; letter-spacing: -.035em; word-break: keep-all; text-wrap: balance; }
 .welcome p { color: var(--muted); margin: 10px 0 0; font-size: 15px; }
 .thread-shell { flex: 1; min-height: 0; position: relative; }
@@ -1327,7 +1332,11 @@ button.usage-lmf-name:hover { color:#fff; }
 .surface-action:disabled { opacity: .55; }
 
 /* The model mark reads as a drawn glyph, so give it room without a plate. */
-.temporary-chat { --background-accent-rgb: 128 128 128; }
+.temporary-chat { --temporary-mix: 1; }
+/* The greeting fades over when a chat turns temporary or back (the welcome block is keyed on the mode). */
+.welcome.mode-swap > * { animation: welcome-swap .42s cubic-bezier(.22,.8,.28,1) both; }
+.welcome.mode-swap > p { animation-delay: .05s; }
+@keyframes welcome-swap { from { opacity: 0; transform: translateY(6px); filter: blur(3px); } to { opacity: 1; transform: none; filter: none; } }
 .model-option .selection-dot { align-self: center; }
 .model-column-list > button.active .model-type-icon { color: var(--text); }
 
