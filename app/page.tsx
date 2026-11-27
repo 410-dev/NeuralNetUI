@@ -706,16 +706,34 @@ export default function Home() {
     // The app also shrinks the WebView once its keyboard is up and grows it back as the keyboard goes down, so the
     // full height is only read from a resize while no keyboard is reported (a rotation, the WebView growing back).
     const onWindowResize = () => { if (nativeShell && !nativeInset) restingHeight = window.innerHeight; schedule(); };
+    // The keyboard-open layout (composer pinned to the bottom, smaller greeting) cannot animate by itself, so it is
+    // applied at once and the content is moved back to where it was with a transform; that transform then runs to
+    // zero on the keyboard's curve while the shell shrinks or grows. Nothing jumps: it glides from where it stood.
+    let flipped: HTMLElement | null = null;
     const onNativeKeyboard = (event: Event) => {
       const detail = (event as CustomEvent<{ height?: number; duration?: number }>).detail || {};
-      nativeInset = Math.max(0, Math.round(Number(detail.height) || 0));
       const duration = Math.max(0, Math.min(600, Math.round(Number(detail.duration) || 0)));
+      const curve = "cubic-bezier(.2,0,0,1)";
+      window.clearTimeout(settle);
+      cancelAnimationFrame(frame);
+      if (flipped) { flipped.style.transition = ""; flipped.style.transform = ""; }
+      root.classList.remove("native-keyboard-moving");
+      const target = document.querySelector<HTMLElement>(".idle-center") ?? document.querySelector<HTMLElement>(".composer-wrap");
+      const anchor = document.querySelector<HTMLElement>(".composer");
+      const before = anchor?.getBoundingClientRect().top;
+      nativeInset = Math.max(0, Math.round(Number(detail.height) || 0));
+      const composerFocused = document.activeElement instanceof HTMLTextAreaElement && Boolean(document.activeElement.closest(".composer"));
+      const open = composerFocused && nativeInset > 80;
+      if (open !== last.open) { root.classList.toggle("keyboard-open", open); last = { ...last, open }; }
+      const after = anchor?.getBoundingClientRect().top;
+      const offset = before !== undefined && after !== undefined ? Math.round(before - after) : 0;
+      flipped = duration > 0 && target && offset ? target : null;
+      if (flipped) { flipped.style.transition = "none"; flipped.style.transform = `translateY(${offset}px)`; void flipped.getBoundingClientRect(); }
       root.style.setProperty("--keyboard-duration", `${duration}ms`);
       root.classList.toggle("native-keyboard-moving", duration > 0);
-      window.clearTimeout(settle);
-      settle = window.setTimeout(() => root.classList.remove("native-keyboard-moving"), duration + 60);
-      cancelAnimationFrame(frame);
+      if (flipped) { flipped.style.transition = `transform ${duration}ms ${curve}`; flipped.style.transform = ""; }
       apply();
+      settle = window.setTimeout(() => { root.classList.remove("native-keyboard-moving"); if (flipped) { flipped.style.transition = ""; flipped = null; } }, duration + 60);
     };
     if (nativeShell) { root.classList.add("native-shell"); window.addEventListener("nnui-native-keyboard", onNativeKeyboard); }
     apply();
