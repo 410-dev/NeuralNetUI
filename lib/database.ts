@@ -680,6 +680,13 @@ function openDatabase() {
     connection.exec("UPDATE mcp_connections SET tool_definitions = 'on_demand' WHERE url LIKE 'https://gmailmcp.googleapis.com/%' OR url LIKE 'https://calendarmcp.googleapis.com/%'");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(35, new Date().toISOString());
   })();
+  const definitionTokensVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (definitionTokensVersion.version < 36) connection.transaction(() => {
+    // Estimated size of the tool definitions a reply's last request carried, for the context donut.
+    const columns = connection.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "tool_definition_tokens")) connection.exec("ALTER TABLE messages ADD COLUMN tool_definition_tokens INTEGER;");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(36, new Date().toISOString());
+  })();
   return connection;
 }
 

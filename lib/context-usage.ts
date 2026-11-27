@@ -2,9 +2,17 @@ import { estimateTokens } from "./harness.ts";
 import type { StoredMessage } from "./types.ts";
 import { applyContextState, type ContextState } from "./context-state.ts";
 
-export type ContextUsage = { input: number; response: number; reasoning: number; tools: number; summary: number; total: number };
+export type ContextUsage = { input: number; response: number; reasoning: number; tools: number; summary: number; definitions: number; total: number };
 const count = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
 const estimate = (text: string | undefined) => text ? estimateTokens(text) : 0;
+
+/**
+ * The tool definitions every request carries, as the newest reply's last request sent them. The next request offers
+ * the same tools unless the person changes them; before any reply there is nothing to go by.
+ */
+function toolDefinitions(messages: StoredMessage[]) {
+  return count(messages.findLast(message => message.role === "assistant" && message.toolDefinitionTokens !== undefined)?.toolDefinitionTokens) ?? 0;
+}
 
 /**
  * Where the next request actually starts. Compaction replaces everything before the compacting
@@ -58,7 +66,8 @@ export function contextUsage(messages: StoredMessage[], includeReasoning: boolea
       }
     }
   }
-  return { input, response, reasoning, tools, summary, total: input + response + reasoning + tools + summary };
+  const definitions = toolDefinitions(messages);
+  return { input, response, reasoning, tools, summary, definitions, total: input + response + reasoning + tools + summary + definitions };
 }
 
 /**
@@ -84,5 +93,6 @@ function stateUsage(messages: StoredMessage[], includeReasoning: boolean, draft:
       tools += Math.max(base, visual);
     }
   }
-  return { input, response, reasoning, tools, summary, total: input + response + reasoning + tools + summary };
+  const definitions = toolDefinitions(messages);
+  return { input, response, reasoning, tools, summary, definitions, total: input + response + reasoning + tools + summary + definitions };
 }

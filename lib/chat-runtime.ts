@@ -698,7 +698,9 @@ async function run(job: ChatJob) {
     // The composer's donut reads the stored counters; the same reading has to drive compaction,
     // or a request the interface calls 89% full is sent untouched.
     const branchMessages = (job.conversation.branches.find(item => item.id === job.input.branchId) || job.conversation.branches[0])?.messages || [];
-    let measuredInput = contextUsage(branchMessages, job.input.sendReasoning === true, "", systemPrompt, 0, contextState).total;
+    // Tool definitions are counted separately below (overhead), from this request's own list.
+    const stored = contextUsage(branchMessages, job.input.sendReasoning === true, "", systemPrompt, 0, contextState);
+    let measuredInput = stored.total - stored.definitions;
     let compactedBeforeSending = false;
     const messageCountBeforePreparation = messages.length;
     messages = await prepareContext(harnessContext, messages, {
@@ -786,6 +788,7 @@ async function run(job: ChatJob) {
       }
       if (contextWindow && projectedInput > contextWindow * .95) throw overflowError({ promptTokens: projectedInput, contextWindow });
       job.message.contextTokens = projectedInput;
+      job.message.toolDefinitionTokens = tools.length ? estimateTokens(tools) : undefined;
       const remainingTokens = contextWindow ? Math.max(1, contextWindow - projectedInput - 32) : 0;
       assertPlanAccess(job.userId,model.id,model.sourceModel);
       const planOutputLimit=remainingPlanOutputTokens(job.userId,chargeModelId);

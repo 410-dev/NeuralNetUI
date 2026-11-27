@@ -398,6 +398,8 @@ export interface StoredMessage {
   completionDurationSeconds?: number;
   timeToFirstTokenSeconds?: number;
   contextTokens?: number;
+  /** Estimated tokens of the tool definitions the reply's last request carried (they are part of every request). */
+  toolDefinitionTokens?: number;
   /** Every prompt-processing stage of the response added together. */
   promptProcessingSeconds?: number;
   /** From the request reaching the server to the response ending. */

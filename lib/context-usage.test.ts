@@ -105,3 +105,16 @@ test("transient browser vision tokens are visible until the follow-up inference 
   assert.ok(retained.tools >= 24000);
   assert.ok(consumed.tools < 100);
 });
+
+test("the tool definitions of the newest reply's last request count toward the next one", () => {
+  const withDefinitions: StoredMessage[] = [
+    { id: "u1", role: "user", content: "Hi", createdAt: "" },
+    { id: "a1", role: "assistant", content: "Old", toolDefinitionTokens: 9000, createdAt: "" },
+    { id: "u2", role: "user", content: "Again", createdAt: "" },
+    { id: "a2", role: "assistant", content: "New", toolDefinitionTokens: 12000, createdAt: "" },
+  ];
+  const usage = contextUsage(withDefinitions, false);
+  assert.equal(usage.definitions, 12000);
+  assert.equal(usage.total, usage.input + usage.response + usage.reasoning + usage.tools + usage.summary + 12000);
+  assert.equal(contextUsage(messages, false).definitions, 0);
+});
