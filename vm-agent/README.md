@@ -10,7 +10,7 @@
 | 백그라운드 작업 (시작·출력 읽기·목록·종료) | `shell_start`, `shell_output`, `shell_jobs`, `shell_kill` |
 | 화면 캡처, 마우스, 키보드 (GUI가 있을 때만) | `screen_capture`, `mouse`, `keyboard` |
 | 개인 저장소와 파일 주고받기 (NeuralNetUI가 제공) | `copy_to_storage`, `copy_from_storage` |
-| 브라우저 | 등록하면 NeuralNetUI의 브라우저 도구가 이 컴퓨터의 Obscura(스텔스, 렌더링 포함)에서 실행됩니다 |
+| 브라우저 | 등록하면 NeuralNetUI가 브라우저 도구(`browser_*`)를 이 컴퓨터의 도구로 함께 제공하고, 이 컴퓨터의 Obscura(스텔스, 렌더링 포함)에서 실행합니다. 셸에서 직접 부를 때는 `obscura --stealth fetch URL --storage-dir DIR` 처럼 `--storage-dir`를 하위 명령 뒤에 둡니다(앞에 두면 무시됨) |
 | 브라우저 쿠키 (1.1.0) | 계정마다 쿠키 하나를 모든 채팅·에이전트가 함께 씁니다(`~/.neuralnetui/browser/account/cookies.json`, 이 컴퓨터에만 저장). 브라우저 세션은 이 프로필의 복사본에서 일하다가 닫힐 때 바뀐 쿠키만 되돌려 합치고(동시에 열린 세션이나 그사이의 수정은 덮어쓰지 않음) 작업 폴더를 지웁니다. NeuralNetUI의 **설정 > MCP·가상 컴퓨터 > Cookies**에서 cookies.txt(Netscape 형식)로 보고 고칩니다(`GET`/`PUT /browser-cookies`). 시작할 때 예전 버전의 대화별 프로필과 남은 작업 폴더를 지웁니다 |
 
 NeuralNetUI 계정마다 작업 공간이 따로 생깁니다. 리눅스에서 root로 실행하면 계정마다 별도 리눅스 사용자

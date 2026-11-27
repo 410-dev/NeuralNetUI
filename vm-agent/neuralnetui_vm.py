@@ -46,7 +46,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 MAX_OUTPUT = 100_000
 SYSTEM = platform.system()  # "Linux" or "Darwin"
@@ -889,7 +889,7 @@ class Handler(BaseHTTPRequestHandler):
             requested = params.get("protocolVersion")
             version = requested if requested in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[0]
             result = {"protocolVersion": version, "capabilities": {"tools": {"listChanged": False}}, "serverInfo": {"name": "neuralnetui-vm", "version": VERSION},
-                      "instructions": "A virtual computer: run shell scripts, background jobs and (when it has a screen) screen and input tools in your own workspace."}
+                      "instructions": "A virtual computer: run shell scripts, background jobs and (when it has a screen) screen and input tools in your own workspace. For web pages prefer the browser_* tools NeuralNetUI offers with this computer: they use the account's shared cookies. If you run obscura from the shell instead, copy ~/.neuralnetui/browser/account to a new folder and pass --storage-dir after the subcommand (obscura --stealth fetch URL --storage-dir DIR); placed before the subcommand it is ignored and no cookies are used."}
             return self.reply(200, {"jsonrpc": "2.0", "id": ident, "result": result}, headers={"Mcp-Session-Id": uuid.uuid4().hex})
         if method == "ping": return self.reply(200, {"jsonrpc": "2.0", "id": ident, "result": {}})
         if method == "tools/list": return self.reply(200, {"jsonrpc": "2.0", "id": ident, "result": {"tools": available_tools()}})

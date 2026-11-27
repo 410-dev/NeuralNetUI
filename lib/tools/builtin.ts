@@ -166,20 +166,25 @@ const boundedText = (text: string) => text.length <= BROWSER_TEXT_LIMIT ? text :
  * plus a download function that saves files into the account's private storage. With render off, screenshots and PDF
  * export are not offered.
  */
-const browser: ToolProvider = {
+/** The browser's functions: Obscura's own (render ones only with render on) plus a download into private storage. */
+export async function browserToolSpecs(ctx: Pick<ToolContext, "userId" | "conversationId" | "config">): Promise<ToolSpec[]> {
+  const settings = browserSettings(ctx);
+  const listed = await obscuraTools(ctx.userId, ctx.conversationId);
+  const specs: ToolSpec[] = listed
+    .filter(tool => tool.name.startsWith("browser_") && tool.name !== BROWSER_DOWNLOAD && (settings.render || !RENDER_FUNCTIONS.has(tool.name)))
+    .map(tool => ({ name: tool.name, description: `[Browser] ${tool.description || tool.name}`, inputSchema: tool.inputSchema || { type: "object", properties: {} } }));
+  specs.push({ name: BROWSER_DOWNLOAD, description: "[Browser] Download a file from an HTTP(S) URL with the browser's cookies and save it to the user's private storage. Use it when the user wants a file (a PDF, an archive, an image or any document) rather than reading a page. Files larger than the space left in private storage are refused.", inputSchema: {
+    type: "object", additionalProperties: false, required: ["url"],
+    properties: { url: { type: "string", description: "Absolute HTTP(S) URL of the file" }, filename: { type: "string", description: "Optional file name to store it under, with its extension" } },
+  } });
+  return specs;
+}
+
+export const browserProvider: ToolProvider = {
   manifest: manifest("browser"),
-  async tools(ctx) {
-    const settings = browserSettings(ctx);
-    const listed = await obscuraTools(ctx.userId, ctx.conversationId);
-    const specs: ToolSpec[] = listed
-      .filter(tool => tool.name.startsWith("browser_") && tool.name !== BROWSER_DOWNLOAD && (settings.render || !RENDER_FUNCTIONS.has(tool.name)))
-      .map(tool => ({ name: tool.name, description: `[Browser] ${tool.description || tool.name}`, inputSchema: tool.inputSchema || { type: "object", properties: {} } }));
-    specs.push({ name: BROWSER_DOWNLOAD, description: "[Browser] Download a file from an HTTP(S) URL with the browser's cookies and save it to the user's private storage. Use it when the user wants a file (a PDF, an archive, an image or any document) rather than reading a page. Files larger than the space left in private storage are refused.", inputSchema: {
-      type: "object", additionalProperties: false, required: ["url"],
-      properties: { url: { type: "string", description: "Absolute HTTP(S) URL of the file" }, filename: { type: "string", description: "Optional file name to store it under, with its extension" } },
-    } });
-    return specs;
-  },
+  // With a virtual computer the browser tools are offered as part of its tools (lib/tools/mcp-source.ts) instead.
+  async available(ctx) { const { vmConnection } = await import("../vm"); return !vmConnection(ctx.userId); },
+  tools: ctx => browserToolSpecs(ctx),
   async execute(name, args, ctx) {
     const settings = browserSettings(ctx);
     if (name === BROWSER_DOWNLOAD) {
@@ -262,6 +267,6 @@ const youtube: ToolProvider = {
 };
 
 /** In catalog order, which is also the order the model sees them. */
-export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, browser, youtube, time, location, storage, codeRunner, multipleChoice, artifact];
+export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, browserProvider, youtube, time, location, storage, codeRunner, multipleChoice, artifact];
 
 export const builtinSource: ToolProviderSource = { id: "builtin", providers: () => [...BUILTIN_PROVIDERS] };

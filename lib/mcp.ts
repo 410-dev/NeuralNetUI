@@ -136,7 +136,7 @@ async function talkToServer<T>(endpoint: string, signal: AbortSignal | undefined
   }
 }
 
-function toolPolicies(connectionId: string) {
+export function toolPolicies(connectionId: string) {
   return new Map((db.prepare("SELECT tool_name,policy FROM mcp_tool_policies WHERE connection_id=?").all(connectionId) as Array<{tool_name:string;policy:McpToolPolicy}>).map(item=>[item.tool_name,item.policy]));
 }
 
@@ -149,7 +149,8 @@ export async function listMcpTools(userId: string, connectionId: string, signal?
     const client=await connectedClient(row,signal);
     try {
       const result=await client.listTools(undefined,{signal:requestSignal(signal),cacheMode:"bypass"});
-      return [...result.tools,...(row.kind==="vm"?VM_FILE_TOOLS:[])].map(tool=>({name:tool.name,description:tool.description,inputSchema:tool.inputSchema,policy:policies.get(tool.name)||(row.kind==="vm"?vmDefaultPolicy(tool.name):DEFAULT_TOOL_POLICY)}));
+      const browser=row.kind==="vm"?await vmBrowserToolList(userId).catch(()=>[]):[];
+      return [...result.tools,...(row.kind==="vm"?VM_FILE_TOOLS:[]),...browser].map(tool=>({name:tool.name,description:tool.description,inputSchema:tool.inputSchema,policy:policies.get(tool.name)||(row.kind==="vm"?vmDefaultPolicy(tool.name):DEFAULT_TOOL_POLICY)}));
     } finally { await client.close().catch(()=>undefined); }
   });
 }
@@ -300,4 +301,10 @@ async function saveLinkToStorage(row: McpRow, userId: string, link: McpStorageLi
       summary: { type: "storage_save_failed", name: link.name, size: link.size, error: message },
     };
   }
+}
+
+/** The browser tools a virtual computer carries (Obscura's, run by NeuralNetUI's browser broker), for its permission list. */
+async function vmBrowserToolList(userId: string): Promise<Array<{ name: string; description?: string; inputSchema?: unknown }>> {
+  const [{ readConfig }, { browserToolSpecs }] = await Promise.all([import("./config"), import("./tools/builtin")]);
+  return (await browserToolSpecs({ userId, conversationId: "vm-tool-list", config: await readConfig() })).map(spec => ({ name: spec.name, description: spec.description, inputSchema: spec.inputSchema }));
 }
