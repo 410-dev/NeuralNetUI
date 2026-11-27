@@ -647,18 +647,7 @@ function openDatabase() {
         created_at TEXT NOT NULL,
         last_used_at TEXT
       );
-      CREATE TABLE IF NOT EXISTS app_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS native_push_tokens (
-        token TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        platform TEXT NOT NULL,
-        user_agent TEXT,
-        created_at TEXT NOT NULL,
-        last_used_at TEXT
-      );`);
-    // The Firebase project the app was built for, to tell a mismatch with the server's key.
-    const nativeColumns = connection.prepare("PRAGMA table_info(native_push_tokens)").all() as Array<{ name: string }>;
-    if (!nativeColumns.some(column => column.name === "project_id")) connection.exec("ALTER TABLE native_push_tokens ADD COLUMN project_id TEXT");
+      CREATE TABLE IF NOT EXISTS app_secrets (name TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL);`);
     const planColumns = connection.prepare("PRAGMA table_info(plans)").all() as Array<{ name: string }>;
     if (!planColumns.some(column => column.name === "agent_enabled")) connection.exec("ALTER TABLE plans ADD COLUMN agent_enabled INTEGER NOT NULL DEFAULT 0 CHECK (agent_enabled IN (0, 1));");
     if (!planColumns.some(column => column.name === "agent_min_interval_minutes")) connection.exec("ALTER TABLE plans ADD COLUMN agent_min_interval_minutes INTEGER NOT NULL DEFAULT 30 CHECK (agent_min_interval_minutes >= 1);");
@@ -741,6 +730,22 @@ function openDatabase() {
       if (match.length === 1) link.run(match[0].id, message.id);
     }
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(40, new Date().toISOString());
+  })();
+  // FCM tokens of the mobile app, with the Firebase project it was built for (to tell a mismatch with the server key).
+  const nativePushVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (nativePushVersion.version < 41) connection.transaction(() => {
+    connection.exec(`CREATE TABLE IF NOT EXISTS native_push_tokens (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      platform TEXT NOT NULL,
+      user_agent TEXT,
+      project_id TEXT,
+      created_at TEXT NOT NULL,
+      last_used_at TEXT
+    );`);
+    const columns = connection.prepare("PRAGMA table_info(native_push_tokens)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "project_id")) connection.exec("ALTER TABLE native_push_tokens ADD COLUMN project_id TEXT");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(41, new Date().toISOString());
   })();
   return connection;
 }
