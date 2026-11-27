@@ -1,6 +1,6 @@
 "use client";
 
-import { contextUsage, type ContextUsage } from "../lib/context-usage";
+import { contextUsage, type ContextUsage, type RequestOverhead } from "../lib/context-usage";
 import { HarnessSettingsPanel, StorageSettingsPanel } from "./harness-settings";
 import { BrowserHarnessSection, YoutubeHarnessSection } from "./managed-tools-settings";
 import { TextDialog } from "./text-dialog";
@@ -862,7 +862,27 @@ export default function Home() {
     if (!response?.ok) { setError(locale === "ko" ? "컨텍스트 변경을 저장하지 못했습니다." : "The context change could not be saved."); return false; }
     return true;
   };
-  const contextBreakdown = useMemo(() => contextUsage(messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length, branchContext), [messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length, branchContext]);
+  // Tool definitions (and the agent's own prompt) go with every request; the server estimates them for the tools
+  // switched on now, so a new chat's donut is not empty. Asked again when the tools, model or chat change, and after
+  // each reply (reading on-demand MCP definitions adds them to the list).
+  const [requestOverhead, setRequestOverhead] = useState<{ key: string; value: RequestOverhead }>();
+  const repliesSoFar = messages.filter(message => message.role === "assistant").length;
+  const overheadKey = selectedModel ? JSON.stringify([selectedModel.id, selectedModel.isAlias ? selectedAliasBase?.id : undefined, toolState, conversation?.id ?? "", repliesSoFar]) : "";
+  useEffect(() => {
+    if (!overheadKey || isGenerating) return;
+    const [modelId, aliasBaseModelId, tools, conversationId] = JSON.parse(overheadKey) as [string, string | undefined, ToolState, string];
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void fetch("/api/chat/overhead", { method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modelId, aliasBaseModelId, tools, conversationId: conversationId || undefined, clientContext: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: navigator.language, language: config.preferences.language } }) })
+        .then(response => response.ok ? response.json() as Promise<{ toolDefinitionTokens: number; systemTokens: number }> : undefined)
+        .then(body => { if (body) setRequestOverhead({ key: overheadKey, value: { definitions: body.toolDefinitionTokens, system: body.systemTokens } }); })
+        .catch(() => undefined);
+    }, 400);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [overheadKey, isGenerating, config.preferences.language]);
+  // A stale estimate (other tools or chat) is not shown; the last reply's own record stands in until the new one comes.
+  const overhead = requestOverhead && requestOverhead.key === overheadKey ? requestOverhead.value : undefined;
+  const contextBreakdown = useMemo(() => contextUsage(messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length, branchContext, overhead), [messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length, branchContext, overhead]);
   const messageRevisions = useMemo(() => {
     const groups = new Map<string, Map<string, MessageRevision>>();
     for (const branch of conversation?.branches || []) {

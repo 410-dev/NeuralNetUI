@@ -118,3 +118,19 @@ test("the tool definitions of the newest reply's last request count toward the n
   assert.equal(usage.total, usage.input + usage.response + usage.reasoning + usage.tools + usage.summary + 12000);
   assert.equal(contextUsage(messages, false).definitions, 0);
 });
+
+test("the server's overhead estimate counts before any reply and replaces the stored definitions", () => {
+  const fresh = contextUsage([], false, "", "", 0, undefined, { definitions: 4200, system: 900 });
+  assert.equal(fresh.definitions, 4200);
+  assert.equal(fresh.input, 900);
+  assert.equal(fresh.total, 5100);
+  const replied: StoredMessage[] = [{ id: "u", role: "user", content: "Hi", createdAt: "" }, { id: "a", role: "assistant", content: "Yo", toolDefinitionTokens: 12000, createdAt: "" }];
+  assert.equal(contextUsage(replied, false, "", "", 0, undefined, { definitions: 3000 }).definitions, 3000);
+  assert.equal(contextUsage(replied, false, "", "", 0, undefined, {}).definitions, 12000);
+});
+
+test("the agent chat's time line counts as input", () => {
+  const plain = contextUsage([{ id: "u", role: "user", content: "Hi", createdAt: "" }], false).input;
+  const stamped = contextUsage([{ id: "u", role: "user", content: "Hi", contextPrefix: "현재 시각: 2026-11-27 03:45:12 PM (Asia/Seoul)", createdAt: "" }], false).input;
+  assert.ok(stamped > plain);
+});

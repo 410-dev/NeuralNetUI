@@ -11,7 +11,7 @@ import type { ToolGate } from "../tools/types";
 import type { Conversation, ModelConfig, StoredMessage, UserRole } from "../types";
 import { AGENT_PROVIDER_ID, decideAgentCall, isReadOnlyCall } from "./policy";
 import { agentToolSource } from "./tools";
-import { defaultAgentInstructions } from "./defaults";
+import { agentClockLine, defaultAgentInstructions, defaultAgentMainPrompt } from "./defaults";
 import { isViewingAgent } from "./presence";
 import {
   advanceAgentSchedule, agentRunLoad, AGENT_RUN_LIMITS, createAgentProfile, createAgentRun, dueAgentSchedules, failInterruptedAgentRuns, getAgentRun, listAgentItems,
@@ -104,16 +104,12 @@ function clock(settings: AgentSettings) {
 }
 
 function mainPrompt(settings: AgentSettings) {
-  return [
-    "# Personal agent",
-    "You are the person's personal assistant in one long-running chat. They give you requests here; you also report here on your own.",
-    `Current time: ${clock(settings)}. Reply in ${ko(settings) ? "Korean" : "English"} unless the person writes otherwise.`,
-    "- Keep this chat short. Hand anything needing several tool calls, reading long material or waiting to spawn_subagent, then tell the person briefly what you started. Answer simple questions directly.",
-    "- Requests for later or repeated work (reminders, watching an inbox, a calendar, a web page, a channel or a topic) become notify_wakeup schedules with complete instructions for the subagent that will run them. Confirm what you scheduled and when.",
-    "- Keep the workboard current: to-dos, events from the person's schedule, and memories of durable facts and preferences. Check it before answering about plans or past requests.",
-    "- User messages that begin with [Subagent result] or [Agent notice] come from the system, not the person. Summarize what matters for the person in a few lines; do not repeat raw output.",
-    "- Never claim to have done something a tool did not confirm.",
-  ].join("\n");
+  return settings.mainPrompt?.trim() || defaultAgentMainPrompt(ko(settings) ? "ko" : "en");
+}
+
+/** The model-only time line for a main-chat message, in the agent's time zone and language. */
+function clockLine(settings: AgentSettings, kind: "sent" | "returned") {
+  return agentClockLine(kind, new Date(), { timeZone: settings.timeZone, language: ko(settings) ? "ko" : "en" });
 }
 
 function subPrompt(settings: AgentSettings, run: AgentRun) {
@@ -175,7 +171,7 @@ const toolSource = agentToolSource({
 // ------------------------------------------------------------------ the main chat
 
 function messagesForJob(messages: StoredMessage[]) {
-  return messages.map(message => ({ id: message.id, role: message.role, content: message.content, reasoning_content: message.reasoning, toolEvents: message.toolEvents, attachments: message.attachments?.map(({ id: attachmentId }) => ({ id: attachmentId })) }));
+  return messages.map(message => ({ id: message.id, role: message.role, content: message.content, ...(message.contextPrefix ? { contextPrefix: message.contextPrefix } : {}), reasoning_content: message.reasoning, toolEvents: message.toolEvents, attachments: message.attachments?.map(({ id: attachmentId }) => ({ id: attachmentId })) }));
 }
 
 function mainBusy(profile: AgentProfile) {
@@ -187,9 +183,9 @@ function mainBusy(profile: AgentProfile) {
  * Adds to the main chat: a notice the person sees, or a context message only the model reads (which also starts a
  * turn so the agent can respond). While a reply is being written, additions wait and follow it.
  */
-export async function postToMain(userId: string, input: { content: string; kind: "notice" | "context" | "user"; attachments?: StoredMessage["attachments"] }) {
+export async function postToMain(userId: string, input: { content: string; kind: "notice" | "context" | "user"; attachments?: StoredMessage["attachments"]; prefix?: string }) {
   if (!input.content.trim() && !input.attachments?.length) return;
-  const message: StoredMessage = { id: id("msg"), role: input.kind === "notice" ? "assistant" : "user", content: input.content, createdAt: nowIso(), ...(input.kind === "user" ? {} : { agentKind: input.kind }), ...(input.attachments?.length ? { attachments: input.attachments } : {}) };
+  const message: StoredMessage = { id: id("msg"), role: input.kind === "notice" ? "assistant" : "user", content: input.content, createdAt: nowIso(), ...(input.prefix ? { contextPrefix: input.prefix } : {}), ...(input.kind === "user" ? {} : { agentKind: input.kind }), ...(input.attachments?.length ? { attachments: input.attachments } : {}) };
   const pending = state.pending.get(userId) ?? { messages: [], trigger: false, autonomous: true };
   pending.messages.push(message);
   if (input.kind !== "notice") pending.trigger = true;
@@ -246,6 +242,13 @@ async function startMainTurn(profile: AgentProfile, conversation: Conversation, 
   markAgentChanged(userId);
 }
 
+/** What the agent's main chat sends besides the conversation, for the context donut's estimate. */
+export function agentRequestShape(userId: string) {
+  const profile = readAgentProfile(userId);
+  if (!profile) return undefined;
+  return { conversationId: profile.conversationId, systemPrompt: mainPrompt(profile.settings), toolState: profile.settings.toolState, sources: [toolSource] };
+}
+
 /** The person's message from the agent screen; it is answered as soon as the agent is free. */
 export async function sendAgentMessage(userId: string, input: { content: string; attachments?: StoredMessage["attachments"]; settings?: Partial<AgentSettings> }) {
   const access = planAgentAccess(userId);
@@ -253,7 +256,8 @@ export async function sendAgentMessage(userId: string, input: { content: string;
   const profile = await ensureAgent(userId, input.settings?.language);
   if (input.settings) updateAgentSettings(userId, input.settings);
   const busy = mainBusy(profile);
-  await postToMain(userId, { content: input.content, kind: "user", attachments: input.attachments });
+  // The model reads when the person wrote; the chat shows only what they typed.
+  await postToMain(userId, { content: input.content, kind: "user", attachments: input.attachments, prefix: clockLine(readAgentProfile(userId)?.settings ?? profile.settings, "sent") });
   return { conversationId: profile.conversationId, queued: busy };
 }
 
@@ -385,7 +389,7 @@ async function finishRun(run: AgentRun, result: { status: string; content: strin
   // Work the person asked for always comes back to the main agent; automatic runs speak through notify_user.
   if (profile && run.report === "always" && status !== "cancelled") {
     const label = ko(profile.settings) ? (status === "completed" ? "완료" : "실패") : status;
-    await postToMain(run.userId, { content: `[Subagent result · ${run.title} · ${label}]\n${(status === "completed" ? result.content : result.error || result.content || "").slice(0, 12_000)}`, kind: "context" });
+    await postToMain(run.userId, { content: `[Subagent result · ${run.title} · ${label}]\n${(status === "completed" ? result.content : result.error || result.content || "").slice(0, 12_000)}`, kind: "context", prefix: clockLine(profile.settings, "returned") });
   }
   void pumpRuns();
 }

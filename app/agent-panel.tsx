@@ -4,14 +4,14 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { createPortal } from "react-dom";
 import { Bell, BellOff, Braces, Brain, Cable, CalendarClock, Check, ChevronLeft, ChevronRight, Clock, Clock3, Code2, Cog, Globe2, HardDrive, History, Layers, Link2, ListChecks, ListTodo, LoaderCircle, MapPin, Monitor, Plus, Repeat, Settings, Square, Timer, Trash2, Video, Wrench, X } from "lucide-react";
 import type { ToolIcon } from "@/lib/tools/catalog";
-import { defaultAgentInstructions } from "@/lib/agent/defaults";
+import { defaultAgentInstructions, defaultAgentMainPrompt } from "@/lib/agent/defaults";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { BUILTIN_TOOL_PROVIDERS } from "@/lib/tools/catalog";
 import type { ModelConfig, StoredMessage } from "@/lib/types";
 
 export type AgentDecision = "allow" | "ask";
 export type AgentToolRule = { read?: AgentDecision; write?: AgentDecision; tools?: Record<string, AgentDecision> };
-export type AgentClientSettings = { enabled: boolean; modelId?: string; subagentModelId?: string; heartbeatMinutes: number; instructions: string; compactPercent: number; toolTimeoutMinutes: number; toolRules: Record<string, AgentToolRule> };
+export type AgentClientSettings = { enabled: boolean; modelId?: string; subagentModelId?: string; heartbeatMinutes: number; instructions: string; mainPrompt?: string; compactPercent: number; toolTimeoutMinutes: number; toolRules: Record<string, AgentToolRule> };
 const RULE_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video, monitor: Monitor };
 
 export type AgentRunView = { id: string; kind: "task" | "heartbeat" | "schedule"; title: string; instructions: string; status: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"; result?: string; error?: string; conversationId?: string; createdAt: string; startedAt?: string; finishedAt?: string };
@@ -173,7 +173,9 @@ function ItemEditor({ ko, item, onSave, onCancel }: { ko: boolean; item: AgentIt
 /** The agent's own settings: automatic runs, standing instructions, models, compaction and what it may do unasked. */
 export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { ko: boolean; state: AgentState; models: ModelConfig[]; onClose: () => void; onSaved: () => void }) {
   const initial = state.settings!;
-  const [value, setValue] = useState<AgentClientSettings>(initial);
+  // The main prompt is edited in full; saved as empty while it equals the default, so later default updates apply.
+  const defaultPrompt = defaultAgentMainPrompt(ko ? "ko" : "en");
+  const [value, setValue] = useState<AgentClientSettings>({ ...initial, mainPrompt: initial.mainPrompt || defaultPrompt });
   const [mcp, setMcp] = useState<Array<{ id: string; name: string; kind?: "user" | "vm" }>>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -202,7 +204,7 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
   const setRule = (id: string, patch: AgentToolRule) => setValue(current => ({ ...current, toolRules: { ...current.toolRules, [id]: { ...current.toolRules[id], ...patch } } }));
   const save = async () => {
     setBusy(true); setError("");
-    try { await api("/api/agent", { method: "PATCH", body: JSON.stringify({ ...value, subagentModelId: value.subagentModelId || "" }) }); onSaved(); onClose(); }
+    try { await api("/api/agent", { method: "PATCH", body: JSON.stringify({ ...value, subagentModelId: value.subagentModelId || "", mainPrompt: value.mainPrompt?.trim() === defaultPrompt.trim() ? "" : value.mainPrompt || "" }) }); onSaved(); onClose(); }
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); setBusy(false); }
   };
   const togglePush = async () => {
@@ -237,6 +239,7 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
     <div className="model-visibility-row"><div><strong>{ko ? "자동 실행" : "Automatic runs"}</strong><small>{ko ? "주기 점검과 예약된 작업을 실행합니다. 끄면 채팅으로 요청할 때만 움직입니다." : "Runs the periodic check and scheduled work. When off, the agent acts only when you message it."}</small></div><button type="button" role="switch" aria-checked={value.enabled} aria-label={ko ? "자동 실행" : "Automatic runs"} className={`toggle ${value.enabled ? "on" : ""}`} onClick={() => setValue({ ...value, enabled: !value.enabled })}><i /></button></div>
     <label className="field"><span>{ko ? "주기 점검 간격 (분)" : "Periodic check interval (minutes)"}</span><input type="number" min={state.access.minIntervalMinutes} max={10080} value={value.heartbeatMinutes} onChange={event => setValue({ ...value, heartbeatMinutes: Math.max(1, Math.round(Number(event.target.value) || 0)) })} /><small>{ko ? `플랜이 허용하는 최소 간격은 ${state.access.minIntervalMinutes}분입니다. 더 짧게 정하면 최소 간격으로 실행합니다.` : `Your plan allows at least ${state.access.minIntervalMinutes} minutes; shorter values run at that minimum.`}</small></label>
     <label className="field"><span>{ko ? "작업 지침" : "Standing instructions"}</span><textarea rows={6} value={value.instructions} onChange={event => setValue({ ...value, instructions: event.target.value })} placeholder={ko ? "예: 받은편지함에서 중요한 메일을 요약해 알려 줘. 캘린더 일정이 겹치면 알려 줘." : "e.g. Summarize important new email. Tell me when calendar events overlap."} /><button type="button" className="agent-reset-link" onClick={() => setValue({ ...value, instructions: defaultAgentInstructions(ko ? "ko" : "en") })}>{ko ? "기본 값으로 되돌리기" : "Restore the default"}</button><small>{ko ? "주기 점검마다 서브에이전트가 이 지침과 워크보드를 보고 일하며, 알릴 것이 있을 때만 메시지를 보냅니다." : "Each periodic check, a subagent works from these instructions and the workboard, and messages you only when something needs attention."}</small></label>
+    <label className="field"><span>{ko ? "메인 채팅 시스템 프롬프트" : "Main chat system prompt"}</span><textarea rows={10} value={value.mainPrompt || ""} onChange={event => setValue({ ...value, mainPrompt: event.target.value })} /><button type="button" className="agent-reset-link" onClick={() => setValue({ ...value, mainPrompt: defaultPrompt })}>{ko ? "기본 값으로 되돌리기" : "Restore the default"}</button><small>{ko ? "에이전트 메인 채팅에서만 쓰는 시스템 프롬프트입니다(모델에 설정된 시스템 프롬프트 뒤에 붙음). 현재 시각은 여기에 넣지 않고, 시스템이 보내는 메시지와 서브에이전트 결과 앞에 모델만 보도록 붙입니다. 비우면 기본 값을 씁니다." : "Used only in the agent's main chat, after the model's own system prompt. The time is not part of it: the system puts it in front of your messages and subagent results for the model only. Empty uses the default."}</small></label>
     <div className="form-grid">
       <label className="field"><span>{ko ? "서브에이전트·자동 실행 모델" : "Subagent and automatic-run model"}</span><select value={value.subagentModelId || ""} onChange={event => setValue({ ...value, subagentModelId: event.target.value || undefined })}><option value="">{ko ? "메인 채팅과 같은 모델" : "Same as the main chat"}</option>{models.filter(model => model.visible !== false && !model.imageGeneration).map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label>
       <label className="field"><span>{ko ? "압축 기준 (컨텍스트의 %)" : "Compact at (% of context)"}</span><input type="number" min={10} max={95} value={value.compactPercent} onChange={event => setValue({ ...value, compactPercent: Math.min(95, Math.max(10, Math.round(Number(event.target.value) || 50))) })} /><small>{ko ? "메인 채팅과 모든 서브에이전트가 이 비율을 넘으면 압축합니다. 하네스 설정과 별개입니다." : "The main chat and every subagent compact past this share; separate from harness settings."}</small></label>

@@ -1,6 +1,6 @@
 "use client";
 
-import { Brain, Check, Eraser, EyeOff, Layers, Minimize2, Paperclip, Pencil, RotateCcw, Undo2, Wrench, X } from "lucide-react";
+import { Brain, Check, Clock, Eraser, EyeOff, Layers, Minimize2, Paperclip, Pencil, RotateCcw, Undo2, Wrench, X } from "lucide-react";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { applyContextState, type ContextMessageOverride, type ContextState } from "@/lib/context-state";
@@ -94,6 +94,7 @@ export function ContextView({ ko, messages, state, includeReasoning, systemPromp
           {reasoning && <details className="context-reasoning"><summary><Brain size={13} />{t("추론", "Reasoning")}</summary><p className="context-text">{reasoning}</p>
             <div className="context-actions"><button type="button" onClick={() => setTextEdit({ kind: "reasoning", messageId: message.id, value: reasoning, original: message.reasoning || "" })}><Pencil size={12} />{t("편집", "Edit")}</button><button type="button" onClick={() => patchOverride(message.id, value => ({ ...value, reasoning: undefined, removeReasoning: true }))}><EyeOff size={12} />{t("빼기", "Remove")}</button></div></details>}
           {includeReasoning && !reasoning && override?.removeReasoning && message.reasoning && <p className="context-note"><EyeOff size={12} />{t("추론을 뺐습니다", "Reasoning removed")} <button type="button" onClick={() => patchOverride(message.id, value => ({ ...value, removeReasoning: undefined }))}>{t("되돌리기", "Undo")}</button></p>}
+          {message.contextPrefix && <p className="context-prefix" title={t("시스템이 모델에게만 붙이는 줄입니다. 채팅에는 보이지 않습니다.", "Added by the system for the model only; not shown in the chat.")}><Clock size={12} />{message.contextPrefix}</p>}
           {shown.content ? <p className="context-text">{shown.content}</p> : <p className="context-text muted">{t("(텍스트 없음)", "(no text)")}</p>}
           {message.attachments?.length ? <p className="context-note"><Paperclip size={12} />{t(`첨부 ${message.attachments.length}개`, `${message.attachments.length} attachments`)}</p> : null}
           {(shown.toolEvents || []).map(event => <div className="context-tool" key={event.id}><Wrench size={13} /><span><strong>{event.name}</strong><small>{override?.tools?.[event.id] ? t("수정됨", "Edited") : t("도구 호출과 결과", "Tool call and result")}</small></span>

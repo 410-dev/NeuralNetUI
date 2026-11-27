@@ -26,7 +26,7 @@ function modelView(messages: StoredMessage[], state: ContextState, includeReason
   const applied = applyContextState(messages, state);
   const history = applied.entries.map(({ message }) => ({
     role: message.role,
-    content: message.content,
+    content: message.contextPrefix ? `${message.contextPrefix}\n${message.content}` : message.content,
     ...(includeReasoning && message.reasoning ? { reasoning: message.reasoning } : {}),
     ...(message.toolEvents?.length ? { tools: message.toolEvents.map(event => ({ name: event.name, arguments: event.arguments, result: event.result })) } : {}),
   }));

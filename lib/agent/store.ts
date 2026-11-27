@@ -17,6 +17,8 @@ export type AgentSettings = {
   heartbeatMinutes: number;
   /** Standing instructions every periodic check follows. */
   instructions: string;
+  /** The main chat's system prompt; missing means the default for the agent's language (defaultAgentMainPrompt). */
+  mainPrompt?: string;
   /** The main chat and every subagent are compacted past this share of the model's context window. */
   compactPercent: number;
   /** A tool call running longer than this is cancelled (approval waits excluded); 0 means no limit. */
@@ -59,6 +61,7 @@ export function normalizeAgentSettings(value: unknown): AgentSettings {
     subagentModelId: text(raw.subagentModelId, 500) || undefined,
     heartbeatMinutes: bounded(raw.heartbeatMinutes, 1, 10080, DEFAULT_AGENT_SETTINGS.heartbeatMinutes),
     instructions: text(raw.instructions, 20_000) ?? "",
+    mainPrompt: text(raw.mainPrompt, 50_000)?.trim() || undefined,
     compactPercent: bounded(raw.compactPercent, 10, 95, DEFAULT_AGENT_SETTINGS.compactPercent),
     toolTimeoutMinutes: bounded(raw.toolTimeoutMinutes, 0, 1440, DEFAULT_AGENT_SETTINGS.toolTimeoutMinutes),
     ...(raw.toolState && typeof raw.toolState === "object" ? { toolState: raw.toolState } : {}),

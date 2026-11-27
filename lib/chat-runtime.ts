@@ -43,7 +43,7 @@ import { createThinkingSplitter, effectiveThinkingTags, normalizeThinkingTags, t
 import { canPersonalizeSystemPrompt, readModelSystemPrompts, readSystemPromptOverrides, resolveSystemPrompt } from "./system-prompt";
 import { readUserPreferences } from "./auth";
 
-type InputMessage = { id?: string; role: "user" | "assistant" | "system"; content: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
+type InputMessage = { id?: string; role: "user" | "assistant" | "system"; content: string; contextPrefix?: string; reasoning_content?: string; toolEvents?: ToolEvent[]; attachments?: Array<{ id: string }> };
 type UpstreamMessage = { role: string; content: unknown; reasoning_content?: string; tool_calls?: unknown; tool_call_id?: string; name?: string };
 type ToolCall = { id: string; function: { name: string; arguments: string }; type: "function" };
 type JobStatus = "running" | "waiting" | "completed" | "stopped" | "error";
@@ -388,7 +388,9 @@ async function upstreamMessages(input: StartChatJobInput, userId: string, system
     const attachments = message.role === "user" ? message.attachments || [] : [];
     const attachmentContent = attachments.length ? (await Promise.all(attachments.map(({ id }) => readUploadModelContent(id, userId, settings, model)))).flat() : [];
     if (model.imageInput === false && attachmentContent.some(part => part.type === "image_file" || part.type === "image_url")) throw new Error("The selected model does not accept image input.");
-    const content = attachments.length ? [...(message.content ? [{ type: "text", text: message.content }] : []), ...attachmentContent] : message.content;
+    // The agent chat's time line goes in front of what was written (also after a context-view edit of the text).
+    const text = message.contextPrefix ? `${message.contextPrefix}\n${message.content}` : message.content;
+    const content = attachments.length ? [...(text ? [{ type: "text", text }] : []), ...attachmentContent] : text;
     return restoreToolHistory({ role: message.role, content, toolEvents: message.toolEvents, ...(input.sendReasoning && message.role === "assistant" && message.reasoning_content ? { reasoning_content: message.reasoning_content } : {}) });
   }));
   return [...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []), ...converted.flat()];
@@ -1023,3 +1025,40 @@ export function submitChatToolInput(job: ChatJob, toolCallId: string, value: unk
 }
 
 export function stopChatJob(job: ChatJob) { job.controller.abort(); }
+
+const overheadCache = new Map<string, { at: number; value: { toolDefinitionTokens: number; systemTokens: number } }>();
+
+/**
+ * What every request of a chat carries besides the conversation, estimated before anything is sent: the tool
+ * definitions the switched-on tools would offer, and (for the agent's chat) its own system prompt. The context donut
+ * shows these from the first message on. Listing MCP tools may call the servers, so results are kept for a minute.
+ */
+export async function estimateRequestOverhead(userId: string, userRole: UserRole, input: { modelId: string; aliasBaseModelId?: string; tools?: unknown; conversationId?: string; clientContext?: StartChatJobInput["clientContext"]; agent?: { systemPrompt: string; toolState?: ToolState; sources: ToolProviderSource[] } }) {
+  const config = await readConfig();
+  const { model } = runtimeModel(config, { modelId: input.modelId, aliasBaseModelId: input.aliasBaseModelId }, userId);
+  const state = input.agent ? agentToolState(input.agent.toolState ?? requestToolState(input.tools), false) : requestToolState(input.tools);
+  const conversation = input.conversationId ? await readConversation(input.conversationId, userId).catch(() => undefined) : undefined;
+  const history = (conversation?.branches || []).flatMap(branch => branch.messages).flatMap(message => message.toolEvents || []);
+  // The chat's tool calls are in the key: definitions read on demand join the list.
+  const key = JSON.stringify([userId, model.id, input.conversationId || "", input.agent ? input.agent.systemPrompt : "", state, history.length]);
+  const cached = overheadCache.get(key);
+  if (cached && Date.now() - cached.at < 60_000) return cached.value;
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const request: ToolRequestContext = {
+      userId, role: userRole, conversationId: input.conversationId || "",
+      locale: input.clientContext?.language === "ko" || input.clientContext?.locale?.toLowerCase().startsWith("ko") ? "ko" : "en",
+      clientContext: input.clientContext, config, model, signal: controller.signal,
+      history: () => history,
+      services: { complete: async () => ({ text: "" }) },
+      disabledTools: planDisabledToolIds(userId), managedTools: managedToolsInstalled(userId),
+      ...(input.agent ? { agent: { userId, mode: "main" as const, autonomous: false } } : {}),
+    };
+    const resolved = await resolveTools(request, state, input.agent ? [...toolSources(), ...input.agent.sources] : toolSources());
+    const definitions = resolved.definitions;
+    const value = { toolDefinitionTokens: definitions.length ? estimateTokens(definitions) : 0, systemTokens: input.agent ? estimateTokens(input.agent.systemPrompt) : 0 };
+    overheadCache.set(key, { at: Date.now(), value });
+    if (overheadCache.size > 500) overheadCache.delete(overheadCache.keys().next().value!);
+    return value;
+  } finally { clearTimeout(timer); }
+}

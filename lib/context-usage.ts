@@ -36,14 +36,25 @@ function compactionBoundary(messages: StoredMessage[]): { start: number; summary
  * Output counters include reasoning; upstream input counters already include history and must
  * never be summed across turns. Attachments/formatting and untokenized text are estimates.
  */
-export function contextUsage(messages: StoredMessage[], includeReasoning: boolean, draft = "", systemPrompt = "", draftAttachments = 0, state?: ContextState): ContextUsage {
-  if (state) return stateUsage(messages, includeReasoning, draft, systemPrompt, draftAttachments, state);
+export function contextUsage(messages: StoredMessage[], includeReasoning: boolean, draft = "", systemPrompt = "", draftAttachments = 0, state?: ContextState, overhead?: RequestOverhead): ContextUsage {
+  const usage = state ? stateUsage(messages, includeReasoning, draft, systemPrompt, draftAttachments, state) : historyUsage(messages, includeReasoning, draft, systemPrompt, draftAttachments);
+  if (!overhead) return usage;
+  // The server's estimate for the tools switched on now wins over what the last reply carried.
+  const definitions = overhead.definitions ?? usage.definitions;
+  const input = usage.input + (overhead.system || 0);
+  return { ...usage, input, definitions, total: input + usage.response + usage.reasoning + usage.tools + usage.summary + definitions };
+}
+
+/** Sent with every request besides the conversation, as the server estimates it (see /api/chat/overhead). */
+export type RequestOverhead = { definitions?: number; system?: number };
+
+function historyUsage(messages: StoredMessage[], includeReasoning: boolean, draft: string, systemPrompt: string, draftAttachments: number): ContextUsage {
   const boundary = compactionBoundary(messages);
   const { start, summary } = boundary;
   let input = estimate(systemPrompt) + estimate(draft) + draftAttachments * 1600;
   let response = 0; let reasoning = 0; let tools = 0;
   for (const [offset, message] of messages.slice(start).entries()) {
-    if (message.role === "user") input += estimate(message.content) + (message.attachments?.length || 0) * 1600;
+    if (message.role === "user") input += estimate(message.content) + estimate(message.contextPrefix) + (message.attachments?.length || 0) * 1600;
     else {
       const messageIndex = start + offset;
       const afterCompaction = messageIndex === boundary.message ? (message.steps || []).slice(boundary.step + 1) : undefined;
@@ -80,7 +91,7 @@ function stateUsage(messages: StoredMessage[], includeReasoning: boolean, draft:
   let input = estimate(systemPrompt) + estimate(draft) + draftAttachments * 1600;
   let response = 0; let reasoning = 0; let tools = 0;
   for (const { message, original, overridden, detailsDropped } of applied.entries) {
-    if (message.role === "user") { input += estimate(message.content) + (message.attachments?.length || 0) * 1600; continue; }
+    if (message.role === "user") { input += estimate(message.content) + estimate(message.contextPrefix) + (message.attachments?.length || 0) * 1600; continue; }
     // Stored counters describe the original reply; once its text or details changed, estimate what is sent instead.
     const counted = !overridden && !detailsDropped ? count(original.outputTokens) : undefined;
     const thinking = message.reasoning ? Math.min(counted ?? Infinity, !overridden && !detailsDropped ? count(original.reasoningTokens) ?? estimate(message.reasoning) : estimate(message.reasoning)) : 0;

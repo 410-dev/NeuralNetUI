@@ -687,6 +687,13 @@ function openDatabase() {
     if (!columns.some(column => column.name === "tool_definition_tokens")) connection.exec("ALTER TABLE messages ADD COLUMN tool_definition_tokens INTEGER;");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(36, new Date().toISOString());
   })();
+  const prefixVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (prefixVersion.version < 37) connection.transaction(() => {
+    // Agent chat: the time line the model reads in front of a message (not shown in the chat).
+    const columns = connection.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "context_prefix")) connection.exec("ALTER TABLE messages ADD COLUMN context_prefix TEXT;");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(37, new Date().toISOString());
+  })();
   return connection;
 }
 

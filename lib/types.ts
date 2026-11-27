@@ -410,6 +410,9 @@ export interface StoredMessage {
   routedModel?: string;
   /** Agent chat only: "notice" is something the agent told the person on its own; "context" is a result only the model reads. */
   agentKind?: "notice" | "context";
+  /** Agent chat only: a line the system puts in front of the content for the model (the time it was sent or a subagent
+   * returned). The chat does not show it; the context view does. */
+  contextPrefix?: string;
   /** Absent on messages written before the sequential transcript existed. */
   steps?: MessageStep[];
   toolEvents?: ToolEvent[];
