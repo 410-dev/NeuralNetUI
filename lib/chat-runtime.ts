@@ -661,6 +661,13 @@ async function run(job: ChatJob) {
     }
     // The branch's context state (summary, dropped details, context-view edits) shapes what the model receives.
     let contextState: ContextState | undefined;
+    // The agent's main chat: once the provider's prompt cache has gone cold, the tool records before the turns kept word
+    // for word are reduced to one line per change (see toolsTracedThroughMessageId). Re-reading them costs as much as
+    // anything else then, and they are most of that chat's context; a warm cache is never broken for it.
+    if (job.agent?.mode === "main") {
+      try { await traceAgentToolRecords(job, connection.driver, (config.harnessSettings || DEFAULT_HARNESS_SETTINGS).compactKeepTurns ?? DEFAULT_HARNESS_SETTINGS.compactKeepTurns); }
+      catch (error) { console.warn("Agent tool records were not summarized:", error instanceof Error ? error.message : error); }
+    }
     try { contextState = loadContextState(job.input.branchId); } catch (error) { console.warn("Context state could not be read:", error); }
     const appliedContext = applyContextState(job.input.messages.map(message => ({ ...message, reasoning: message.reasoning_content })), contextState);
     const contextInput = { ...job.input, messages: appliedContext.entries.map(({ message: { reasoning, ...message } }) => ({ ...message, ...(reasoning ? { reasoning_content: reasoning } : { reasoning_content: undefined }) })) };
@@ -1076,4 +1083,34 @@ export async function estimateRequestOverhead(userId: string, userRole: UserRole
     if (overheadCache.size > 500) overheadCache.delete(overheadCache.keys().next().value!);
     return value;
   } finally { clearTimeout(timer); }
+}
+
+/** Prompt caches of other providers last about this long without a request (Anthropic's default is five minutes). */
+const DEFAULT_CACHE_SECONDS = 5 * 60;
+
+async function promptCacheCold(job: ChatJob, driver: string) {
+  if (driver === "lmf") {
+    const { lmfCacheOfConversation } = await import("./lmf-maintenance");
+    const cache = await lmfCacheOfConversation(job.input.conversationId).catch(() => undefined);
+    if (cache) return cache.remainingSeconds <= 0;
+  }
+  // Without the server's word: the time since the last reply ended.
+  const branch = job.conversation.branches.find(item => item.id === job.input.branchId);
+  const last = branch?.messages.findLast(message => message.role === "assistant" && message.id !== job.message.id && !message.agentKind);
+  if (!last) return false;
+  const ended = Date.parse(last.createdAt) + (last.totalDurationSeconds || 0) * 1000;
+  return Number.isFinite(ended) && Date.now() - ended > DEFAULT_CACHE_SECONDS * 1000;
+}
+
+async function traceAgentToolRecords(job: ChatJob, driver: string, keepTurns: number) {
+  const through = messageBeforeKeptTurns(job.input.messages, keepTurns, true);
+  if (!through) return;
+  const order = new Map(job.input.messages.map((message, index) => [message.id, index]));
+  const state = loadContextState(job.input.branchId);
+  const current = state.toolsTracedThroughMessageId ? order.get(state.toolsTracedThroughMessageId) ?? -1 : -1;
+  const target = order.get(through) ?? -1;
+  // Only forward, and only when something new would be traced.
+  if (target <= current || !job.input.messages.slice(current + 1, target + 1).some(message => message.toolEvents?.length)) return;
+  if (!await promptCacheCold(job, driver)) return;
+  updateContextState(job.input.branchId, value => ({ ...value, toolsTracedThroughMessageId: through }));
 }

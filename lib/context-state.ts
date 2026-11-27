@@ -6,6 +6,9 @@ import type { ToolEvent } from "./types.ts";
  *
  * - `summary`: every message up to and including `throughMessageId` is replaced by this text.
  * - `droppedThroughMessageId`: tool calls, tool results and reasoning of messages up to this one are left out.
+ * - `toolsTracedThroughMessageId`: tool calls and results of messages up to this one are left out, and each change the
+ *   agent made with its own tools (a subagent started, a schedule or a workboard item changed) stays as one line in
+ *   the reply, built from the call itself (no model is asked). Lookups leave nothing. Used by the agent's main chat.
  * - `overrides`: per-message edits made in the context view. The transcript keeps the original.
  *
  * Message ids that are not in the branch (deleted, or not yet part of a fork) are ignored, so a state copied from a
@@ -22,6 +25,7 @@ export interface ContextMessageOverride {
 export interface ContextState {
   summary?: { text: string; throughMessageId: string };
   droppedThroughMessageId?: string;
+  toolsTracedThroughMessageId?: string;
   overrides: Record<string, ContextMessageOverride>;
 }
 
@@ -67,12 +71,12 @@ export function normalizeContextState(input: unknown): ContextState {
     const normalized = id(key) && normalizeOverride(value);
     if (normalized) overrides[key] = normalized;
   }
-  const dropped = id(source.droppedThroughMessageId);
-  return { ...(summaryText !== undefined && summaryText.trim() && through ? { summary: { text: summaryText, throughMessageId: through } } : {}), ...(dropped ? { droppedThroughMessageId: dropped } : {}), overrides };
+  const dropped = id(source.droppedThroughMessageId), traced = id(source.toolsTracedThroughMessageId);
+  return { ...(summaryText !== undefined && summaryText.trim() && through ? { summary: { text: summaryText, throughMessageId: through } } : {}), ...(dropped ? { droppedThroughMessageId: dropped } : {}), ...(traced ? { toolsTracedThroughMessageId: traced } : {}), overrides };
 }
 
 export function isEmptyContextState(state: ContextState) {
-  return !state.summary && !state.droppedThroughMessageId && !Object.keys(state.overrides).length;
+  return !state.summary && !state.droppedThroughMessageId && !state.toolsTracedThroughMessageId && !Object.keys(state.overrides).length;
 }
 
 /** The fields of a transcript message that model input is built from. */
@@ -99,6 +103,7 @@ export function applyContextState<T extends ContextSourceMessage>(messages: T[],
   if (!state) return { summarized: [], entries: messages.map(message => ({ message, original: message, overridden: false, detailsDropped: false })) };
   const summaryIndex = state.summary ? messages.findIndex(message => message.id === state.summary!.throughMessageId) : -1;
   const droppedIndex = state.droppedThroughMessageId ? messages.findIndex(message => message.id === state.droppedThroughMessageId) : -1;
+  const tracedIndex = state.toolsTracedThroughMessageId ? messages.findIndex(message => message.id === state.toolsTracedThroughMessageId) : -1;
   const entries: ContextEntry<T>[] = [];
   messages.forEach((original, index) => {
     if (index <= summaryIndex) return;
@@ -118,8 +123,13 @@ export function applyContextState<T extends ContextSourceMessage>(messages: T[],
         ...(original.toolEvents ? { toolEvents: tools } : {}),
       };
     }
-    const detailsDropped = index <= droppedIndex && (Boolean(message.reasoning) || Boolean(message.toolEvents?.length));
+    const traced = index <= tracedIndex && index > droppedIndex && Boolean(message.toolEvents?.length);
+    const detailsDropped = traced || index <= droppedIndex && (Boolean(message.reasoning) || Boolean(message.toolEvents?.length));
     if (index <= droppedIndex) message = { ...message, reasoning: undefined, toolEvents: undefined };
+    else if (traced) {
+      const lines = (message.toolEvents || []).map(toolTrace).filter((line): line is string => Boolean(line));
+      message = { ...message, content: [message.content.trim(), ...lines].filter(Boolean).join("\n\n"), toolEvents: undefined };
+    }
     if (message.role === "assistant" && !message.content.trim() && !message.toolEvents?.length) return;
     entries.push({ message, original, overridden: Boolean(override), detailsDropped });
   });
@@ -169,4 +179,34 @@ export function keptTurnsStart(messages: Array<{ role: string }>, keepTurns: num
 export function messageBeforeKeptTurns(messages: Array<{ id?: string; role: string }>, keepTurns: number, pending: boolean) {
   const start = keptTurnsStart(messages, keepTurns, pending);
   return start > 0 ? messages[start - 1].id : undefined;
+}
+
+const quoted = (value: unknown) => typeof value === "string" && value.trim() ? `"${value.trim().slice(0, 120)}"` : "";
+const field = (value: unknown, key: string) => value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
+
+/**
+ * One line standing in for an agent tool call once its record is left out (`toolsTracedThroughMessageId`), built from
+ * the call's own arguments and result: what was started or changed, with the id to refer to it later. Lookups, other
+ * tools and calls that failed or were refused leave nothing.
+ */
+export function toolTrace(event: Pick<ToolEvent, "name" | "status" | "arguments" | "result">): string | undefined {
+  const args = event.arguments && typeof event.arguments === "object" ? event.arguments as Record<string, unknown> : {};
+  const result = event.result;
+  if (event.status === "error" || field(result, "error") || field(result, "executed") === false || field(result, "rejected")) return undefined;
+  const id = (value: unknown) => typeof value === "string" && value ? value : undefined;
+  const changed = (keys: string[]) => keys.filter(key => args[key] !== undefined).map(key => key === "instructions" || key === "body" ? key : `${key} ${typeof args[key] === "string" ? quoted(args[key]) : JSON.stringify(args[key])}`).join(", ");
+  switch (event.name) {
+    case "spawn_subagent": return `[Delegated to a subagent] ${quoted(args.title)} (run id ${id(field(result, "id")) ?? "?"})`;
+    case "notify_wakeup": {
+      const every = field(result, "intervalMinutes") ?? args.every_minutes;
+      const when = typeof every === "number" ? `every ${every} min` : `once${id(field(result, "nextRunAt")) ? ` at ${field(result, "nextRunAt")}` : ""}`;
+      return `[Scheduled] ${quoted(args.title)} ${when} (schedule id ${id(field(result, "id")) ?? "?"})`;
+    }
+    case "update_wakeup": return `[Schedule changed] ${id(args.id) ?? "?"}${changed(["title", "every_minutes", "at", "enabled", "instructions"]) ? `: ${changed(["title", "every_minutes", "at", "enabled", "instructions"])}` : ""}`;
+    case "cancel_wakeup": return `[Schedule cancelled] ${id(args.id) ?? "?"}`;
+    case "workboard_add": return `[Workboard ${typeof args.kind === "string" ? args.kind : "item"} added] ${quoted(args.title)} (id ${id(field(result, "id")) ?? "?"})`;
+    case "workboard_update": return `[Workboard item changed] ${id(args.id) ?? "?"}${changed(["title", "status", "starts_at", "ends_at", "body"]) ? `: ${changed(["title", "status", "starts_at", "ends_at", "body"])}` : ""}`;
+    case "workboard_remove": return `[Workboard item removed] ${id(args.id) ?? "?"}`;
+    default: return undefined;
+  }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { Brain, Check, Clock, Eraser, EyeOff, Layers, Minimize2, Paperclip, Pencil, RotateCcw, Undo2, Wrench, X } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { createPortal } from "react-dom";
 import { applyContextState, type ContextMessageOverride, type ContextState } from "@/lib/context-state";
 import type { StoredMessage, ToolEvent } from "@/lib/types";
@@ -35,6 +35,7 @@ export function ContextView({ ko, messages, state, includeReasoning, systemPromp
   const entries = new Map(applied.entries.map(entry => [entry.original.id, entry]));
   const summaryIndex = current.summary ? messages.findIndex(message => message.id === current.summary!.throughMessageId) : -1;
   const droppedIndex = current.droppedThroughMessageId ? messages.findIndex(message => message.id === current.droppedThroughMessageId) : -1;
+  const tracedIndex = current.toolsTracedThroughMessageId ? messages.findIndex(message => message.id === current.toolsTracedThroughMessageId) : -1;
   const [textEdit, setTextEdit] = useState<TextEdit>();
   const [toolEdit, setToolEdit] = useState<{ messageId: string; event: ToolEvent }>();
   const [systemOpen, setSystemOpen] = useState(false);
@@ -81,7 +82,9 @@ export function ContextView({ ko, messages, state, includeReasoning, systemPromp
     {messages.map((message, index) => {
       if (index <= summaryIndex) return null;
       const override = current.overrides[message.id];
-      const divider = index === droppedIndex ? <div className="context-divider" key={`${message.id}-dropped`}><Eraser size={13} /><span>{t("이 지점까지 도구 세부 내용과 추론을 버림", "Tool details and reasoning are dropped up to here")}</span><button type="button" onClick={() => { const { droppedThroughMessageId: _dropped, ...rest } = current; void onSave(rest); }}><Undo2 size={12} />{t("되돌리기", "Undo")}</button></div> : null;
+      const droppedDivider = index === droppedIndex ? <div className="context-divider" key={`${message.id}-dropped`}><Eraser size={13} /><span>{t("이 지점까지 도구 세부 내용과 추론을 버림", "Tool details and reasoning are dropped up to here")}</span><button type="button" onClick={() => { const { droppedThroughMessageId: _dropped, ...rest } = current; void onSave(rest); }}><Undo2 size={12} />{t("되돌리기", "Undo")}</button></div> : null;
+      const tracedDivider = index === tracedIndex && tracedIndex > droppedIndex ? <div className="context-divider" key={`${message.id}-traced`}><Eraser size={13} /><span>{t("이 지점까지 도구 기록을 한 줄 요약으로 바꿈 (캐시가 식은 뒤 자동)", "Tool records summarized to one line each up to here (automatic once the cache went cold)")}</span><button type="button" onClick={() => { const { toolsTracedThroughMessageId: _traced, ...rest } = current; void onSave(rest); }}><Undo2 size={12} />{t("되돌리기", "Undo")}</button></div> : null;
+      const divider = droppedDivider || tracedDivider ? <Fragment key={`${message.id}-dividers`}>{droppedDivider}{tracedDivider}</Fragment> : null;
       if (override?.removed) return <div key={message.id} data-context-message-id={message.id}>
         <article className={`context-message ${message.role} excluded`}><p className="context-text">{message.content || t("(내용 없음)", "(no text)")}</p>
           <footer><span className="context-badge"><EyeOff size={12} />{t("모델에 보내지 않음", "Not sent")}</span><button type="button" onClick={() => patchOverride(message.id, value => ({ ...value, removed: undefined }))}><RotateCcw size={12} />{t("다시 포함", "Include")}</button></footer></article>{divider}</div>;

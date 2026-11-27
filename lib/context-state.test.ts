@@ -85,3 +85,26 @@ test("compaction keeps the last pairs word for word", () => {
   const withTools = [{ id: "u1", role: "user" }, { id: "a1", role: "assistant" }, { id: "t1", role: "tool" }, { id: "a1b", role: "assistant" }, { id: "u2", role: "user" }, { id: "a2", role: "assistant" }];
   assert.equal(messageBeforeKeptTurns(withTools, 1, false), "a1b");
 });
+
+test("traced tool records leave one line per agent change and nothing for lookups", async () => {
+  const { applyContextState, toolTrace } = await import("./context-state.ts");
+  const call = (name: string, args: unknown, result: unknown) => ({ id: name, name, status: "completed" as const, arguments: args, result }) as unknown as import("./types.ts").ToolEvent;
+  const messages: import("./context-state.ts").ContextSourceMessage[] = [
+    { id: "u1", role: "user", content: "watch the channel" },
+    { id: "a1", role: "assistant", content: "Done.", toolEvents: [
+      call("workboard_list", { kind: "memory" }, { memorys: [{ id: "m", body: "x".repeat(5000) }] }),
+      call("notify_wakeup", { title: "러끼 채널", instructions: "…", every_minutes: 60 }, { id: "sch-1", intervalMinutes: 60 }),
+      call("spawn_subagent", { title: "메일 확인", instructions: "…" }, { id: "run-9", status: "queued" }),
+      call("workboard_add", { kind: "todo", title: "x" }, { error: "boom" }),
+    ] },
+    { id: "u2", role: "user", content: "next" },
+    { id: "a2", role: "assistant", content: "Kept.", toolEvents: [call("workboard_list", {}, { todos: [] })] },
+  ];
+  const applied = applyContextState(messages, { overrides: {}, toolsTracedThroughMessageId: "a1" });
+  const a1 = applied.entries.find(entry => entry.message.id === "a1")!;
+  assert.equal(a1.message.toolEvents, undefined);
+  assert.equal(a1.message.content, 'Done.\n\n[Scheduled] "러끼 채널" every 60 min (schedule id sch-1)\n\n[Delegated to a subagent] "메일 확인" (run id run-9)');
+  assert.equal(applied.entries.find(entry => entry.message.id === "a2")!.message.toolEvents?.length, 1);
+  assert.equal(toolTrace(call("update_wakeup", { id: "sch-1", enabled: false }, { id: "sch-1" })), "[Schedule changed] sch-1: enabled false");
+  assert.equal(toolTrace(call("internet_search", { query: "x" }, { results: [] })), undefined);
+});
