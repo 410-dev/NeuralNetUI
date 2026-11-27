@@ -12,3 +12,4 @@ installer/output
 .wix
 *.log
 tsconfig.tsbuildinfo
+mobile

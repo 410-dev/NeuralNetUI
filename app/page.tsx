@@ -667,7 +667,11 @@ export default function Home() {
       frame = 0;
       const composerFocused = document.activeElement instanceof HTMLTextAreaElement && Boolean(document.activeElement.closest(".composer"));
       let height: number, top: number;
-      if (nativeShell) { restingHeight = window.innerHeight; height = Math.max(0, restingHeight - nativeInset); top = 0; }
+      if (nativeShell) {
+        // Read the full height only while the keyboard is down, in case the WebView also shrinks for it.
+        if (!nativeInset) restingHeight = window.innerHeight;
+        height = Math.max(0, restingHeight - nativeInset); top = 0;
+      }
       else {
         height = Math.round(viewport?.height || window.innerHeight);
         top = Math.round(viewport?.offsetTop || 0);
