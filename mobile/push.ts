@@ -62,7 +62,8 @@ async function answer(action: "status" | "enable" | "disable"): Promise<PushRepl
     if (action === "enable" && status !== "granted") status = (await Notifications.requestPermissionsAsync()).status;
     const permission = status === "granted" ? "granted" : status === "denied" ? "denied" : "undetermined";
     if (action === "disable") {
-      await AsyncStorage.removeItem(ENABLED_KEY);
+      // Remembered as an explicit "off", so launching the app does not turn notifications back on.
+      await AsyncStorage.setItem(ENABLED_KEY, "0");
       return { permission, enabled: false, platform, token: permission === "granted" ? await deviceToken().catch(() => undefined) : undefined };
     }
     if (action === "enable") {
@@ -77,4 +78,23 @@ async function answer(action: "status" | "enable" | "disable"): Promise<PushRepl
   } catch (error) {
     return { permission: "undetermined", enabled: false, platform, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * On launch, unless the person turned notifications off in the app, notifications are switched on: the system asks
+ * for permission when it has not been answered yet. Returns true when they were just turned on, so the page can
+ * register the token without waiting for the next launch.
+ */
+export async function enableOnLaunch(): Promise<boolean> {
+  try {
+    const choice = await AsyncStorage.getItem(ENABLED_KEY);
+    if (choice === "0") return false;
+    await ensureChannels();
+    let { status, canAskAgain } = await Notifications.getPermissionsAsync();
+    if (status !== "granted" && canAskAgain) status = (await Notifications.requestPermissionsAsync()).status;
+    if (status !== "granted") return false;
+    if (choice === "1") return false;
+    await AsyncStorage.setItem(ENABLED_KEY, "1");
+    return true;
+  } catch { return false; }
 }

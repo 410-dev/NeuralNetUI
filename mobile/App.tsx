@@ -8,7 +8,8 @@ import { WebView as WebViewBase } from "react-native-webview";
 import type { WebViewNavigation } from "react-native-webview/lib/WebViewTypes";
 import type { WebViewProps } from "react-native-webview/lib/WebView";
 import * as Notifications from "expo-notifications";
-import { ensureChannels, handlePushRequest, notificationData } from "./push";
+import Constants from "expo-constants";
+import { enableOnLaunch, handlePushRequest, notificationData } from "./push";
 
 /** The commands the WebView's ref exposes at runtime (its typings declare a plain function component). */
 type WebViewHandle = { goBack(): void; injectJavaScript(script: string): void };
@@ -17,7 +18,7 @@ const WebView = WebViewBase as unknown as React.ComponentType<WebViewProps & { r
 const BACKGROUND = "#0a0a0c";
 const SERVER_KEY = "nnui.server";
 /** The page recognises the app by this token and lets it drive the keyboard layout. */
-const USER_AGENT_TOKEN = "NeuralNetUIApp/0.2.2";
+const USER_AGENT_TOKEN = "NeuralNetUIApp/0.2.3";
 
 export default function App() {
   return <SafeAreaProvider>
@@ -82,7 +83,10 @@ function Shell({ server, onChangeServer }: { server: string; onChangeServer: () 
   });
   const loaded = useRef(false);
 
-  useEffect(() => { void ensureChannels().catch(() => undefined); }, []);
+  // Notifications are asked for on launch; once granted, the page (if already signed in) registers the token.
+  useEffect(() => {
+    void enableOnLaunch().then(enabled => { if (enabled) web.current?.injectJavaScript(`window.dispatchEvent(new Event("nnui-native-push-ready"));true;`); });
+  }, []);
 
   // A notification tapped while the app is running hands its target to the page, which opens it in place.
   useEffect(() => {
@@ -195,6 +199,8 @@ function Shell({ server, onChangeServer }: { server: string; onChangeServer: () 
       keyboardDisplayRequiresUserAction={false}
       hideKeyboardAccessoryView
       allowsBackForwardNavigationGestures
+      // Test builds: lets chrome://inspect attach to the page. Turned off before any public release.
+      webviewDebuggingEnabled={Boolean((Constants.expoConfig?.extra as { webviewDebug?: boolean } | undefined)?.webviewDebug)}
     />
   </View>;
 }
