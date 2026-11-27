@@ -2261,3 +2261,10 @@ select:focus-visible {
 .secure-input-status { display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap; }
 .secure-input-status.done { color:var(--muted); }
 .secure-input-status.error { color:#ef5350; }
+
+.mcp-oauth-box { display:grid;gap:12px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-card);background:rgba(255,255,255,.02); }
+.mcp-oauth-box textarea { width:100%;min-height:0;height:auto;max-height:160px;resize:vertical;font-family:var(--font-mono, ui-monospace, monospace);font-size:12px;line-height:1.5;padding:8px 10px; }
+.mcp-oauth-redirect { display:flex;align-items:center;gap:8px;min-width:0; }
+.mcp-oauth-redirect code { flex:1;min-width:0;overflow-wrap:anywhere;font-size:12px;padding:6px 8px;border-radius:8px;background:#121216; }
+.mcp-oauth-status { display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted); }
+.mcp-oauth-status button { display:inline-flex;align-items:center;gap:6px; }

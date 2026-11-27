@@ -663,6 +663,13 @@ function openDatabase() {
     if (!columns.some(column => column.name === "kind")) connection.exec("ALTER TABLE mcp_connections ADD COLUMN kind TEXT NOT NULL DEFAULT 'user' CHECK (kind IN ('user', 'vm'));");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(33, new Date().toISOString());
   })();
+  const oauthVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (oauthVersion.version < 34) connection.transaction(() => {
+    // OAuth sign-in for MCP connections: client, endpoints, scopes and the refresh token (JSON); the access token stays in credential.
+    const columns = connection.prepare("PRAGMA table_info(mcp_connections)").all() as Array<{ name: string }>;
+    if (!columns.some(column => column.name === "oauth")) connection.exec("ALTER TABLE mcp_connections ADD COLUMN oauth TEXT;");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(34, new Date().toISOString());
+  })();
   return connection;
 }
 

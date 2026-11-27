@@ -1,6 +1,6 @@
 "use client";
 
-import { Cable, ChevronDown, CirclePlus, Cookie, Copy, Info, LoaderCircle, Monitor, Pencil, PlugZap, Save, Settings, ShieldCheck, Trash2, X } from "lucide-react";
+import { Cable, ChevronDown, CirclePlus, Cookie, Copy, LogIn, Info, LoaderCircle, Monitor, Pencil, PlugZap, Save, Settings, ShieldCheck, Trash2, X } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { McpAuthType, McpConnection, McpEntitlement, McpToolInfo, McpToolPolicy } from "@/lib/types";
@@ -9,10 +9,20 @@ import { SectionTitle } from "./section-title";
 import { SelectMenu } from "./select-menu";
 import { useMessageDialog } from "./message-dialog";
 import { readApiResponse } from "@/lib/client-response";
+import { MCP_OAUTH_CALLBACK_PATH, mcpOAuthPreset } from "@/lib/mcp-oauth-presets";
 
-type McpDraft = { id?: string; name: string; description: string; url: string; authType: McpAuthType; credential: string; enabled: boolean; toolTimeoutSeconds: string; hasCredential?: boolean };
+type McpDraft = { id?: string; name: string; description: string; url: string; authType: McpAuthType; credential: string; enabled: boolean; toolTimeoutSeconds: string; hasCredential?: boolean;
+  oauthClientId: string; oauthClientSecret: string; oauthAuthorizationUrl: string; oauthTokenUrl: string; oauthScopes: string };
 const MIN_TOOL_TIMEOUT = 5, MAX_TOOL_TIMEOUT = 600, DEFAULT_TOOL_TIMEOUT = 20;
-const emptyDraft = (): McpDraft => ({ name: "", description: "", url: "", authType: "none", credential: "", enabled: true, toolTimeoutSeconds: String(DEFAULT_TOOL_TIMEOUT) });
+const emptyDraft = (): McpDraft => ({ name: "", description: "", url: "", authType: "none", credential: "", enabled: true, toolTimeoutSeconds: String(DEFAULT_TOOL_TIMEOUT), oauthClientId: "", oauthClientSecret: "", oauthAuthorizationUrl: "", oauthTokenUrl: "", oauthScopes: "" });
+const draftFrom = (connection: McpConnection): McpDraft => ({ ...emptyDraft(), ...connection, description: connection.description || "", credential: "", toolTimeoutSeconds: String(connection.toolTimeoutSeconds ?? DEFAULT_TOOL_TIMEOUT),
+  oauthClientId: connection.oauth?.clientId || "", oauthAuthorizationUrl: connection.oauth?.authorizationUrl || "", oauthTokenUrl: connection.oauth?.tokenUrl || "", oauthScopes: (connection.oauth?.scopes || []).join("\n") });
+/** A known server (Google's Workspace MCP servers) fills the OAuth endpoints and scopes left blank. */
+function withPreset(draft: McpDraft): McpDraft {
+  const preset = draft.authType === "oauth" ? mcpOAuthPreset(draft.url) : undefined;
+  if (!preset) return draft;
+  return { ...draft, oauthAuthorizationUrl: draft.oauthAuthorizationUrl || preset.authorizationUrl, oauthTokenUrl: draft.oauthTokenUrl || preset.tokenUrl, oauthScopes: draft.oauthScopes || preset.scopes.join("\n") };
+}
 
 const policies:McpToolPolicy[]=["blocked","always_ask","session_ask","always_allow"];
 function policyLabel(policy:McpToolPolicy,ko:boolean){return ({blocked:ko?"차단":"Block",always_ask:ko?"항상 묻기":"Always ask",session_ask:ko?"세션마다 묻기":"Ask per session",always_allow:ko?"항상 허용":"Always allow"})[policy];}
@@ -26,18 +36,55 @@ function McpToolPolicyDialog({ko,connection,onClose}:{ko:boolean;connection:McpC
 
 function McpConnectionDialog({ ko, initial, onClose, onSaved }: { ko: boolean; initial?: McpConnection; onClose: () => void; onSaved: () => void }) {
   const ref = useModalFocus(onClose);
-  const [draft, setDraft] = useState<McpDraft>(() => initial ? { ...initial, description: initial.description || "", credential: "", toolTimeoutSeconds: String(initial.toolTimeoutSeconds ?? DEFAULT_TOOL_TIMEOUT) } : emptyDraft());
-  const [notice, setNotice] = useState(""), [busy, setBusy] = useState(false), [testing, setTesting] = useState(false);
+  const [saved, setSaved] = useState<McpConnection | undefined>(initial);
+  const [draft, setDraft] = useState<McpDraft>(() => initial ? draftFrom(initial) : emptyDraft());
+  const [notice, setNotice] = useState(""), [busy, setBusy] = useState(false), [testing, setTesting] = useState(false), [signingIn, setSigningIn] = useState(false);
   const toolTimeoutSeconds = Number(draft.toolTimeoutSeconds);
   const timeoutValid = Number.isInteger(toolTimeoutSeconds) && toolTimeoutSeconds >= MIN_TOOL_TIMEOUT && toolTimeoutSeconds <= MAX_TOOL_TIMEOUT;
-  const payload = { ...draft, credential: draft.credential.trim(), toolTimeoutSeconds };
-  const credentialNeeded = draft.authType !== "none" && !draft.credential.trim() && !draft.hasCredential;
-  const valid = Boolean(draft.name.trim() && draft.url.trim() && !credentialNeeded && timeoutValid);
+  // OAuth with a client signs in through NeuralNetUI; OAuth without one takes a pasted access token, as before.
+  const oauthClient = draft.authType === "oauth" && Boolean(draft.oauthClientId.trim());
+  const { oauthClientId, oauthClientSecret, oauthAuthorizationUrl, oauthTokenUrl, oauthScopes, ...base } = draft;
+  const payload = { ...base, credential: draft.credential.trim(), toolTimeoutSeconds,
+    ...(oauthClient ? { oauth: { clientId: oauthClientId.trim(), clientSecret: oauthClientSecret.trim(), authorizationUrl: oauthAuthorizationUrl.trim(), tokenUrl: oauthTokenUrl.trim(), scopes: oauthScopes.split(/[\s,]+/).map(item => item.trim()).filter(Boolean) } } : {}) };
+  const credentialNeeded = draft.authType !== "none" && !oauthClient && !draft.credential.trim() && !draft.hasCredential;
+  const redirectUri = typeof window === "undefined" ? "" : `${window.location.origin}${MCP_OAUTH_CALLBACK_PATH}`;
+  const secretNeeded = oauthClient && !draft.oauthClientSecret.trim() && !saved?.oauth?.hasClientSecret;
+  async function persist() {
+    const response = await fetch(saved ? `/api/mcp-connections/${saved.id}` : "/api/mcp-connections", { method: saved ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const body = await readApiResponse<{ connection: McpConnection }>(response, ko ? "ko" : "en");
+    setSaved(body.connection); setDraft(current => ({ ...current, id: body.connection.id, hasCredential: body.connection.hasCredential, oauthClientSecret: "" }));
+    return body.connection;
+  }
+  /** Saves, then opens the provider's sign-in in a new window and waits until the connection reports it is signed in. */
+  async function signIn() {
+    if (!valid || secretNeeded) return;
+    const popup = window.open("about:blank", "nnui-mcp-oauth", "width=520,height=720");
+    setSigningIn(true); setNotice("");
+    try {
+      const connection = await persist();
+      const started = await readApiResponse<{ url: string }>(await fetch(`/api/mcp-connections/${connection.id}/oauth`, { method: "POST" }), ko ? "ko" : "en");
+      if (popup && !popup.closed) popup.location.href = started.url; else window.open(started.url, "_blank");
+      setNotice(ko ? "새 창에서 로그인하고 권한을 허용해 주세요." : "Sign in and allow access in the new window.");
+      const before = connection.updatedAt;
+      const deadline = Date.now() + 10 * 60_000;
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const list = await fetch("/api/mcp-connections", { cache: "no-store" }).then(response => response.ok ? response.json() as Promise<{ connections: McpConnection[] }> : undefined).catch(() => undefined);
+        const current = list?.connections.find(item => item.id === connection.id);
+        if (current?.oauth?.signedIn && current.updatedAt !== before) {
+          setSaved(current); setNotice(ko ? "로그인했습니다. 연결 테스트로 도구를 확인해 보세요." : "Signed in. Use Test connection to check the tools."); onSaved(); return;
+        }
+      }
+      setNotice(ko ? "로그인이 확인되지 않았습니다. 다시 시도해 주세요." : "The sign-in was not confirmed. Try again.");
+    } catch (error) { if (popup && !popup.closed) popup.close(); setNotice(error instanceof Error ? error.message : String(error)); }
+    finally { setSigningIn(false); }
+  }
+  const valid = Boolean(draft.name.trim() && draft.url.trim() && !credentialNeeded && timeoutValid && (!oauthClient || (draft.oauthAuthorizationUrl.trim() && draft.oauthTokenUrl.trim())));
   async function test() {
     if (!valid) return;
     setTesting(true); setNotice("");
     try {
-      const response = await fetch("/api/mcp-connections/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const response = await fetch("/api/mcp-connections/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, ...(saved ? { id: saved.id } : {}) }) });
       const body = await readApiResponse<{ toolCount: number }>(response, ko ? "ko" : "en");
       setNotice(ko ? `연결됨: 도구 ${body.toolCount}개를 확인했습니다.` : `Connected: found ${body.toolCount} tools.`);
     } catch (error) { setNotice(error instanceof Error ? error.message : (ko ? "연결 테스트에 실패했습니다." : "Connection test failed.")); }
@@ -47,8 +94,7 @@ function McpConnectionDialog({ ko, initial, onClose, onSaved }: { ko: boolean; i
     event.preventDefault(); if (!valid) return;
     setBusy(true); setNotice("");
     try {
-      const response = await fetch(initial ? `/api/mcp-connections/${initial.id}` : "/api/mcp-connections", { method: initial ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      await readApiResponse(response, ko ? "ko" : "en");
+      await persist();
       onSaved(); onClose();
     } catch (error) { setNotice(error instanceof Error ? error.message : (ko ? "MCP 연결을 저장하지 못했습니다." : "Unable to save the MCP connection.")); }
     finally { setBusy(false); }
@@ -59,9 +105,19 @@ function McpConnectionDialog({ ko, initial, onClose, onSaved }: { ko: boolean; i
     <form className="harness-dialog mcp-connection-dialog" onSubmit={save}>
       <header><div><h2>{initial ? (ko ? "MCP 연결 수정" : "Edit MCP connection") : (ko ? "MCP 연결 등록" : "Add MCP connection")}</h2><p>{ko ? "원격 MCP 서버의 기본 정보와 인증 방식을 설정합니다." : "Configure the remote MCP server and its authentication."}</p></div><button type="button" onClick={onClose} aria-label={ko ? "닫기" : "Close"}><X size={20}/></button></header>
       <div className="form-grid"><label className="field"><span>{ko ? "MCP 이름" : "MCP name"}</span><input required maxLength={80} value={draft.name} onChange={event=>setDraft(current=>({...current,name:event.target.value}))} placeholder={ko ? "예: 사내 문서 검색" : "e.g. Internal docs"}/></label><label className="field"><span>{ko ? "설명 (선택)" : "Description (optional)"}</span><input maxLength={500} value={draft.description} onChange={event=>setDraft(current=>({...current,description:event.target.value}))}/></label></div>
-      <label className="field"><span>{ko ? "연결 URL" : "Connection URL"}</span><input required type="url" value={draft.url} onChange={event=>setDraft(current=>({...current,url:event.target.value}))} placeholder="https://example.com/mcp"/><small>{ko ? "Streamable HTTP를 지원하는 MCP 엔드포인트를 입력하세요." : "Enter an MCP endpoint that supports Streamable HTTP."}</small></label>
-      <label className="field"><span>{ko ? "인증" : "Authentication"}</span><SelectMenu label={ko ? "인증" : "Authentication"} value={draft.authType} options={[{value:"oauth",label:"OAuth"},{value:"api_key",label:ko?"API Key":"API key"},{value:"none",label:ko?"인증 없음":"No authentication"}]} onChange={value=>setDraft(current=>({...current,authType:value as McpAuthType,credential:value==="none"?"":current.credential}))}/></label>
-      {draft.authType!=="none"&&<label className="field"><span>{credentialLabel}</span><input type="password" autoComplete="off" required={!draft.hasCredential} value={draft.credential} onChange={event=>setDraft(current=>({...current,credential:event.target.value}))} placeholder={draft.hasCredential?(ko?"저장된 값 유지":"Keep saved value"):"••••••••"}/><small>{draft.authType==="oauth"?(ko?"발급된 OAuth 액세스 토큰을 Bearer 인증으로 전송합니다.":"The issued OAuth access token is sent as Bearer authentication."):(ko?"API 키를 Bearer 인증으로 전송합니다.":"The API key is sent as Bearer authentication.")}</small></label>}
+      <label className="field"><span>{ko ? "연결 URL" : "Connection URL"}</span><input required type="url" value={draft.url} onChange={event=>setDraft(current=>withPreset({...current,url:event.target.value}))} placeholder="https://example.com/mcp"/><small>{ko ? "Streamable HTTP를 지원하는 MCP 엔드포인트를 입력하세요." : "Enter an MCP endpoint that supports Streamable HTTP."}</small></label>
+      <label className="field"><span>{ko ? "인증" : "Authentication"}</span><SelectMenu label={ko ? "인증" : "Authentication"} value={draft.authType} options={[{value:"oauth",label:"OAuth"},{value:"api_key",label:ko?"API Key":"API key"},{value:"none",label:ko?"인증 없음":"No authentication"}]} onChange={value=>setDraft(current=>withPreset({...current,authType:value as McpAuthType,credential:value==="none"?"":current.credential}))}/></label>
+      {draft.authType==="oauth"&&<div className="mcp-oauth-box">
+        <div className="form-grid"><label className="field"><span>{ko?"클라이언트 ID":"Client ID"}</span><input autoComplete="off" value={draft.oauthClientId} onChange={event=>setDraft(current=>({...current,oauthClientId:event.target.value}))} placeholder="1234-abc.apps.googleusercontent.com"/></label>
+          <label className="field"><span>{ko?"클라이언트 시크릿":"Client secret"}</span><input type="password" autoComplete="off" value={draft.oauthClientSecret} onChange={event=>setDraft(current=>({...current,oauthClientSecret:event.target.value}))} placeholder={saved?.oauth?.hasClientSecret?(ko?"저장된 값 유지":"Keep saved value"):"••••••••"}/></label></div>
+        {oauthClient&&<><div className="form-grid"><label className="field"><span>{ko?"인증 주소":"Authorization URL"}</span><input value={draft.oauthAuthorizationUrl} onChange={event=>setDraft(current=>({...current,oauthAuthorizationUrl:event.target.value}))} placeholder="https://…/authorize"/></label>
+          <label className="field"><span>{ko?"토큰 주소":"Token URL"}</span><input value={draft.oauthTokenUrl} onChange={event=>setDraft(current=>({...current,oauthTokenUrl:event.target.value}))} placeholder="https://…/token"/></label></div>
+        <label className="field"><span>{ko?"권한 범위 (scope)":"Scopes"}</span><textarea rows={3} spellCheck={false} value={draft.oauthScopes} onChange={event=>setDraft(current=>({...current,oauthScopes:event.target.value}))}/><small>{ko?"한 줄에 하나씩. Google Gmail·Calendar MCP 주소를 넣으면 인증·토큰 주소와 권한이 자동으로 채워집니다.":"One per line. Google's Gmail and Calendar MCP URLs fill in the endpoints and scopes."}</small></label>
+        <div className="field"><span>{ko?"리디렉션 URI (OAuth 클라이언트에 등록)":"Redirect URI (register it on the OAuth client)"}</span><div className="mcp-oauth-redirect"><code>{redirectUri}</code><button type="button" className="subtle-action" onClick={()=>void navigator.clipboard?.writeText(redirectUri)}><Copy size={13}/>{ko?"복사":"Copy"}</button></div></div>
+        <div className="mcp-oauth-status"><span>{saved?.oauth?.signedIn?(ko?`로그인됨${saved.oauth.canRefresh?" · 자동 갱신":" · 갱신 토큰 없음(만료되면 다시 로그인)"}`:`Signed in${saved.oauth.canRefresh?" · renews itself":" · no refresh token (sign in again when it expires)"}`):(ko?"로그인 필요":"Not signed in")}</span>
+          <button type="button" className="secondary-button" disabled={!valid||secretNeeded||signingIn||busy} onClick={()=>void signIn()}>{signingIn?<LoaderCircle className="spin" size={15}/>:<LogIn size={15}/>} {saved?.oauth?.signedIn?(ko?"다시 로그인":"Sign in again"):(ko?"저장하고 로그인":"Save and sign in")}</button></div></>}
+      </div>}
+      {draft.authType!=="none"&&!oauthClient&&<label className="field"><span>{credentialLabel}</span><input type="password" autoComplete="off" required={!draft.hasCredential} value={draft.credential} onChange={event=>setDraft(current=>({...current,credential:event.target.value}))} placeholder={draft.hasCredential?(ko?"저장된 값 유지":"Keep saved value"):"••••••••"}/><small>{draft.authType==="oauth"?(ko?"발급된 OAuth 액세스 토큰을 Bearer 인증으로 전송합니다. 클라이언트 ID를 넣으면 NeuralNetUI가 직접 로그인하고 토큰을 갱신합니다.":"The issued OAuth access token is sent as Bearer authentication. Enter a client ID to have NeuralNetUI sign in and renew the token."):(ko?"API 키를 Bearer 인증으로 전송합니다.":"The API key is sent as Bearer authentication.")}</small></label>}
       <label className="field"><span>{ko?"도구 실행 타임아웃 (초)":"Tool timeout (seconds)"}</span><input required type="number" inputMode="numeric" min={MIN_TOOL_TIMEOUT} max={MAX_TOOL_TIMEOUT} step={1} value={draft.toolTimeoutSeconds} aria-invalid={!timeoutValid} onChange={event=>setDraft(current=>({...current,toolTimeoutSeconds:event.target.value}))}/><small>{ko?`도구 한 번 호출의 최대 대기 시간입니다. ${MIN_TOOL_TIMEOUT}~${MAX_TOOL_TIMEOUT}초, 기본값 ${DEFAULT_TOOL_TIMEOUT}초.`:`Maximum wait for a single tool call. ${MIN_TOOL_TIMEOUT}–${MAX_TOOL_TIMEOUT} seconds, default ${DEFAULT_TOOL_TIMEOUT}.`}</small></label>
       <div className="general-setting-card general-toggle-card"><div><strong>{ko?"이 연결 사용":"Use this connection"}</strong><small>{ko?"끄면 등록 정보는 유지되지만 채팅 도구에 나타나지 않습니다.":"When off, the record stays saved but is hidden from chat tools."}</small></div><button type="button" role="switch" aria-label={ko?"이 연결 사용":"Use this connection"} aria-checked={draft.enabled} className={`toggle ${draft.enabled?"on":""}`} onClick={()=>setDraft(current=>({...current,enabled:!current.enabled}))}><i/></button></div>
       {notice&&<p className="settings-notice" role="status">{notice}</p>}
@@ -182,7 +238,7 @@ export function McpSettings({ ko, connections: initialConnections, entitlement: 
   return <div className="settings-section mcp-settings"><SectionTitle icon={<Cable size={19}/>} title={ko?"MCP 연결":"MCP connections"} description={ko?"계정에 연결할 원격 MCP 서버를 등록하고 채팅에서 사용할 도구를 관리합니다.":"Register remote MCP servers for your account and control the tools available in chat."} action={<button className="subtle-action" disabled={!canAdd} onClick={()=>setEditing("new")}><CirclePlus size={15}/>{ko?"MCP 추가":"Add MCP"}</button>}/>
     <VirtualComputerCard key={vm?.id || "new"} ko={ko} connection={vm} onChanged={()=>void refresh().catch(error=>setNotice(error.message))} onPermissions={setPermissions} onRemove={connection=>void remove(connection)} />
     <div className={`mcp-plan-summary ${entitlement.enabled?"":"disabled"}`}><div><strong>{entitlement.enabled?(ko?"MCP 사용 가능":"MCP available"):(ko?"현재 플랜에서 사용할 수 없음":"Not available on this plan")}</strong><small>{ko?`${entitlement.usedConnections} / ${entitlement.maxConnections}개 등록됨`:`${entitlement.usedConnections} of ${entitlement.maxConnections} registered`}</small></div></div>
-    {userConnections.length?<div className="mcp-connection-list">{userConnections.map(connection=><article key={connection.id} className={connection.enabled?"":"disabled"}><span className="mcp-connection-mark"><Cable size={18}/></span><div><strong>{connection.name}</strong><small>{connection.description||connection.url}</small><em>{connection.authType==="none"?(ko?"인증 없음":"No auth"):connection.authType==="oauth"?"OAuth":"API Key"}</em></div><span className="mcp-row-actions"><button disabled={!connection.enabled} aria-label={ko?`${connection.name} 도구 권한`:`${connection.name} tool permissions`} onClick={()=>setPermissions(connection)}><Settings size={16}/></button><button aria-label={ko?`${connection.name} 수정`:`Edit ${connection.name}`} onClick={()=>setEditing(connection)}><Pencil size={16}/></button><button className="danger" aria-label={ko?`${connection.name} 삭제`:`Delete ${connection.name}`} onClick={()=>void remove(connection)}><Trash2 size={16}/></button></span></article>)}</div>:<div className="mcp-empty"><Cable size={25}/><strong>{ko?"등록된 MCP 연결이 없습니다.":"No MCP connections yet."}</strong><small>{entitlement.enabled?(ko?"MCP를 추가하면 채팅의 도구 메뉴에 표시됩니다.":"Add one to show it in the chat tools menu."):(ko?"관리자가 플랜에서 MCP 사용을 활성화해야 합니다.":"An administrator must enable MCP for your plan.")}</small></div>}
+    {userConnections.length?<div className="mcp-connection-list">{userConnections.map(connection=><article key={connection.id} className={connection.enabled?"":"disabled"}><span className="mcp-connection-mark"><Cable size={18}/></span><div><strong>{connection.name}</strong><small>{connection.description||connection.url}</small><em>{connection.authType==="none"?(ko?"인증 없음":"No auth"):connection.authType==="oauth"?(connection.oauth&&!connection.oauth.signedIn?(ko?"OAuth · 로그인 필요":"OAuth · sign-in needed"):"OAuth"):"API Key"}</em></div><span className="mcp-row-actions"><button disabled={!connection.enabled} aria-label={ko?`${connection.name} 도구 권한`:`${connection.name} tool permissions`} onClick={()=>setPermissions(connection)}><Settings size={16}/></button><button aria-label={ko?`${connection.name} 수정`:`Edit ${connection.name}`} onClick={()=>setEditing(connection)}><Pencil size={16}/></button><button className="danger" aria-label={ko?`${connection.name} 삭제`:`Delete ${connection.name}`} onClick={()=>void remove(connection)}><Trash2 size={16}/></button></span></article>)}</div>:<div className="mcp-empty"><Cable size={25}/><strong>{ko?"등록된 MCP 연결이 없습니다.":"No MCP connections yet."}</strong><small>{entitlement.enabled?(ko?"MCP를 추가하면 채팅의 도구 메뉴에 표시됩니다.":"Add one to show it in the chat tools menu."):(ko?"관리자가 플랜에서 MCP 사용을 활성화해야 합니다.":"An administrator must enable MCP for your plan.")}</small></div>}
     {notice&&<p className="settings-notice" role="alert">{notice}</p>}
     {editing&&<McpConnectionDialog ko={ko} initial={editing==="new"?undefined:editing} onClose={()=>setEditing(undefined)} onSaved={()=>void refresh().catch(error=>setNotice(error.message))}/>} {permissions&&<McpToolPolicyDialog ko={ko} connection={permissions} onClose={()=>setPermissions(undefined)}/>} {dialog}
   </div>;
