@@ -7,6 +7,8 @@ import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-cont
 import { WebView as WebViewBase } from "react-native-webview";
 import type { WebViewNavigation } from "react-native-webview/lib/WebViewTypes";
 import type { WebViewProps } from "react-native-webview/lib/WebView";
+import * as Notifications from "expo-notifications";
+import { ensureChannels, handlePushRequest, notificationData } from "./push";
 
 /** The commands the WebView's ref exposes at runtime (its typings declare a plain function component). */
 type WebViewHandle = { goBack(): void; injectJavaScript(script: string): void };
@@ -15,7 +17,7 @@ const WebView = WebViewBase as unknown as React.ComponentType<WebViewProps & { r
 const BACKGROUND = "#0a0a0c";
 const SERVER_KEY = "nnui.server";
 /** The page recognises the app by this token and lets it drive the keyboard layout. */
-const USER_AGENT_TOKEN = "NeuralNetUIApp/0.1.0";
+const USER_AGENT_TOKEN = "NeuralNetUIApp/0.2.0";
 
 export default function App() {
   return <SafeAreaProvider>
@@ -71,6 +73,37 @@ function Shell({ server, onChangeServer }: { server: string; onChangeServer: () 
   const canGoBack = useRef(false);
   const [failed, setFailed] = useState<string>();
   const origin = new URL(server).origin;
+  // A notification tapped while the app was closed opens straight at the place it points to.
+  const [startUrl] = useState(() => {
+    const response = Notifications.getLastNotificationResponse();
+    const target = response ? notificationData(response.notification).url : undefined;
+    if (response) Notifications.clearLastNotificationResponse();
+    return target?.startsWith("/") ? `${origin}${target}` : server;
+  });
+  const loaded = useRef(false);
+
+  useEffect(() => { void ensureChannels().catch(() => undefined); }, []);
+
+  // A notification tapped while the app is running hands its target to the page, which opens it in place.
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+      const target = notificationData(response.notification).url;
+      if (!target?.startsWith("/")) return;
+      if (loaded.current) web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent("nnui-native-open",{detail:{url:${JSON.stringify(target)}}}));true;`);
+      else web.current?.injectJavaScript(`window.location.assign(${JSON.stringify(`${origin}${target}`)});true;`);
+    });
+    return () => subscription.remove();
+  }, [origin]);
+
+  // Requests from the page (lib/native-bridge.ts) are answered with a `nnui-native-reply` event carrying their id.
+  const onMessage = async (event: { nativeEvent: { data: string; url: string } }) => {
+    try { if (new URL(event.nativeEvent.url).origin !== origin) return; } catch { return; }
+    let request: { type?: string; action?: string; id?: string };
+    try { request = JSON.parse(event.nativeEvent.data); } catch { return; }
+    if (request.type !== "push" || !request.id || !["status", "enable", "disable"].includes(String(request.action))) return;
+    const reply = await handlePushRequest(request.action as "status" | "enable" | "disable");
+    web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent("nnui-native-reply",{detail:${JSON.stringify({ ...reply, id: request.id })}}));true;`);
+  };
 
   // The keyboard overlaps the WebView (the provider keeps the window from resizing). As soon as it
   // starts to move, the page is told where it will end and how long it takes, so the layout follows
@@ -123,7 +156,9 @@ function Shell({ server, onChangeServer }: { server: string; onChangeServer: () 
   return <View style={[styles.fill, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }]}>
     <WebView
       ref={web}
-      source={{ uri: server }}
+      source={{ uri: startUrl }}
+      onMessage={event => void onMessage(event as { nativeEvent: { data: string; url: string } })}
+      onLoadEnd={() => { loaded.current = true; }}
       style={styles.web}
       containerStyle={styles.web}
       applicationNameForUserAgent={USER_AGENT_TOKEN}

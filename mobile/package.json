@@ -6,6 +6,7 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~58.1.0",
     "expo-build-properties": "~58.0.12",
+    "expo-notifications": "~58.1.10",
     "expo-splash-screen": "~58.0.15",
     "expo-status-bar": "~58.0.5",
     "react": "19.3.0",
