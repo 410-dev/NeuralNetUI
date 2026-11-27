@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Bell, BellOff, Braces, Brain, Cable, CalendarClock, Check, ChevronLeft, ChevronRight, Clock, Clock3, Code2, Cog, Globe2, HardDrive, History, Layers, Link2, ListChecks, ListTodo, LoaderCircle, MapPin, Monitor, Plus, Repeat, Settings, Square, Timer, Trash2, Video, Wrench, X } from "lucide-react";
+import { Bell, BellOff, Braces, Brain, Cable, CalendarClock, Check, ChevronLeft, ChevronRight, Clock, Clock3, Code2, Cog, Globe2, HardDrive, History, Layers, Link2, ListChecks, ListTodo, LoaderCircle, MapPin, Monitor, Plus, Repeat, Settings, Square, Timer, Trash2, Video, Wrench, X , LayoutTemplate } from "lucide-react";
 import type { ToolIcon } from "@/lib/tools/catalog";
 import { defaultAgentInstructions, defaultAgentMainPrompt, defaultSubagentTemplate, SUBAGENT_TASK_PLACEHOLDER } from "@/lib/agent/defaults";
 import type { ToolState } from "@/lib/tools/state";
@@ -15,7 +15,7 @@ import type { ModelConfig, StoredMessage } from "@/lib/types";
 export type AgentDecision = "allow" | "ask";
 export type AgentToolRule = { read?: AgentDecision; write?: AgentDecision; tools?: Record<string, AgentDecision> };
 export type AgentClientSettings = { enabled: boolean; modelId?: string; subagentModelId?: string; heartbeatMinutes: number; instructions: string; mainPrompt?: string; subagentTemplate?: string; toolState?: ToolState; compactPercent: number; toolTimeoutMinutes: number; toolRules: Record<string, AgentToolRule> };
-const RULE_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video, monitor: Monitor };
+const RULE_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video, monitor: Monitor, layout: LayoutTemplate };
 
 export type AgentRunView = { id: string; kind: "task" | "heartbeat" | "schedule"; title: string; instructions: string; status: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"; result?: string; error?: string; conversationId?: string; createdAt: string; startedAt?: string; finishedAt?: string };
 export type AgentScheduleView = { id: string; kind: "once" | "recurring"; title: string; instructions: string; nextRunAt?: string; intervalMinutes?: number; enabled: boolean; lastRunAt?: string };
@@ -213,7 +213,7 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
     })();
   }, [ko]);
   const providers = useMemo(() => [
-    ...BUILTIN_TOOL_PROVIDERS.filter(item => !["code-runner", "location", "multiple-choice"].includes(item.id)).map(item => ({ id: item.id, name: ko ? item.label.ko : item.label.en, icon: item.icon })),
+    ...BUILTIN_TOOL_PROVIDERS.filter(item => !["code-runner", "location", "multiple-choice"].includes(item.id) && item.section !== "skill").map(item => ({ id: item.id, name: ko ? item.label.ko : item.label.en, icon: item.icon })),
     ...mcp.map(item => item.kind === "vm" ? { id: `mcp:${item.id}`, name: ko ? "가상 컴퓨터" : "Virtual computer", icon: "monitor" as ToolIcon } : { id: `mcp:${item.id}`, name: `MCP · ${item.name}`, icon: "cable" as ToolIcon }),
   ], [mcp, ko]);
   const rule = (id: string) => value.toolRules[id] || {};

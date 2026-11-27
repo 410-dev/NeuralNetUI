@@ -84,6 +84,8 @@ export interface ToolProvider {
   manifest: ToolProviderManifest;
   /** Server-enforced conditions beyond the manifest requirements (plan, connection state). Defaults to true. */
   available?(ctx: ToolContext): boolean | Promise<boolean>;
+  /** Text added to the system prompt while the provider is on (skills: how to use their functions). */
+  instructions?(ctx: ToolContext): string | undefined | Promise<string | undefined>;
   /** Functions offered for this request. May be empty, e.g. storage with both read and write off. */
   tools(ctx: ToolContext): ToolSpec[] | Promise<ToolSpec[]>;
   /** Runs before every call. Returning not approved skips execution and sends `result` to the model. */

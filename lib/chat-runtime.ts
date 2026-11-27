@@ -623,7 +623,7 @@ async function run(job: ChatJob) {
     // This chat's prompt, then the account's prompt for the model, then the server default — where the model allows it.
     const allowed = canPersonalizeSystemPrompt(selected, job.userRole);
     const composedPrompt = resolveSystemPrompt({ model, selectedId: selected.id, preset, allowed, personal: readModelSystemPrompts(readUserPreferences(job.userId))[selected.id], session: readSystemPromptOverrides(job.input.systemPromptOverrides) });
-    const systemPrompt = job.agent ? [composedPrompt, job.agent.systemPrompt].filter(Boolean).join("\n\n") : composedPrompt;
+    let systemPrompt = job.agent ? [composedPrompt, job.agent.systemPrompt].filter(Boolean).join("\n\n") : composedPrompt;
     if (model.imageGeneration === true) {
       if (connection.driver !== "openai") throw new Error("Image generation currently requires an OpenAI-compatible connection.");
       const latest = job.input.messages.findLast(message => message.role === "user");
@@ -691,6 +691,14 @@ async function run(job: ChatJob) {
     // Every provider the request switched on and the server allows, fixed for the whole reply.
     const resolvedTools = await resolveTools(toolRequest, job.agent ? agentToolState(job.agent.toolState ?? requestToolState(job.input.tools), job.agent.autonomous) : requestToolState(job.input.tools), job.agent ? [...toolSources(), ...job.agent.sources] : toolSources());
     for (const dropped of resolvedTools.rejected) console.warn(`Tool ${dropped.name} from ${dropped.provider} was not offered: ${dropped.reason}.`);
+    // Enabled skills teach the model how to use their functions: their instructions follow the system prompt.
+    const skillPrompt = resolvedTools.instructions.join("\n\n");
+    if (skillPrompt) {
+      const hadSystem = Boolean(systemPrompt);
+      systemPrompt = [systemPrompt, skillPrompt].filter(Boolean).join("\n\n");
+      if (hadSystem && messages[0]?.role === "system") messages[0] = { ...messages[0], content: systemPrompt };
+      else messages = [{ role: "system", content: systemPrompt }, ...messages];
+    }
     let tools = resolvedTools.definitions;
     const firstResponse = !job.conversation.branches.some(b => b.messages.some(m => m.role === "assistant" && m.content));
     const generateTitle = async () => {
@@ -1078,7 +1086,9 @@ export async function estimateRequestOverhead(userId: string, userRole: UserRole
     };
     const resolved = await resolveTools(request, state, input.agent ? [...toolSources(), ...input.agent.sources] : toolSources());
     const definitions = resolved.definitions;
-    const value = { toolDefinitionTokens: definitions.length ? estimateTokens(definitions) : 0, systemTokens: input.agent ? estimateTokens(input.agent.systemPrompt) : 0 };
+    // Skill instructions join the system prompt, so they count with it.
+    const skillPrompt = resolved.instructions.join("\n\n");
+    const value = { toolDefinitionTokens: definitions.length ? estimateTokens(definitions) : 0, systemTokens: (input.agent ? estimateTokens(input.agent.systemPrompt) : 0) + (skillPrompt ? estimateTokens(skillPrompt) : 0) };
     overheadCache.set(key, { at: Date.now(), value });
     if (overheadCache.size > 500) overheadCache.delete(overheadCache.keys().next().value!);
     return value;

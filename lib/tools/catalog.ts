@@ -12,8 +12,9 @@ import type { Locale } from "../types.ts";
 export type ToolOrigin = "builtin" | "workspace" | "user";
 export type ToolCategory = "internet" | "awareness" | "agent" | "interaction";
 /** Menu section: the fixed built-in categories, then the installed tiers. */
-export type ToolSection = ToolCategory | "workspace" | "mcp";
-export type ToolIcon = "search" | "link" | "braces" | "clock" | "map-pin" | "hard-drive" | "list-checks" | "code" | "cable" | "wrench" | "globe" | "video" | "monitor";
+/** "skill" holds providers that teach the model a way of working (instructions plus their own functions). */
+export type ToolSection = ToolCategory | "workspace" | "mcp" | "skill";
+export type ToolIcon = "search" | "link" | "braces" | "clock" | "map-pin" | "hard-drive" | "list-checks" | "code" | "cable" | "wrench" | "globe" | "video" | "monitor" | "layout";
 export type Localized = Record<Locale, string>;
 
 export type ToolOptionField =
@@ -55,7 +56,7 @@ export interface ToolProviderManifest {
   /** Wait phase shown while the model is still streaming this tool's arguments. */
   streamingPhase?: "creating-artifact";
   /** Completed calls are drawn as their own card in the transcript instead of in the tool activity list. */
-  transcriptCard?: "multiple-choice" | "artifact";
+  transcriptCard?: "multiple-choice" | "artifact" | "a2ui";
 }
 
 const text = (en: string, ko: string): Localized => ({ en, ko });
@@ -67,6 +68,7 @@ export const TOOL_SECTION_LABELS: Record<ToolSection, Localized> = {
   interaction: text("Interaction", "상호 작용"),
   workspace: text("Workspace", "워크스페이스"),
   mcp: text("MCP", "MCP"),
+  skill: text("Skills", "스킬"),
 };
 
 export const TOOL_SECTION_ORDER: ToolSection[] = ["internet", "awareness", "agent", "interaction", "workspace", "mcp"];
@@ -142,7 +144,16 @@ export const BUILTIN_TOOL_PROVIDERS: readonly ToolProviderManifest[] = [
     functions: [{ name: "create_artifact", label: text("Artifact", "아티팩트"), description: text("Creates a document or mini-app opened beside the chat", "채팅 옆에서 여는 문서나 미니 앱 생성") }],
     streamingPhase: "creating-artifact", transcriptCard: "artifact",
   },
+  {
+    id: "a2ui", origin: "builtin", section: "skill", order: 10, icon: "layout", defaultEnabled: false,
+    label: text("Generative UI (A2UI)", "생성형 UI (A2UI)"), description: text("The model draws cards, forms, lists and dialogs you can use", "모델이 카드·폼·목록·대화상자를 직접 그려 보여줌"),
+    functions: [{ name: "render_ui", label: text("Render UI", "UI 그리기"), description: text("Shows A2UI v1.0 surfaces in the chat", "채팅에 A2UI v1.0 화면 표시") }],
+    transcriptCard: "a2ui",
+  },
 ];
+
+/** Skill providers, listed apart from tools in the composer's menu. */
+export const isSkillProvider = (manifest: Pick<ToolProviderManifest, "section">) => manifest.section === "skill";
 
 const builtinById = new Map(BUILTIN_TOOL_PROVIDERS.map(manifest => [manifest.id, manifest]));
 const builtinByFunction = new Map(BUILTIN_TOOL_PROVIDERS.flatMap(manifest => manifest.functions.map(fn => [fn.name, manifest] as const)));

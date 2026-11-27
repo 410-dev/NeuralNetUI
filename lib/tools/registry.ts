@@ -11,6 +11,8 @@ export interface ResolvedTools {
   readonly definitions: Array<Record<string, unknown>>;
   /** Function names that were offered but dropped, with the reason, for the server log. */
   rejected: Array<{ provider: string; name: string; reason: string }>;
+  /** System prompt additions of the enabled providers (skill instructions), in provider order. */
+  instructions: string[];
   has(name: string): boolean;
   releasesModel(name: string): boolean;
   /** `signal` replaces the request's, so one call can be cancelled on its own. */
@@ -53,7 +55,8 @@ export async function resolveTools(request: ToolRequestContext, state: ToolState
     if (provider.available && !await provider.available(ctx)) return undefined;
     const specs = await provider.tools(ctx);
     const allowed = settings.functions ? new Set(settings.functions) : undefined;
-    return { provider, ctx, specs: allowed ? specs.filter(spec => allowed.has(spec.sourceName ?? spec.name)) : specs };
+    const instructions = (await provider.instructions?.(ctx))?.trim() || undefined;
+    return { provider, ctx, instructions, specs: allowed ? specs.filter(spec => allowed.has(spec.sourceName ?? spec.name)) : specs };
   }));
   const bindings = new Map<string, Binding>();
   const rejected: ResolvedTools["rejected"] = [];
@@ -77,6 +80,7 @@ export async function resolveTools(request: ToolRequestContext, state: ToolState
   return {
     get definitions() { return [...bindings.values()].map(binding => toModelTool(binding.spec)); },
     rejected,
+    instructions: offered.flatMap(entry => entry?.instructions ? [entry.instructions] : []),
     has: name => bindings.has(name),
     releasesModel: name => bindings.get(name)?.provider.releasesModelWhileRunning === true,
     async execute(name, args, call) {

@@ -29,7 +29,7 @@ const messageSchema = z.object({
   totalDurationSeconds: z.number().nonnegative().optional(),
   modelName: z.string().max(200).optional(),
   agentKind: z.enum(["notice", "context"]).optional(),
-  contextPrefix: z.string().max(500).optional(),
+  contextPrefix: z.string().max(20_000).optional(),
   agentRunId: z.string().max(200).optional(),
   contextCalibration: z.object({ real: z.number().nonnegative(), estimated: z.number().nonnegative(), counted: z.number().nonnegative() }).optional(),
   routedModel: z.string().max(200).optional(),

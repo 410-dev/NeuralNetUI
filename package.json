@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "node scripts/start-server.mjs dev",
-    "test": "node --test --experimental-strip-types \"lib/*.test.ts\" \"lib/tools/*.test.ts\" \"lib/agent/*.test.ts\"",
+    "test": "node --test --experimental-strip-types \"lib/*.test.ts\" \"lib/tools/*.test.ts\" \"lib/agent/*.test.ts\" \"lib/a2ui/*.test.ts\"",
     "build": "next build",
     "start": "node scripts/start-server.mjs start"
   },

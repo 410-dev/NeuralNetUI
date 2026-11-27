@@ -20,7 +20,7 @@ import { SyntaxHighlightedCode } from "./syntax-highlighted-code";
 import { UsageDonut } from "./usage-donut";
 import { USAGE_REFRESH_EVENT } from "@/lib/usage-popover";
 import { formatModelWeight } from "@/lib/plan-usage";
-import { BUILTIN_TOOL_PROVIDERS, builtinToolProvider, clientRendererFor, mcpManifest, pendingApprovalKind, TOOL_SECTION_LABELS, TOOL_SECTION_ORDER, toolIconFor, toolRequirementsMet, transcriptCardFor, type ToolIcon, type ToolOptionField, type ToolProviderManifest } from "@/lib/tools/catalog";
+import { BUILTIN_TOOL_PROVIDERS, builtinToolProvider, clientRendererFor, isSkillProvider, mcpManifest, pendingApprovalKind, TOOL_SECTION_LABELS, TOOL_SECTION_ORDER, toolIconFor, toolRequirementsMet, transcriptCardFor, type ToolIcon, type ToolOptionField, type ToolProviderManifest } from "@/lib/tools/catalog";
 import { normalizeCodeRunResult, readCodeRunRequest } from "@/lib/tools/code-runner";
 import { runInBrowserSandbox } from "@/lib/code-runner-client";
 import { readApiResponse } from "@/lib/client-response";
@@ -47,7 +47,7 @@ import {
   Search, Server, Settings2, SlidersHorizontal, Square, Trash2, UserRound, X, Globe2, Link2,
   Braces, Layers, LogOut, Users, ShieldCheck, Clock3, MapPin, ListChecks, Wrench, LocateFixed, Power, Upload, HardDrive,
   Palette, PanelLeftClose, PanelLeftOpen, Pin, PinOff, Repeat2, Settings, Type, Zap, MessageSquareDashed, Save, Minimize2, Eye, EyeOff, Keyboard, DatabaseBackup, Gauge, Cable, Code2, Unlock,
-  RotateCcw, Video, LockKeyhole, ShieldAlert, Bot, BellRing, Monitor } from "lucide-react";
+  RotateCcw, Video, LockKeyhole, ShieldAlert, Bot, BellRing, Monitor , LayoutTemplate, Sparkles } from "lucide-react";
 import { Children, cloneElement, createContext, CSSProperties, FormEvent, isValidElement, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, WheelEvent as ReactWheelEvent, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
@@ -84,6 +84,8 @@ import { refreshSamplingDefaults } from "@/lib/sampling-params";
 import { canPersonalizeSystemPrompt, resolveSystemPrompt, systemPromptEditable, withSystemPromptOverride, type SystemPromptOverrides } from "@/lib/system-prompt";
 import { SystemPromptDialog } from "@/app/system-prompt-dialog";
 import { useKeyboardReturn } from "@/lib/use-keyboard-return";
+import { A2uiConversation, A2uiEventCard, type A2uiAction } from "./a2ui-surface";
+import { a2uiSurfaces } from "@/lib/a2ui/runtime";
 import { isNativeShell, nativePush } from "@/lib/native-bridge";
 import { describeConnectionFailure, isConnectionFailureCode } from "@/lib/connection-errors";
 import { moveItemById, nudgeItemById } from "@/lib/ordered-list";
@@ -162,7 +164,7 @@ const translations = {
     attachImages: "Upload files", loadFromStorage: "Load files", uploadingImages: "Preparing and uploading files…", removeImage: "Remove attachment", loadEarlier: "Load earlier messages",
     imagesAttached: "files attached", imageChat: "File chat", imageUploadFailed: "File upload failed.", maxImages: "You have reached the configured attachment limit.",
     thinking: "Thinking…", compactingNow: "Compacting context…", detailsDropped: "Dropped tool details and reasoning", turnsRolled: "Removed the oldest turns from the context", compactionThought: "Compaction reasoning", compactionSummary: "Summary kept in context", editResponse: "Edit response", saveEdit: "Save", thoughtFor: "Thought for", useWrapping: "Use wrapping", copied: "Copied",
-    addMenu: "Add", tools: "Tools", internetGroup: "Internet", awarenessGroup: "Ambient awareness", agentGroup: "Agent", interactionGroup: "Interaction", internetSearch: "Internet search", internetSearchDesc: "Let the model search DuckDuckGo", pageVisit: "Visit pages", pageVisitDesc: "Let the model read public web pages", storageAccess: "Storage access", storageAccessDesc: "Let the model privately access your stored files", storageRead:"Read", storageReadDesc:"Search and load files", storageWrite:"Write", storageWriteDesc:"Create text files and save URL files", storageWriteLimit:"files per session", currentTime: "Current time", currentTimeDesc: "Provide local time and time zone to the model", locationTool: "Current location", locationToolDesc: "Use browser location and detailed reverse geocoding", multipleChoice: "Multiple choice", multipleChoiceDesc: "Let the model ask selectable questions", artifact: "Artifact", artifactDesc: "Render HTML, CSV, JSON, XML, or Markdown in an interactive viewer", usingTool: "Using a tool…", toolCall: "Tool call", toolResult: "Tool result", submitChoices: "Submit answers", otherChoice: "Or type a direct answer…", choiceNext: "Next", choiceBack: "Previous question", choiceProgress: "Question", choiceWaiting: "Answer the request above to continue", locationPermission: "Waiting for browser location permission…", codeRunning: "Running in this browser's sandbox…", mcpApprovalTitle:"MCP tool approval", approve: "Allow", reject: "Deny", repetitionTitle: "Repetitive output detected", repetitionMessage: "The model has produced the same {kind} {count} times in a row in its {segment}.", repetitionInReasoning: "reasoning", repetitionInResponse: "response", repetitionInTool: "tool calls", repetitionWord: "word", repetitionSentence: "sentence", repetitionParagraph: "paragraph", repetitionGroup: "group of paragraphs", repetitionToolCall: "tool call", repetitionToolCalls: "sequence of tool calls", repetitionSample: "Repeated content", repetitionStop: "Stop", repetitionRetry: "Retry", repetitionIgnore: "Ignore",
+    addMenu: "Add", tools: "Tools", skills: "Skills", noSkills: "No skills available.", internetGroup: "Internet", awarenessGroup: "Ambient awareness", agentGroup: "Agent", interactionGroup: "Interaction", internetSearch: "Internet search", internetSearchDesc: "Let the model search DuckDuckGo", pageVisit: "Visit pages", pageVisitDesc: "Let the model read public web pages", storageAccess: "Storage access", storageAccessDesc: "Let the model privately access your stored files", storageRead:"Read", storageReadDesc:"Search and load files", storageWrite:"Write", storageWriteDesc:"Create text files and save URL files", storageWriteLimit:"files per session", currentTime: "Current time", currentTimeDesc: "Provide local time and time zone to the model", locationTool: "Current location", locationToolDesc: "Use browser location and detailed reverse geocoding", multipleChoice: "Multiple choice", multipleChoiceDesc: "Let the model ask selectable questions", artifact: "Artifact", artifactDesc: "Render HTML, CSV, JSON, XML, or Markdown in an interactive viewer", usingTool: "Using a tool…", toolCall: "Tool call", toolResult: "Tool result", submitChoices: "Submit answers", otherChoice: "Or type a direct answer…", choiceNext: "Next", choiceBack: "Previous question", choiceProgress: "Question", choiceWaiting: "Answer the request above to continue", locationPermission: "Waiting for browser location permission…", codeRunning: "Running in this browser's sandbox…", mcpApprovalTitle:"MCP tool approval", approve: "Allow", reject: "Deny", repetitionTitle: "Repetitive output detected", repetitionMessage: "The model has produced the same {kind} {count} times in a row in its {segment}.", repetitionInReasoning: "reasoning", repetitionInResponse: "response", repetitionInTool: "tool calls", repetitionWord: "word", repetitionSentence: "sentence", repetitionParagraph: "paragraph", repetitionGroup: "group of paragraphs", repetitionToolCall: "tool call", repetitionToolCalls: "sequence of tool calls", repetitionSample: "Repeated content", repetitionStop: "Stop", repetitionRetry: "Retry", repetitionIgnore: "Ignore",
     account: "Account", users: "Users", signOut: "Sign out", changePassword: "Change password", currentPassword: "Current password", newPassword: "New password", passwordChanged: "Password changed. Please sign in again.",
     toolsSettings: "Harness settings", toolsSettingsTitle: "Tool and file limits", toolsSettingsDesc: "Control tool iterations, interactive tools, downloads, PDF processing, and temporary upload cleanup.", maxToolRounds: "Maximum tool rounds", maxMultipleChoiceQuestions: "Questions per multiple-choice call", maxAttachments: "Attachments per message", textDownloadLimit: "Text download limit (MB)", textCharacterLimit: "Text characters sent to model", imageDownloadLimit: "Image URL limit (MB)", imageUploadLimit: "Image upload limit (MB)", pdfSizeLimit: "PDF limit (MB)", pdfPageLimit: "PDF pages processed", pdfTextLimit: "PDF characters sent to model", pdfVisionPages: "Scanned PDF vision pages", pdfTimeout: "PDF processing timeout (seconds)", temporaryFileTtl: "Temporary file cleanup (minutes)", orphanTtl: "Unattached upload retention (hours)", toolLoopGroup: "Tool loop", interactiveToolGroup: "Interactive tools", attachmentGroup: "Attachments and downloads", pdfGroup: "PDF processing", cleanupGroup: "Temporary file cleanup", toolsSafetyHelp: "Tool and file limit values are validated against server safety boundaries when saved.",
     userManagement: "User management", userManagementDesc: "Administrators can create accounts, change display names and roles, and delete accounts.", username: "Username", password: "Password", role: "Role", standardUser: "User", administrator: "Administrator", addUser: "Add user", saveDisplayName: "Save user changes", deleteUser: "Delete user", confirmDeleteUser: "Permanently delete this user and all of their data?", userDeleted: "User deleted.", publicModel: "Public custom model", publicModelDesc: "Allow every user to use this custom model.",
@@ -210,7 +212,7 @@ const translations = {
     attachImages: "파일 업로드", loadFromStorage: "파일 불러오기", uploadingImages: "파일 준비 및 업로드 중…", removeImage: "첨부 제거", loadEarlier: "이전 메시지 불러오기",
     imagesAttached: "개 파일 첨부", imageChat: "파일 대화", imageUploadFailed: "파일 업로드에 실패했습니다.", maxImages: "설정된 첨부 개수 제한에 도달했습니다.",
     thinking: "생각 중…", compactingNow: "컨텍스트 압축 중…", detailsDropped: "도구 세부 내용과 추론을 버림", turnsRolled: "오래된 턴을 컨텍스트에서 뺌", compactionThought: "압축 모델의 사고", compactionSummary: "맥락으로 유지되는 요약", editResponse: "응답 편집", saveEdit: "저장", thoughtFor: "동안 생각함", useWrapping: "줄 바꿈 사용", copied: "복사됨",
-    addMenu: "추가", tools: "도구", internetGroup: "인터넷", awarenessGroup: "주변 인식", agentGroup: "에이전트", interactionGroup: "상호 작용", internetSearch: "인터넷 검색", internetSearchDesc: "모델이 DuckDuckGo를 검색하도록 허용", pageVisit: "페이지 방문", pageVisitDesc: "모델이 공개 웹 페이지를 읽도록 허용", storageAccess: "저장소 접근", storageAccessDesc: "모델의 개인 저장소 접근 권한", storageRead:"읽기", storageReadDesc:"파일 검색 및 불러오기", storageWrite:"쓰기", storageWriteDesc:"텍스트 파일 생성 및 URL 파일 저장", storageWriteLimit:"세션당 파일", currentTime: "현재 시간", currentTimeDesc: "현지 시간과 시간대를 모델에 제공", locationTool: "현재 위치", locationToolDesc: "브라우저 위치와 상세 역지오코딩 사용", multipleChoice: "다중 선택", multipleChoiceDesc: "모델이 설정된 개수만큼 선택형 질문을 요청", artifact: "아티팩트", artifactDesc: "HTML·CSV·JSON·XML·Markdown을 전용 뷰어로 렌더링", usingTool: "도구 사용 중…", toolCall: "도구 호출", toolResult: "도구 결과", submitChoices: "답변 제출", otherChoice: "또는 직접 답변…", choiceNext: "다음", choiceBack: "이전 질문", choiceProgress: "질문", choiceWaiting: "위 요청에 응답하면 모델이 계속 작업합니다", locationPermission: "브라우저 위치 권한을 기다리는 중…", codeRunning: "이 브라우저의 샌드박스에서 실행하는 중…", mcpApprovalTitle:"MCP 도구 승인", approve: "허용", reject: "거부", repetitionTitle: "반복 출력 감지", repetitionMessage: "모델이 {segment}에서 같은 {kind} {count}번 연속으로 출력하고 있습니다.", repetitionInReasoning: "추론", repetitionInResponse: "응답", repetitionInTool: "도구 호출", repetitionWord: "단어를", repetitionSentence: "문장을", repetitionParagraph: "문단을", repetitionGroup: "문단 묶음을", repetitionToolCall: "도구 호출을", repetitionToolCalls: "도구 호출 묶음을", repetitionSample: "반복된 내용", repetitionStop: "정지하기", repetitionRetry: "다시 시도하기", repetitionIgnore: "무시하기",
+    addMenu: "추가", tools: "도구", skills: "스킬", noSkills: "사용할 수 있는 스킬이 없습니다.", internetGroup: "인터넷", awarenessGroup: "주변 인식", agentGroup: "에이전트", interactionGroup: "상호 작용", internetSearch: "인터넷 검색", internetSearchDesc: "모델이 DuckDuckGo를 검색하도록 허용", pageVisit: "페이지 방문", pageVisitDesc: "모델이 공개 웹 페이지를 읽도록 허용", storageAccess: "저장소 접근", storageAccessDesc: "모델의 개인 저장소 접근 권한", storageRead:"읽기", storageReadDesc:"파일 검색 및 불러오기", storageWrite:"쓰기", storageWriteDesc:"텍스트 파일 생성 및 URL 파일 저장", storageWriteLimit:"세션당 파일", currentTime: "현재 시간", currentTimeDesc: "현지 시간과 시간대를 모델에 제공", locationTool: "현재 위치", locationToolDesc: "브라우저 위치와 상세 역지오코딩 사용", multipleChoice: "다중 선택", multipleChoiceDesc: "모델이 설정된 개수만큼 선택형 질문을 요청", artifact: "아티팩트", artifactDesc: "HTML·CSV·JSON·XML·Markdown을 전용 뷰어로 렌더링", usingTool: "도구 사용 중…", toolCall: "도구 호출", toolResult: "도구 결과", submitChoices: "답변 제출", otherChoice: "또는 직접 답변…", choiceNext: "다음", choiceBack: "이전 질문", choiceProgress: "질문", choiceWaiting: "위 요청에 응답하면 모델이 계속 작업합니다", locationPermission: "브라우저 위치 권한을 기다리는 중…", codeRunning: "이 브라우저의 샌드박스에서 실행하는 중…", mcpApprovalTitle:"MCP 도구 승인", approve: "허용", reject: "거부", repetitionTitle: "반복 출력 감지", repetitionMessage: "모델이 {segment}에서 같은 {kind} {count}번 연속으로 출력하고 있습니다.", repetitionInReasoning: "추론", repetitionInResponse: "응답", repetitionInTool: "도구 호출", repetitionWord: "단어를", repetitionSentence: "문장을", repetitionParagraph: "문단을", repetitionGroup: "문단 묶음을", repetitionToolCall: "도구 호출을", repetitionToolCalls: "도구 호출 묶음을", repetitionSample: "반복된 내용", repetitionStop: "정지하기", repetitionRetry: "다시 시도하기", repetitionIgnore: "무시하기",
     account: "계정", users: "사용자", signOut: "로그아웃", changePassword: "비밀번호 변경", currentPassword: "현재 비밀번호", newPassword: "새 비밀번호", passwordChanged: "비밀번호를 변경했습니다. 다시 로그인해 주세요.",
     toolsSettings: "하네스 설정", toolsSettingsTitle: "도구 및 파일 제한", toolsSettingsDesc: "도구 반복, 인터랙티브 도구, 다운로드, PDF 처리 및 임시 업로드 정리 기준을 설정합니다.", maxToolRounds: "최대 도구 호출 라운드", maxMultipleChoiceQuestions: "다중 선택 호출당 질문 수", maxAttachments: "메시지당 첨부 개수", textDownloadLimit: "텍스트 다운로드 제한 (MB)", textCharacterLimit: "모델에 전달할 텍스트 글자 수", imageDownloadLimit: "이미지 URL 제한 (MB)", imageUploadLimit: "이미지 업로드 제한 (MB)", pdfSizeLimit: "PDF 제한 (MB)", pdfPageLimit: "처리할 PDF 페이지 수", pdfTextLimit: "모델에 전달할 PDF 글자 수", pdfVisionPages: "스캔 PDF 비전 페이지 수", pdfTimeout: "PDF 처리 제한 시간 (초)", temporaryFileTtl: "임시 파일 정리 시간 (분)", orphanTtl: "미첨부 업로드 보관 시간", toolLoopGroup: "도구 반복", interactiveToolGroup: "인터랙티브 도구", attachmentGroup: "첨부 및 다운로드", pdfGroup: "PDF 처리", cleanupGroup: "임시 파일 정리", toolsSafetyHelp: "도구 및 파일 제한 값은 저장 시 서버의 안전 범위 안에서 검증됩니다.",
     userManagement: "사용자 관리", userManagementDesc: "관리자는 계정을 만들고, 다른 사용자의 표시 이름과 권한을 변경하거나 계정을 삭제할 수 있습니다.", username: "사용자 이름", password: "비밀번호", role: "역할", standardUser: "일반 사용자", administrator: "관리자", addUser: "사용자 추가", saveDisplayName: "사용자 변경 저장", deleteUser: "사용자 삭제", confirmDeleteUser: "이 사용자와 모든 데이터를 영구적으로 삭제할까요?", userDeleted: "사용자를 삭제했습니다.", publicModel: "커스텀 모델 공개", publicModelDesc: "모든 사용자가 이 커스텀 모델을 사용할 수 있습니다.",
@@ -1060,6 +1062,19 @@ export default function Home() {
   const [modeSwapped, setModeSwapped] = useState(false);
   const previousTemporary = useRef(temporaryActive);
   useEffect(() => { if (previousTemporary.current !== temporaryActive) setModeSwapped(true); previousTemporary.current = temporaryActive; }, [temporaryActive]);
+  // Generated UI (A2UI skill): every surface the conversation's render_ui calls left, and button presses sent back
+  // as the person's next message with the action in a hidden <a2ui-action> block the model reads.
+  const a2uiActionRef = useRef<(action: A2uiAction) => void>(undefined);
+  a2uiActionRef.current = action => {
+    const payload = { ...action.message, ...(action.dataModel !== undefined ? { dataModel: action.dataModel } : {}) };
+    void sendMessage(undefined, { text: action.label, contextPrefix: `<a2ui-action>\n${JSON.stringify(payload)}\n</a2ui-action>` });
+  };
+  const a2uiConversation = useMemo(() => ({
+    surfaces: a2uiSurfaces(messages.flatMap(message => message.toolEvents || [])),
+    conversationId: conversation?.id || "draft", ko: locale === "ko",
+    disabled: isGenerating || agentOpen,
+    onAction: (action: A2uiAction) => a2uiActionRef.current?.(action),
+  }), [messages, conversation?.id, locale, isGenerating, agentOpen]);
   const [greeting, setGreeting] = useState("");
   const [mainVisit, setMainVisit] = useState(0);
   const lastGreetings = useRef(new Map<string, string>());
@@ -1529,7 +1544,7 @@ export default function Home() {
         body: JSON.stringify({ conversationId: working.id, branchId, assistantMessageId: placeholder.id, revisionGroupId, modelId: working.modelId, aliasBaseModelId: runtimeAliasBaseModelId, reasoningPresetId: working.reasoningPresetId, systemPromptOverrides: sessionPromptsRef.current,
           tools: options?.tools || toolState,
           clientContext: { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, locale: navigator.language, language: config.preferences.language },
-          messages: requestMessages.map((message) => ({ id: message.id, role: message.role, content: message.content, reasoning_content: message.reasoning, toolEvents: message.toolEvents, attachments: message.attachments?.map(({ id }) => ({ id })) })) }),
+          messages: requestMessages.map((message) => ({ id: message.id, role: message.role, content: message.content, ...(message.contextPrefix ? { contextPrefix: message.contextPrefix } : {}), reasoning_content: message.reasoning, toolEvents: message.toolEvents, attachments: message.attachments?.map(({ id }) => ({ id })) })) }),
       });
       if (!response.ok) { const detail = await response.json().catch(() => ({})); throw new Error(detail.error || `요청에 실패했습니다 (${response.status})`); }
       const completed = await watchChatJob(working, branchId); void refreshRouting(working.modelId, runtimeAliasBaseModelId, working.id, "current"); if (completed) void refreshModelContextWindow(working.modelId, runtimeAliasBaseModelId); return completed;
@@ -1610,17 +1625,19 @@ export default function Home() {
     } catch (caught) { setManualCompaction(undefined); setError(caught instanceof Error ? caught.message : String(caught)); }
   }
 
-  async function sendMessage(event?: FormEvent) {
+  /** `override` sends a message that is not the composer draft (a generated UI's button), leaving the draft alone. */
+  async function sendMessage(event?: FormEvent, override?: { text: string; contextPrefix?: string }) {
     event?.preventDefault();
     const requestModel = visibleModels.find((model) => model.id === selectedModelIdRef.current) || selectedModel;
     const requestPreset = requestModel?.reasoningPresets.find((preset) => preset.id === selectedPresetId) || requestModel?.reasoningPresets[0];
-    const text = draft.trim();
-    const compactCommand = draftAttachments.length ? undefined : parseCompactCommand(text);
+    const text = override ? override.text : draft.trim();
+    const sendAttachments = override ? [] : draftAttachments;
+    const compactCommand = sendAttachments.length ? undefined : parseCompactCommand(text);
     if (compactCommand) { await runCompactCommand(compactCommand); return; }
-    if (text || draftAttachments.length) setContextViewOpen(false);
-    const hasMessage = Boolean(text || draftAttachments.length);
+    if (text || sendAttachments.length) setContextViewOpen(false);
+    const hasMessage = Boolean(text || sendAttachments.length);
     if (hasMessage && !messages.length) captureComposer();
-    if(requestModel&&draftAttachments.some(attachment=>!attachmentAllowedForModel(requestModel,attachment))){setError(c.modelAttachmentUnsupported);return;}
+    if(requestModel&&sendAttachments.some(attachment=>!attachmentAllowedForModel(requestModel,attachment))){setError(c.modelAttachmentUnsupported);return;}
     if (hasMessage && !pendingChoice) {
       // A model list refresh still in flight may be retrying a server; the send waits for its answer.
       if (serverCheckInFlight) { setSendHeld(true); return; }
@@ -1634,7 +1651,7 @@ export default function Home() {
       if (isGenerating && (!hasMessage || pendingChoice)) { await fetch("/api/agent/stop", { method: "POST" }).catch(() => undefined); return; }
       if (!hasMessage || uploadingImages) return;
       if (!requestModel) { setError(c.noModel); return; }
-      await sendAgentMessage(text, draftAttachments, requestModel, requestPreset?.id); return;
+      await sendAgentMessage(text, sendAttachments, requestModel, requestPreset?.id); return;
     }
     if (isGenerating) {
       if (!hasMessage || pendingChoice) {
@@ -1644,16 +1661,16 @@ export default function Home() {
       }
       if (!requestModel) { setError(c.noModel); return; }
       if (uploadingImages) return;
-      const queued: QueuedPrompt = { id: uid("user"), content: text, attachments: draftAttachments, modelId: requestModel.id, aliasBaseModelId: requestModel.isAlias ? selectedAliasBase?.id : undefined, reasoningPresetId: requestPreset?.id,
+      const queued: QueuedPrompt = { id: uid("user"), content: text, attachments: sendAttachments, modelId: requestModel.id, aliasBaseModelId: requestModel.isAlias ? selectedAliasBase?.id : undefined, reasoningPresetId: requestPreset?.id,
         tools: toolState };
-      replaceQueue([...queuedPromptsRef.current, queued]); setDraft(""); setDraftAttachments([]); return;
+      replaceQueue([...queuedPromptsRef.current, queued]); if (!override) { setDraft(""); setDraftAttachments([]); } return;
     }
     if (!hasMessage || uploadingImages) return;
     if (!requestModel) { setError(c.noModel); return; }
     // A reopened chat starts at its last request rather than following the bottom; a new request follows again.
     revealHoldRef.current?.(); autoFollowThreadRef.current = true; setThreadAutoFollow(true);
-    const attachments = draftAttachments;
-    const userMessage: StoredMessage = { id: uid("user"), role: "user", content: text, attachments, createdAt: now() }; setDraft(""); setDraftAttachments([]);
+    const attachments = sendAttachments;
+    const userMessage: StoredMessage = { id: uid("user"), role: "user", content: text, attachments, createdAt: now(), ...(override?.contextPrefix ? { contextPrefix: override.contextPrefix } : {}) }; if (!override) { setDraft(""); setDraftAttachments([]); }
     const options: CompletionOptions = { modelId: requestModel.id, aliasBaseModelId: requestModel.isAlias ? selectedAliasBase?.id : undefined, reasoningPresetId: requestPreset?.id,
       tools: toolState };
     if (!conversation) {
@@ -1960,7 +1977,7 @@ export default function Home() {
                 {contextViewOpen ? <ContextView ko={locale === "ko"} messages={messages} state={branchContext} includeReasoning={rememberReasoning} systemPrompt={selectedSystemPrompt} summaryEditing={contextSummaryEditing} setSummaryEditing={setContextSummaryEditing} onSave={saveContextState} confirm={askConfirm} onClose={() => setContextViewOpen(false)} /> : <>
                 {agentOpen && !visibleTranscript.length && <div className="agent-empty welcome"><h1>{locale === "ko" ? "무엇을 맡길까요?" : "What should I take care of?"}</h1><p>{locale === "ko" ? "일정·메일 확인, 알림 예약, 사이트·채널 추적처럼 계속 돌봐야 하는 일을 맡겨 보세요." : "Hand over ongoing work: checking schedules and mail, reminders, watching sites and channels."}</p></div>}
                 {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
-                {renderedMessages.map((message) => <Message onToolInput={submitToolInput} agentMode={agentOpen} agentRunId={agentRunOf.get(message.id)} c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} waitStartedAt={pendingWait?.messageId === message.id ? pendingWait.startedAt : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={editUserRequest} onEditAssistant={editAssistantResponse} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
+                <A2uiConversation value={a2uiConversation}>{renderedMessages.map((message) => <Message onToolInput={submitToolInput} agentMode={agentOpen} agentRunId={agentRunOf.get(message.id)} c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} waitStartedAt={pendingWait?.messageId === message.id ? pendingWait.startedAt : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={editUserRequest} onEditAssistant={editAssistantResponse} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}</A2uiConversation>
                 {manualCompaction && manualCompaction.key === `${conversation?.id}:${activeBranch?.id}` && <div className="message-row assistant-message manual-compaction"><CompactionStep c={c} locale={locale} step={manualCompaction.step} live={manualCompaction.live} /></div>}
                 </>}
               </div>
@@ -2103,7 +2120,14 @@ function Composer(props: { hideTools?: boolean; lmfCache?: { expiresAt: number; 
   const locale: Locale = c === translations.ko ? "ko" : "en";
   const { mounted: addMenuMounted, closing: addMenuClosing } = usePopoverPresence(addMenuOpen);
   const { mounted: presetMounted, closing: presetClosing } = usePopoverPresence(presetOpen);
-  const activeToolCount = enabledProviderCount(toolMenu.state, toolMenu.providers);
+  // Skills are listed apart from tools: each has its own flyout beside the menu (hover on a mouse, tap on touch).
+  const menuTools = useMemo(() => toolMenu.providers.filter(manifest => !isSkillProvider(manifest)), [toolMenu.providers]);
+  const menuSkills = useMemo(() => toolMenu.providers.filter(isSkillProvider).sort((left, right) => left.order - right.order), [toolMenu.providers]);
+  const activeToolCount = enabledProviderCount(toolMenu.state, menuTools);
+  const activeSkillCount = enabledProviderCount(toolMenu.state, menuSkills);
+  const [menuFlyout, setMenuFlyout] = useState<"tools" | "skills" | null>(null);
+  useEffect(() => { if (!addMenuOpen) setMenuFlyout(null); }, [addMenuOpen]);
+  const hoverFlyout = (event: React.PointerEvent, value: "tools" | "skills" | null) => { if (event.pointerType === "mouse") setMenuFlyout(value); };
   const[toolGroups,setToolGroups]=useState<Record<string,boolean>>({internet:true,awareness:true,agent:true,interaction:true,workspace:true,mcp:true});
   const toggleToolGroup=(key:string)=>setToolGroups(current=>({...current,[key]:!current[key]}));
   useEffect(() => {
@@ -2145,19 +2169,29 @@ function Composer(props: { hideTools?: boolean; lmfCache?: { expiresAt: number; 
         <div className="add-menu-wrap" ref={addMenuRef}>
           <button type="button" className={`icon-button ${addMenuOpen ? "active" : ""}`} title={c.addMenu} onClick={() => setAddMenuOpen((value) => !value)}><Plus size={20} /></button>
           {addMenuMounted && <div className={`popover add-menu-popover ${addMenuClosing ? "closing" : ""}`}>
-            <button type="button" className="add-menu-action" onClick={() => { fileRef.current?.click(); setAddMenuOpen(false); }} disabled={attachmentControlsDisabled || uploadingImages || attachments.length >= maxAttachments}><ImagePlus size={17} /><span><strong>{c.attachImages}</strong></span></button>
-            <button type="button" className="add-menu-action" onClick={() => { onOpenStorage(); setAddMenuOpen(false); }} disabled={attachmentControlsDisabled || attachments.length >= maxAttachments}><HardDrive size={17}/><span><strong>{c.loadFromStorage}</strong></span></button>
+            <button type="button" className="add-menu-action" onPointerEnter={event => hoverFlyout(event, null)} onClick={() => { fileRef.current?.click(); setAddMenuOpen(false); }} disabled={attachmentControlsDisabled || uploadingImages || attachments.length >= maxAttachments}><ImagePlus size={17} /><span><strong>{c.attachImages}</strong></span></button>
+            <button type="button" className="add-menu-action" onPointerEnter={event => hoverFlyout(event, null)} onClick={() => { onOpenStorage(); setAddMenuOpen(false); }} disabled={attachmentControlsDisabled || attachments.length >= maxAttachments}><HardDrive size={17}/><span><strong>{c.loadFromStorage}</strong></span></button>
             {/* The agent's tools are set in its own settings, not from the chat's menu. */}
-            {!props.hideTools && <p>{c.tools}</p>}
-            {!props.hideTools && TOOL_SECTION_ORDER.map(section => {
-              const providers = toolMenu.providers.filter(manifest => manifest.section === section).sort((left, right) => left.order - right.order);
+            {!props.hideTools && <>
+              <hr className="add-menu-divider" />
+              <button type="button" className={`add-menu-action add-menu-branch ${menuFlyout === "tools" ? "open" : ""}`} aria-expanded={menuFlyout === "tools"} onPointerEnter={event => hoverFlyout(event, "tools")} onClick={() => setMenuFlyout(current => current === "tools" ? null : "tools")}><Wrench size={17} /><span><strong>{c.tools}</strong></span>{activeToolCount > 0 && <em>{activeToolCount}</em>}<ChevronRight size={15} /></button>
+              <button type="button" className={`add-menu-action add-menu-branch ${menuFlyout === "skills" ? "open" : ""}`} aria-expanded={menuFlyout === "skills"} onPointerEnter={event => hoverFlyout(event, "skills")} onClick={() => setMenuFlyout(current => current === "skills" ? null : "skills")}><Sparkles size={17} /><span><strong>{c.skills}</strong></span>{activeSkillCount > 0 && <em>{activeSkillCount}</em>}<ChevronRight size={15} /></button>
+            </>}
+          </div>}
+          {addMenuMounted && !props.hideTools && menuFlyout && <div key={menuFlyout} className={`popover add-menu-popover add-menu-flyout ${addMenuClosing ? "closing" : ""}`} role="group" aria-label={menuFlyout === "tools" ? c.tools : c.skills}>
+            <p>{menuFlyout === "tools" ? c.tools : c.skills}</p>
+            {/* On a phone the list covers the menu: its title goes back to it. */}
+            <button type="button" className="add-menu-back" onClick={() => setMenuFlyout(null)}><ChevronLeft size={16} /><span>{menuFlyout === "tools" ? c.tools : c.skills}</span></button>
+            {menuFlyout === "tools" ? TOOL_SECTION_ORDER.map(section => {
+              const providers = menuTools.filter(manifest => manifest.section === section).sort((left, right) => left.order - right.order);
               if (!providers.length) return null;
               return <section key={section} className={`composer-tool-group ${section === "mcp" ? "mcp-tool-group" : ""}`}><button type="button" aria-expanded={toolGroups[section]} onClick={() => toggleToolGroup(section)}><span>{TOOL_SECTION_LABELS[section][locale]}</span><ChevronDown size={14} /></button>{toolGroups[section] && <div>{providers.map(manifest => <ToolProviderEntry key={manifest.id} manifest={manifest} c={c} locale={locale} />)}</div>}</section>;
-            })}
+            }) : menuSkills.length ? menuSkills.map(manifest => <ToolProviderEntry key={manifest.id} manifest={manifest} c={c} locale={locale} />) : <small className="add-menu-empty">{c.noSkills}</small>}
           </div>}
         </div>
         {attachments.length > 0 && <small className="attachment-count">{attachments.length} {c.imagesAttached}</small>}
         {!props.hideTools && activeToolCount > 0 && <small className="enabled-tools"><Wrench size={11} />{activeToolCount}</small>}
+        {!props.hideTools && activeSkillCount > 0 && <small className="enabled-tools"><Sparkles size={11} />{activeSkillCount}</small>}
       </div>
       <div className="composer-field">
         {suggestions.length > 0 && <div className="slash-suggestions" role="listbox" aria-label={locale === "ko" ? "명령어" : "Commands"}>
@@ -2220,7 +2254,7 @@ function CodeSnippet({ c, children, fadeDurationMs = 0 }: { c: CopySet; children
   </div>;
 }
 
-const MENU_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video, monitor: Monitor };
+const MENU_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video, monitor: Monitor, layout: LayoutTemplate };
 
 /** A bounded number option. Typing stays free; the value is clamped and saved when the field loses focus or on Enter. */
 function OptionNumber({ field, value, locale, onChange }: { field: Extract<ToolOptionField, { kind: "integer" }>; value: number; locale: Locale; onChange: (value: number) => void }) {
@@ -2501,7 +2535,7 @@ function MultipleChoiceResponse({ event }: { event: ToolEvent }) {
   })}</div></div>;
 }
 
-const EVENT_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Search, link: Link2, braces: Braces, clock: Clock3, "map-pin": LocateFixed, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video, monitor: Monitor };
+const EVENT_TOOL_ICONS: Record<ToolIcon, typeof Wrench> = { search: Search, link: Link2, braces: Braces, clock: Clock3, "map-pin": LocateFixed, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video, monitor: Monitor, layout: LayoutTemplate };
 
 function ToolEventIcon({ name, size = 15 }: { name: string; size?: number }) {
   const Icon = EVENT_TOOL_ICONS[toolIconFor(name)] || Wrench;
@@ -2672,7 +2706,8 @@ function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, r
         const answered = events.filter((event) => transcriptCardFor(event.name) === "multiple-choice" && event.status === "completed");
         const artifacts=events.filter(event=>transcriptCardFor(event.name)==="artifact"&&event.status==="completed");
         const creatingArtifacts=pending?events.filter(event=>transcriptCardFor(event.name)==="artifact"&&["calling","waiting"].includes(event.status)):[];
-        return <div key={index} className="transcript-tools">{tools.length ? <ToolActivityGroup c={c} locale={locale} events={tools} /> : null}{inputs.map(event => <SecureInputCard key={event.id} event={event} ko={locale === "ko"} onSubmit={pending && onToolInput ? value => onToolInput(event.id, value) : undefined} />)}{answered.map((event) => <MultipleChoiceResponse key={event.id} event={event} />)}{artifacts.map(event=><ArtifactCard key={event.id} event={event} locale={locale} onSave={artifact=>onEditArtifact(event.id,artifact)}/>)}{creatingArtifacts.map(event=><div key={event.id} className="artifact-card artifact-card-pending" role="status" aria-live="polite"><LoaderCircle className="spin" size={20}/><div className="artifact-card-label"><strong>{chatWaitLabel("creating-artifact", locale)}</strong><small>{typeof (event.arguments as {title?:unknown}|undefined)?.title==="string"?String((event.arguments as {title:string}).title):"…"}</small></div></div>)}</div>;
+        const generatedUi = events.filter(event => transcriptCardFor(event.name) === "a2ui");
+        return <div key={index} className="transcript-tools">{generatedUi.map(event => <A2uiEventCard key={event.id} event={event} />)}{tools.length ? <ToolActivityGroup c={c} locale={locale} events={tools} /> : null}{inputs.map(event => <SecureInputCard key={event.id} event={event} ko={locale === "ko"} onSubmit={pending && onToolInput ? value => onToolInput(event.id, value) : undefined} />)}{answered.map((event) => <MultipleChoiceResponse key={event.id} event={event} />)}{artifacts.map(event=><ArtifactCard key={event.id} event={event} locale={locale} onSave={artifact=>onEditArtifact(event.id,artifact)}/>)}{creatingArtifacts.map(event=><div key={event.id} className="artifact-card artifact-card-pending" role="status" aria-live="polite"><LoaderCircle className="spin" size={20}/><div className="artifact-card-label"><strong>{chatWaitLabel("creating-artifact", locale)}</strong><small>{typeof (event.arguments as {title?:unknown}|undefined)?.title==="string"?String((event.arguments as {title:string}).title):"…"}</small></div></div>)}</div>;
       }
       const live = index === liveContentIndex && pending;
       const body = step.text;

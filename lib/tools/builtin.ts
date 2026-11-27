@@ -11,6 +11,9 @@ import { CODE_FUNCTIONS, MAX_CODE_CHARS, normalizeCodeRunResult } from "./code-r
 import { specFromModelTool } from "./registry";
 import type { ToolContext, ToolProvider, ToolProviderSource, ToolSpec } from "./types";
 import type { ModelContentPart } from "../document-processing";
+import { a2uiInstructions, RENDER_UI_TOOL } from "../a2ui/prompt";
+import { a2uiSurfaces } from "../a2ui/runtime";
+import { validateMessages } from "../a2ui/validate";
 
 /**
  * NeuralNetUI's own tools as providers. Each one is a thin adapter over the module that already implements the
@@ -267,6 +270,18 @@ const youtube: ToolProvider = {
 };
 
 /** In catalog order, which is also the order the model sees them. */
-export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, browserProvider, youtube, time, location, storage, codeRunner, multipleChoice, artifact];
+/** The Generative UI skill: A2UI v1.0 instructions in the system prompt and a validated render_ui function. */
+const a2ui: ToolProvider = {
+  manifest: manifest("a2ui"),
+  instructions: () => a2uiInstructions(),
+  tools: () => [RENDER_UI_TOOL],
+  async execute(_name, args, ctx) {
+    const outcome = validateMessages(args.messages, a2uiSurfaces(ctx.history().filter(event => event.id !== ctx.callId)));
+    if (outcome.errors.length) return { result: { ok: false, errors: outcome.errors, hint: "Nothing was shown. Fix these problems and call render_ui again with the corrected messages." } };
+    return { result: { ok: true, surfaces: outcome.touched, note: "Shown to the person. Their button presses arrive as <a2ui-action> in their next message." } };
+  },
+};
+
+export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, browserProvider, youtube, time, location, storage, codeRunner, multipleChoice, artifact, a2ui];
 
 export const builtinSource: ToolProviderSource = { id: "builtin", providers: () => [...BUILTIN_PROVIDERS] };
