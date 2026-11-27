@@ -56,3 +56,11 @@ export function toolsWithDetails(history: Array<{ name: string; status?: string;
   }
   return seen;
 }
+
+/** Virtual computer tools sent in full even on demand: most tasks start with them, so they cost no extra round. */
+export const VM_CORE_TOOLS = new Set(["shell_run", "browser_navigate", "browser_markdown"]);
+
+/** A details request names a tool exactly, or a group with a trailing * ("browser_*"). */
+export function matchesToolName(pattern: string, name: string) {
+  return pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : pattern === name;
+}

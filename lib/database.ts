@@ -694,6 +694,12 @@ function openDatabase() {
     if (!columns.some(column => column.name === "context_prefix")) connection.exec("ALTER TABLE messages ADD COLUMN context_prefix TEXT;");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(37, new Date().toISOString());
   })();
+  const vmDefinitionsVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (vmDefinitionsVersion.version < 38) connection.transaction(() => {
+    // The virtual computer's ~50 tool definitions (about 21,000 characters) go on demand like Gmail's.
+    connection.exec("UPDATE mcp_connections SET tool_definitions = 'on_demand' WHERE kind = 'vm'");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(38, new Date().toISOString());
+  })();
   return connection;
 }
 

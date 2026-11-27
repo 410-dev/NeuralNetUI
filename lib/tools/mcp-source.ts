@@ -4,12 +4,12 @@ import { mcpToolAlias } from "../mcp-utils";
 import { vmDefaultPolicy } from "../vm";
 import { maskSecureInput, runSecureInputTool, SECURE_INPUT_SPECS } from "../secure-input";
 import type { ElicitationAnswer, ElicitationRequest } from "../mcp-stateless";
-import { DETAILS_TOOL, summarize, toolsWithDetails, trimDescription, trimSchema } from "../mcp-tool-definitions";
+import { DETAILS_TOOL, matchesToolName, summarize, toolsWithDetails, trimDescription, trimSchema, VM_CORE_TOOLS } from "../mcp-tool-definitions";
 import type { McpConnection, McpToolPolicy } from "../types";
 import { requestApproval, type ApprovalPolicy } from "./approval";
 import { mcpManifest, toolRequirementsMet } from "./catalog";
 import { resolveProviderState } from "./state";
-import type { ToolProvider, ToolProviderSource } from "./types";
+import type { ToolProvider, ToolProviderSource, ToolSpec } from "./types";
 
 /** The "user" tier: MCP servers an account registered for itself. One provider per connection. */
 
@@ -25,17 +25,28 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
   const label = `[MCP: ${connection.name}]`;
   const readOnly = (binding: McpToolBinding) => (binding.tool as { annotations?: { readOnlyHint?: boolean } }).annotations?.readOnlyHint === true;
   const schemaOf = (binding: McpToolBinding) => (binding.tool.inputSchema || { type: "object", properties: {} }) as Record<string, unknown>;
-  const fullSpec = (binding: McpToolBinding) => ({ name: binding.advertisedName, sourceName: binding.toolName, readOnly: readOnly(binding), description: `${label} ${binding.tool.description || binding.toolName}`, inputSchema: schemaOf(binding) });
-  // On demand: a held-back call or a details request puts the full definitions into the tool list (ToolExecution.define).
-  const heldBack = (target: McpToolBinding) => ({
-    result: { executed: false, reason: "This tool's full description and argument schema are now in your tool list. Read them, then call the tool again with arguments that match the schema.", tools: [{ name: target.toolName, call_as: target.advertisedName }] },
-    define: [fullSpec(target)],
+  const fullSpec = (binding: McpToolBinding): ToolSpec => ({ name: binding.advertisedName, sourceName: binding.toolName, readOnly: readOnly(binding), description: `${label} ${binding.tool.description || binding.toolName}`, inputSchema: schemaOf(binding) });
+  // Every function this connection offers in this request, fully described, by the name the model calls: the server's
+  // tools and, on a virtual computer, the browser and input-card tools.
+  const definitions = new Map<string, ToolSpec>();
+  const onDemand = () => connection.toolDefinitions === "on_demand";
+  const alwaysFull = (spec: ToolSpec) => connection.kind === "vm" && VM_CORE_TOOLS.has(spec.sourceName ?? spec.name);
+  // On demand: a function whose definition the model has not read in this conversation is not run.
+  const unread = (name: string, history: Parameters<typeof toolsWithDetails>[0]) => {
+    if (!onDemand()) return undefined;
+    const spec = definitions.get(name);
+    return spec && !alwaysFull(spec) && !toolsWithDetails(history, namespace).has(spec.sourceName ?? spec.name) ? spec : undefined;
+  };
+  // A held-back call or a details request puts the full definitions into the tool list (ToolExecution.define).
+  const heldBack = (target: ToolSpec) => ({
+    result: { executed: false, reason: "This tool's full description and argument schema are now in your tool list. Read them, then call the tool again with arguments that match the schema.", tools: [{ name: target.sourceName ?? target.name, call_as: target.name }] },
+    define: [target],
   });
   return {
     manifest: mcpManifest(connection, order),
     async tools(ctx) {
       const listed = await mcpConnectionBindings(ctx.userId, connection.id, ctx.signal);
-      bindings.clear(); browser.clear();
+      bindings.clear(); browser.clear(); definitions.clear();
       for (const binding of listed) bindings.set(binding.advertisedName, binding);
       // Input cards need someone at the screen: offered in regular chats, not to the personal agent.
       const browserSpecs = connection.kind === "vm" ? [...await vmBrowserSpecs(ctx), ...(ctx.agent ? [] : SECURE_INPUT_SPECS)] : [];
@@ -47,35 +58,36 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
         browser.set(name, { name: spec.name, policy });
         return [{ ...spec, name, sourceName: spec.name, description: `[MCP: ${connection.name}] ${spec.description}` }];
       });
-      const mode = connection.kind === "vm" ? "full" : connection.toolDefinitions || "trimmed";
-      if (mode === "on_demand" && listed.length) {
+      for (const spec of [...listed.map(fullSpec), ...extra]) definitions.set(spec.name, spec);
+      const all = [...definitions.values()];
+      const mode = connection.toolDefinitions || (connection.kind === "vm" ? "on_demand" : "trimmed");
+      if (mode === "on_demand" && all.length) {
         // Names and one line each; the full definitions come from the details function when the model needs them.
-        // Tools already read in this conversation keep their full definitions, so compaction cannot take them away.
+        // Tools already read in this conversation keep their full definitions, so compaction cannot take them away;
+        // the virtual computer's everyday tools (VM_CORE_TOOLS) are always sent in full.
         const details = mcpToolAlias(connection.id, DETAILS_TOOL);
         const read = toolsWithDetails(ctx.history(), namespace);
+        const prefix = `${label} `;
         return [{
           name: details, sourceName: DETAILS_TOOL, readOnly: true,
-          description: `${label} Adds the full description and argument schema of tools of this connection to your tool list. Call it with the tools you are about to use before calling them; their listed descriptions are one-line summaries and their arguments are not shown until then.`,
-          inputSchema: { type: "object", additionalProperties: false, required: ["names"], properties: { names: { type: "array", minItems: 1, maxItems: 20, items: { type: "string" }, description: "Tool names, as listed (with or without the mcp_… prefix)" } } },
-        }, ...listed.map(binding => read.has(binding.toolName) ? fullSpec(binding) : ({
-          name: binding.advertisedName, sourceName: binding.toolName, readOnly: readOnly(binding),
-          description: `${label} ${summarize(binding.tool.description || binding.toolName)} (Arguments: call ${details} first.)`,
-          inputSchema: { type: "object", additionalProperties: true, properties: {} },
-        })), ...extra];
+          description: `${label} Tools named ${namespace}… whose description is a single line and whose arguments are not listed belong to ${connection.name}. Before calling any of them, call this with their names: it adds their full descriptions and argument schemas to your tool list. A name may end in * for a whole group (e.g. "browser_*").`,
+          inputSchema: { type: "object", additionalProperties: false, required: ["names"], properties: { names: { type: "array", minItems: 1, maxItems: 20, items: { type: "string" }, description: "Tool names, as listed (with or without the mcp_… prefix); a trailing * matches every tool starting with the rest" } } },
+        }, ...all.map(spec => alwaysFull(spec) || read.has(spec.sourceName ?? spec.name) ? spec : ({
+          // Only the summary: the details function says how to get the rest, and a call without it is held back.
+          // Repeating a label and a hint on dozens of entries cost as much as the summaries themselves.
+          name: spec.name, sourceName: spec.sourceName, readOnly: spec.readOnly,
+          description: summarize(spec.description.startsWith(prefix) ? spec.description.slice(prefix.length) : spec.description),
+          inputSchema: { type: "object" },
+        }))];
       }
-      return [...listed.map(binding => ({
-        name: binding.advertisedName, sourceName: binding.toolName, readOnly: readOnly(binding),
-        description: `${label} ${mode === "trimmed" ? trimDescription(binding.tool.description || binding.toolName) : binding.tool.description || binding.toolName}`,
-        inputSchema: mode === "trimmed" ? trimSchema(schemaOf(binding)) : schemaOf(binding),
-      })), ...extra];
+      if (mode === "trimmed") return all.map(spec => ({ ...spec, description: trimDescription(spec.description), inputSchema: trimSchema(spec.inputSchema) }));
+      return all;
     },
     async authorize(name, args, ctx) {
-      if (name === mcpToolAlias(connection.id, DETAILS_TOOL) && connection.toolDefinitions === "on_demand") return { approved: true };
+      if (name === mcpToolAlias(connection.id, DETAILS_TOOL) && onDemand()) return { approved: true };
       // On demand: a tool whose definition the model has not read here is not run; it gets the definition instead.
-      if (connection.toolDefinitions === "on_demand" && connection.kind !== "vm") {
-        const target = bindings.get(name);
-        if (target && !toolsWithDetails(ctx.history(), namespace).has(target.toolName)) return { approved: false, ...heldBack(target) };
-      }
+      const target = unread(name, ctx.history());
+      if (target) return { approved: false, ...heldBack(target) };
       const web = browser.get(name);
       if (web) {
         const approval = await requestApproval(ctx, `${connection.id}:${web.name}`, APPROVAL[web.policy], () => ctx.updateEvent({ arguments: { ...args, _mcpApproval: {
@@ -93,20 +105,19 @@ function connectionProvider(connection: McpConnection, order: number): ToolProvi
     },
     async execute(name, args, ctx) {
       if (name === mcpToolAlias(connection.id, DETAILS_TOOL)) {
-        const wanted = Array.isArray(args.names) ? args.names.map(item => String(item)) : [];
-        const all = [...bindings.values()];
-        const found = wanted.flatMap(item => all.filter(binding => binding.toolName === item || binding.advertisedName === item)).filter((binding, index, list) => list.indexOf(binding) === index);
-        const missing = wanted.filter(item => !all.some(binding => binding.toolName === item || binding.advertisedName === item));
+        const wanted = Array.isArray(args.names) ? args.names.map(item => String(item).trim()).filter(Boolean) : [];
+        const all = [...definitions.values()].filter(spec => spec.sourceName !== DETAILS_TOOL);
+        const matches = (item: string) => all.filter(spec => matchesToolName(item, spec.sourceName ?? spec.name) || matchesToolName(item, spec.name));
+        const found = [...new Set(wanted.flatMap(matches))];
+        const missing = wanted.filter(item => !matches(item).length);
         return {
-          result: { tools: found.map(binding => ({ name: binding.toolName, call_as: binding.advertisedName })), ...(found.length ? { note: "Their full descriptions and argument schemas are now in your tool list. Read them there and call the tools directly." } : {}), ...(missing.length ? { unknown: missing } : {}) },
-          define: found.map(fullSpec),
+          result: { tools: found.map(spec => ({ name: spec.sourceName ?? spec.name, call_as: spec.name })), ...(found.length ? { note: "Their full descriptions and argument schemas are now in your tool list. Read them there and call the tools directly." } : {}), ...(missing.length ? { unknown: missing } : {}) },
+          define: found,
         };
       }
       // The personal agent's automatic runs skip authorize(): the same check applies here.
-      if (connection.toolDefinitions === "on_demand" && connection.kind !== "vm") {
-        const target = bindings.get(name);
-        if (target && !toolsWithDetails(ctx.history(), namespace).has(target.toolName)) return heldBack(target);
-      }
+      const target = unread(name, ctx.history());
+      if (target) return heldBack(target);
       const web = browser.get(name);
       if (web) {
         if (SECURE_INPUT_SPECS.some(spec => spec.name === web.name)) return runSecureInputTool(web.name, args, ctx);

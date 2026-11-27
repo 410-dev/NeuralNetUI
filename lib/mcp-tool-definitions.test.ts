@@ -32,3 +32,13 @@ test("details read in the conversation are remembered by tool name", () => {
   ];
   assert.deepEqual([...toolsWithDetails(history, "mcp_b1d9153f_")].sort(), ["get_thread", "search_threads", "send_message"]);
 });
+
+test("details requests match a tool exactly or a group by its trailing *", async () => {
+  const { matchesToolName, VM_CORE_TOOLS } = await import("./mcp-tool-definitions.ts");
+  assert.equal(matchesToolName("browser_*", "browser_click"), true);
+  assert.equal(matchesToolName("browser_*", "shell_run"), false);
+  assert.equal(matchesToolName("mcp_72fc34ca_browser_*", "mcp_72fc34ca_browser_click"), true);
+  assert.equal(matchesToolName("shell_run", "shell_run"), true);
+  assert.equal(matchesToolName("shell", "shell_run"), false);
+  assert.ok(VM_CORE_TOOLS.has("shell_run") && VM_CORE_TOOLS.has("browser_navigate"));
+});
