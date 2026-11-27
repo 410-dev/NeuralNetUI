@@ -72,14 +72,26 @@ export function chatHeaders(connection: Pick<ConnectionConfig, "driver" | "apiKe
   return connectionHeaders(connection, fallbackKey);
 }
 
+/**
+ * The id a model gets when an earlier connection already lists a model with the same id (the same LM Studio model on
+ * two machines, for one). Requests still name the model by its sourceModel; the id only tells the two apart.
+ */
+export function scopedModelId(id: string, connectionId: string) {
+  return `${id}@@${connectionId.replace(/^connection-/, "").slice(0, 8)}`;
+}
+
 export function resolveConnectionModels(connections: ConnectionConfig[], aliases: ModelConfig[] = [], preferredOrder: string[] = []) {
-  const seen = new Set<string>(); const models: ModelConfig[] = [];
+  // A connection lists a model once; the same model on another connection is kept under its own id.
+  const seen = new Set<string>(); const used = new Set<string>(); const models: ModelConfig[] = [];
   for (const connection of connections) {
     for (const model of connection.models) {
       const identifier = model.sourceModel || model.id;
-      if (seen.has(identifier)) continue;
-      seen.add(identifier);
-      models.push({ ...model, connectionId: connection.id });
+      const key = `${connection.id}\0${identifier}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const id = used.has(model.id) ? scopedModelId(model.id, connection.id) : model.id;
+      used.add(id);
+      models.push({ ...model, id, sourceModel: identifier, connectionId: connection.id });
     }
   }
   for (const alias of aliases.filter((model) => model.isAlias)) {

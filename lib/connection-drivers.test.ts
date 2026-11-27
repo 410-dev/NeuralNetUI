@@ -21,13 +21,16 @@ test("chat requests authenticate with a bearer token, or x-api-key for Anthropic
   assert.equal(chatHeaders({ ...base, driver: "anthropic" }, "", "conversation-42").Authorization, undefined);
 });
 
-test("connection order resolves duplicate model identifiers", () => {
+test("connection order decides which of two same-named models keeps the plain id", () => {
   const connections: ConnectionConfig[] = [
     { id: "top", name: "Top", driver: "openai", baseUrl: "http://top/v1", apiKey: "", models: [model("same", "top", "Top model")] },
     { id: "lower", name: "Lower", driver: "lmstudio", baseUrl: "http://lower", apiKey: "", models: [model("same", "lower", "Lower model"), model("unique", "lower")] },
   ];
-  assert.deepEqual(resolveConnectionModels(connections).map(({ name, connectionId }) => [name, connectionId]), [["Top model", "top"], ["unique", "lower"]]);
-  assert.equal(resolveConnectionModels(connections.reverse())[0].name, "Lower model");
+  // Both are listed (each connection shows what it serves); the higher connection keeps the plain id.
+  assert.deepEqual(resolveConnectionModels(connections).map(({ id, name, connectionId }) => [id === "same", name, connectionId]), [[true, "Top model", "top"], [false, "Lower model", "lower"], [false, "unique", "lower"]]);
+  const reversed = resolveConnectionModels(connections.reverse());
+  assert.equal(reversed[0].name, "Lower model");
+  assert.equal(reversed[0].id, "same");
 });
 
 test("saved model order remains independent from connection priority", () => {
@@ -45,4 +48,17 @@ test("removing a connection immediately drops its models and reveals lower-prior
   const after = resolveConnectionModels([lower], [], before.map(item => item.id));
   assert.deepEqual(after.map(({ name, connectionId }) => [name, connectionId]), [["Lower model", "lower"], ["kept", "lower"]]);
   assert.equal(after.some(item => item.id === "removed"), false);
+});
+
+test("the same model on two connections is listed for each, the later one under a scoped id", async () => {
+  const { resolveConnectionModels, scopedModelId } = await import("./connection-drivers.ts");
+  const model = (id: string) => ({ id, name: id, sourceModel: id, reasoningSupported: false, reasoningEfforts: [], reasoningPresets: [] }) as never;
+  const models = resolveConnectionModels([
+    { id: "connection-aaaaaaaa-1", name: "A", driver: "lmstudio", baseUrl: "http://a", apiKey: "", models: [model("qwen"), model("gemma")] },
+    { id: "connection-bbbbbbbb-2", name: "B", driver: "lmstudio", baseUrl: "http://b", apiKey: "", models: [model("qwen"), model("inkling"), model("qwen")] },
+  ] as never);
+  assert.deepEqual(models.map(m => [m.id, m.sourceModel, m.connectionId]), [
+    ["qwen", "qwen", "connection-aaaaaaaa-1"], ["gemma", "gemma", "connection-aaaaaaaa-1"],
+    [scopedModelId("qwen", "connection-bbbbbbbb-2"), "qwen", "connection-bbbbbbbb-2"], ["inkling", "inkling", "connection-bbbbbbbb-2"],
+  ]);
 });

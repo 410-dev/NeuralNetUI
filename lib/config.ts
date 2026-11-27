@@ -17,7 +17,7 @@ import { inferApiContextWindowTokens } from "./model-context";
 import { mergeModelPresets } from "./model-edits";
 import { canPersonalizeSystemPrompt, MAX_SYSTEM_PROMPT_OVERRIDE_LENGTH, readModelSystemPrompts } from "./system-prompt";
 import { inferReasoning, normalizeReasoning, offeredPresets, presetVisibleTo } from "./reasoning-capabilities";
-import { connectionRoot, envApiKey, resolveConnectionModels } from "./connection-drivers";
+import { connectionRoot, envApiKey, resolveConnectionModels, scopedModelId } from "./connection-drivers";
 import { normalizeSamplingParams, readPersonalSampling } from "./sampling-params";
 
 // Out-of-range or unreadable values are dropped rather than rejected, so an empty field always saves.
@@ -92,7 +92,7 @@ const configPath = path.join(dataDir, "config.json");
 
 function normalizeConfig(config: AppConfig): AppConfig {
   const edited = new Map(config.models.filter((model) => !model.isAlias && model.connectionId).map((model) => [`${model.connectionId}\0${model.id}`, model]));
-  const connections = config.connections.map((connection) => ({ ...connection, models: connection.models.filter((model) => !model.isAlias).map((model) => normalizeReasoning({ ...model, ...edited.get(`${connection.id}\0${model.id}`), connectionId: connection.id })) }));
+  const connections = config.connections.map((connection) => ({ ...connection, models: connection.models.filter((model) => !model.isAlias).map((model) => normalizeReasoning({ ...model, ...(edited.get(`${connection.id}\0${model.id}`) ?? edited.get(`${connection.id}\0${scopedModelId(model.id, connection.id)}`)), connectionId: connection.id })) }));
   return { ...config, connections, models: resolveConnectionModels(connections, config.models.filter((model) => model.isAlias), config.models.map((model) => model.id)) };
 }
 
