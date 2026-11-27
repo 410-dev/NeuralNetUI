@@ -1,6 +1,6 @@
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { hasNativePushToken, hasPushSubscription, pushDeviceCount, pushToUser, rememberPushSubject, removeNativePushToken, removePushSubscription, saveNativePushToken, savePushSubscription, vapidPublicKey } from "@/lib/agent/push";
-import { fcmConfigured } from "@/lib/agent/fcm";
+import { fcmConfigured, firebaseProjectId } from "@/lib/agent/fcm";
 import { publicOrigin } from "@/lib/vm-installer";
 
 export const runtime = "nodejs";
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   try {
     const user = requireUser(request); const params = new URL(request.url).searchParams;
     const endpoint = params.get("endpoint"), nativeToken = params.get("nativeToken");
-    return Response.json({ publicKey: vapidPublicKey(), devices: pushDeviceCount(user.id), nativeAvailable: fcmConfigured(),
+    return Response.json({ publicKey: vapidPublicKey(), devices: pushDeviceCount(user.id), nativeAvailable: fcmConfigured(), nativeProjectId: firebaseProjectId(),
       ...(endpoint ? { registered: hasPushSubscription(user.id, endpoint) } : nativeToken ? { registered: hasNativePushToken(user.id, nativeToken) } : {}) });
   } catch (error) { return authErrorResponse(error); }
 }
@@ -29,8 +29,8 @@ export async function POST(request: Request) {
       return Response.json({ results, devices: pushDeviceCount(user.id) });
     }
     if (body.native && typeof body.native === "object") {
-      saveNativePushToken(user.id, body.native as { token?: unknown; platform?: unknown }, request.headers.get("user-agent") || undefined);
-      return Response.json({ subscribed: true, devices: pushDeviceCount(user.id), nativeAvailable: fcmConfigured() });
+      saveNativePushToken(user.id, body.native as { token?: unknown; platform?: unknown; projectId?: unknown }, request.headers.get("user-agent") || undefined);
+      return Response.json({ subscribed: true, devices: pushDeviceCount(user.id), nativeAvailable: fcmConfigured(), nativeProjectId: firebaseProjectId() });
     }
     savePushSubscription(user.id, body, request.headers.get("user-agent") || undefined);
     rememberPushSubject(publicOrigin(request));

@@ -195,9 +195,10 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
         const reply = await nativePush("status").catch(() => undefined);
         if (!reply) { setPushState("unsupported"); setPushNotice({ text: ko ? "앱이 알림 상태를 알려주지 않습니다. 앱을 최신 버전으로 업데이트해 주세요." : "The app did not report its notification state. Update the app." }); return; }
         if (reply.permission === "denied") { setPushState("denied"); return; }
-        const known = await api<{ registered?: boolean; devices: number; nativeAvailable?: boolean }>(`/api/agent/push${reply.token ? `?nativeToken=${encodeURIComponent(reply.token)}` : ""}`).catch(() => undefined);
+        const known = await api<{ registered?: boolean; devices: number; nativeAvailable?: boolean; nativeProjectId?: string }>(`/api/agent/push${reply.token ? `?nativeToken=${encodeURIComponent(reply.token)}` : ""}`).catch(() => undefined);
         if (known) setPushDevices(known.devices);
-        if (known && !known.nativeAvailable) setPushNotice({ text: ko ? "서버에 Firebase 서비스 계정 키가 없어 앱으로 알림을 보낼 수 없습니다." : "The server has no Firebase service account key, so it cannot notify the app.", error: true });
+        if (known && !known.nativeAvailable) setPushNotice({ text: ko ? "서버에 Firebase 서비스 계정 키가 없어 앱으로 알림을 보낼 수 없습니다. 최고 관리자가 설정 > 데이터에서 올릴 수 있습니다." : "The server has no Firebase service account key, so it cannot notify the app. The superadmin can upload one in Settings > Data.", error: true });
+        else if (known?.nativeProjectId && reply.projectId && known.nativeProjectId !== reply.projectId) setPushNotice({ text: ko ? `이 앱은 Firebase 프로젝트 '${reply.projectId}'로 빌드되었지만 서버 키는 '${known.nativeProjectId}' 프로젝트입니다. 알림이 오지 않습니다. 서버의 google-services.json으로 빌드한 앱을 설치하거나, 서버 키를 바꿔 주세요.` : `This app was built for Firebase project '${reply.projectId}' but the server's key is for '${known.nativeProjectId}', so notifications cannot arrive. Install an app built with this server's google-services.json, or change the server key.`, error: true });
         setPushState(reply.enabled && known?.registered ? "on" : "off");
         return;
       }
@@ -235,7 +236,7 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
         if (enable && reply.permission !== "granted") { setPushState("denied"); setPushNotice({ text: ko ? "알림 권한이 허용되지 않았습니다. 휴대폰 설정 > 앱 > NeuralNetUI > 알림에서 허용해 주세요." : "Notification permission was not granted. Allow it in the phone's settings for NeuralNetUI.", error: true }); return; }
         if (enable && !reply.token) throw new Error(ko ? "앱이 알림 토큰을 받지 못했습니다." : "The app got no notification token.");
         const body = enable
-          ? await api<{ devices: number }>("/api/agent/push", { method: "POST", body: JSON.stringify({ native: { token: reply.token, platform: reply.platform } }) })
+          ? await api<{ devices: number }>("/api/agent/push", { method: "POST", body: JSON.stringify({ native: { token: reply.token, platform: reply.platform, projectId: reply.projectId } }) })
           : reply.token ? await api<{ devices: number }>("/api/agent/push", { method: "DELETE", body: JSON.stringify({ nativeToken: reply.token }) }) : await api<{ devices: number }>("/api/agent/push");
         setPushDevices(body.devices); setPushState(enable ? "on" : "off");
         setPushNotice({ text: enable ? (ko ? `이 휴대폰을 등록했습니다. 등록된 기기 ${body.devices}대. 긴급 알림만 소리와 함께 화면 위에 뜨고, 나머지는 조용히 알림창에 쌓입니다.` : `This phone is registered (${body.devices} in total). Only urgent notifications ring and pop up; the rest arrive silently.`) : (ko ? "이 휴대폰의 알림을 껐습니다." : "Notifications are off on this phone.") });

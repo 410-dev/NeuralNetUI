@@ -1399,6 +1399,10 @@ button.usage-lmf-name:hover { color:#fff; }
 .backup-card > div:first-child { min-width:0; }
 .backup-card > div:first-child strong { display:block; color:var(--text); font-size:13px; font-weight:570; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .backup-card > div:first-child small { display:block; margin-top:4px; color:var(--dim); font-size:11px; line-height:1.55; }
+.push-service-card strong { display:flex !important; align-items:center; gap:6px; }
+.push-service-status { display:block; margin-top:6px; color:var(--dim); overflow-wrap:anywhere; }
+.push-service-status.on { color:#8fd19e; }
+.push-service-help { color:var(--dim); font-size:11px; line-height:1.5; }
 .backup-card-actions, .backup-restore-control { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .backup-card-actions > .secondary-button, .backup-restore-control > button { height:38px; display:flex; align-items:center; justify-content:center; gap:7px; padding:0 15px; font-size:12px; white-space:nowrap; }
 .backup-card-actions > .secondary-button { color:var(--text); }

@@ -184,3 +184,15 @@ systemctl enable --now neural-chat
 | LXC / systemd | 빌드 후 파일을 다시 복사하고 `systemctl restart neural-chat` |
 
 데이터베이스 마이그레이션은 서버 기동 시 자동으로 적용됩니다. 업데이트 전에 [백업](operations.md#백업과-복원)을 먼저 하세요.
+
+## 모바일 앱 푸시 알림 (Firebase)
+
+모바일 앱(`2.0-mobile-shell` 브랜치의 `mobile/`)으로 에이전트 알림을 보내려면 서버마다 자기 Firebase 프로젝트가 필요합니다.
+
+1. Firebase 콘솔에서 프로젝트를 만들고 Android 앱(패키지 `dev.hysong.neuralnetui`)을 등록해 `google-services.json`을 받습니다. 앱은 이 파일로 빌드합니다(`mobile/README.md`).
+2. 같은 프로젝트의 **서비스 계정 키**(프로젝트 설정 > 서비스 계정 > 새 비공개 키 생성)를 최고 관리자가 **설정 > 데이터 > 앱 푸시 알림**에서 올립니다. 올릴 때 Google 로그인으로 키를 확인한 뒤 `data/secrets/firebase-admin.json`(권한 600)에 저장합니다.
+   - 웹 대신 파일로 둘 수도 있습니다. Docker에서는 `NEURAL_CHAT_SECRETS_PATH`(기본 `./secrets`)의 `firebase-admin.json`이 `/app/secrets`로 읽기 전용 마운트됩니다. 웹에서 올린 키가 있으면 그것이 우선입니다.
+   - 키는 백업 이미지에 포함되지 않습니다. 서버를 옮길 때 `data/` 폴더를 통째로 복사하면 함께 옮겨지고, 파일로 둔 경우에는 그 파일도 따로 옮기세요.
+3. 앱과 서버 키의 프로젝트가 다르면 에이전트 설정의 알림 항목에 경고가 표시됩니다.
+
+서버 주소가 바뀌어도(예: 집 서버에서 VPS로 이전) 등록된 기기 토큰은 그대로 유효합니다. 앱에서 서버 주소만 새 주소로 바꾸면 됩니다.

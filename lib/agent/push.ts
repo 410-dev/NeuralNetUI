@@ -41,13 +41,14 @@ export function removePushSubscription(userId: string, endpoint: string) {
 }
 
 /** The mobile app registers its FCM token (Android, and iOS later) through the page it hosts. */
-export function saveNativePushToken(userId: string, input: { token?: unknown; platform?: unknown }, userAgent?: string) {
+export function saveNativePushToken(userId: string, input: { token?: unknown; platform?: unknown; projectId?: unknown }, userAgent?: string) {
   const token = typeof input.token === "string" ? input.token.trim() : "";
   const platform = input.platform === "ios" ? "ios" : input.platform === "android" ? "android" : "";
   if (!token || token.length > 4096 || !platform) throw Object.assign(new Error("Invalid device token."), { status: 400 });
-  db.prepare(`INSERT INTO native_push_tokens(token, user_id, platform, user_agent, created_at) VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, platform = excluded.platform, user_agent = excluded.user_agent`)
-    .run(token, userId, platform, userAgent?.slice(0, 300) ?? null, new Date().toISOString());
+  const projectId = typeof input.projectId === "string" && /^[a-z0-9-]{1,64}$/.test(input.projectId) ? input.projectId : null;
+  db.prepare(`INSERT INTO native_push_tokens(token, user_id, platform, user_agent, project_id, created_at) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, platform = excluded.platform, user_agent = excluded.user_agent, project_id = excluded.project_id`)
+    .run(token, userId, platform, userAgent?.slice(0, 300) ?? null, projectId, new Date().toISOString());
 }
 
 export function removeNativePushToken(userId: string, token: string) {

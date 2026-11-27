@@ -9,7 +9,8 @@ export function isNativeShell() {
   return typeof window !== "undefined" && /\bNeuralNetUIApp\//.test(navigator.userAgent) && Boolean((window as NativeWindow).ReactNativeWebView);
 }
 
-export type NativePushReply = { permission: "granted" | "denied" | "undetermined"; enabled: boolean; token?: string; platform?: "android" | "ios"; error?: string };
+/** `projectId` is the Firebase project the app was built for; it must match the server's key. */
+export type NativePushReply = { permission: "granted" | "denied" | "undetermined"; enabled: boolean; token?: string; platform?: "android" | "ios"; projectId?: string; error?: string };
 
 let sequence = 0;
 /** `status` reports permission and, when the app has notifications on, its token; `enable` asks for permission first. */
