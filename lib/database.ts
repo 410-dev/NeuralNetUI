@@ -700,6 +700,19 @@ function openDatabase() {
     connection.exec("UPDATE mcp_connections SET tool_definitions = 'on_demand' WHERE kind = 'vm'");
     connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(38, new Date().toISOString());
   })();
+  const calibrationVersion = connection.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get() as { version: number };
+  if (calibrationVersion.version < 39) connection.transaction(() => {
+    // The donut's calibration (a reply's real context next to the estimate of the same history), the subagent run a
+    // main-chat message came from, and each run's model and token totals.
+    const messageColumns = connection.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
+    if (!messageColumns.some(column => column.name === "context_calibration")) connection.exec("ALTER TABLE messages ADD COLUMN context_calibration TEXT;");
+    if (!messageColumns.some(column => column.name === "agent_run_id")) connection.exec("ALTER TABLE messages ADD COLUMN agent_run_id TEXT;");
+    const runColumns = connection.prepare("PRAGMA table_info(agent_runs)").all() as Array<{ name: string }>;
+    if (!runColumns.some(column => column.name === "model_name")) connection.exec("ALTER TABLE agent_runs ADD COLUMN model_name TEXT;");
+    if (!runColumns.some(column => column.name === "input_tokens")) connection.exec("ALTER TABLE agent_runs ADD COLUMN input_tokens INTEGER;");
+    if (!runColumns.some(column => column.name === "output_tokens")) connection.exec("ALTER TABLE agent_runs ADD COLUMN output_tokens INTEGER;");
+    connection.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)").run(39, new Date().toISOString());
+  })();
   return connection;
 }
 

@@ -30,6 +30,8 @@ const messageSchema = z.object({
   modelName: z.string().max(200).optional(),
   agentKind: z.enum(["notice", "context"]).optional(),
   contextPrefix: z.string().max(500).optional(),
+  agentRunId: z.string().max(200).optional(),
+  contextCalibration: z.object({ real: z.number().nonnegative(), estimated: z.number().nonnegative(), counted: z.number().nonnegative() }).optional(),
   routedModel: z.string().max(200).optional(),
   steps: z.array(z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("reasoning"), text: z.string(), seconds: z.number().nonnegative().optional(), startedAt: z.number().nonnegative().optional(), promptSeconds: z.number().nonnegative().optional() }),
@@ -166,6 +168,8 @@ function storeConversation(record: Conversation, userId: string, guard?: () => b
         // A save that does not carry the answering model (an older client, an edited copy) keeps the recorded one.
         if (message.agentKind) db.prepare("UPDATE messages SET agent_kind = ? WHERE id = ? AND conversation_id = ?").run(message.agentKind, message.id, record.id);
         if (message.contextPrefix) db.prepare("UPDATE messages SET context_prefix = ? WHERE id = ? AND conversation_id = ?").run(message.contextPrefix, message.id, record.id);
+        if (message.agentRunId) db.prepare("UPDATE messages SET agent_run_id = ? WHERE id = ? AND conversation_id = ?").run(message.agentRunId, message.id, record.id);
+        if (message.contextCalibration) db.prepare("UPDATE messages SET context_calibration = ? WHERE id = ? AND conversation_id = ?").run(JSON.stringify(message.contextCalibration), message.id, record.id);
         if (message.modelName || message.routedModel) db.prepare("UPDATE messages SET model_name = COALESCE(?, model_name), routed_model = COALESCE(?, routed_model) WHERE id = ? AND conversation_id = ?").run(message.modelName ?? null, message.routedModel ?? null, message.id, record.id);
         insertBranchMessage.run(branch.id, message.id, messagePosition);
         for (const [attachmentPosition, attachment] of (message.attachments || []).entries()) {
@@ -351,6 +355,8 @@ type MessageRow = {
   context_tokens: number | null;
   tool_definition_tokens: number | null;
   context_prefix: string | null;
+  agent_run_id: string | null;
+  context_calibration: string | null;
   tool_events: string | null;
   steps: string | null;
   created_at: string;
@@ -374,7 +380,7 @@ async function readConversationRecord(id: string, userId: string, includeDeleted
   const branchRows = db.prepare("SELECT id, name, parent_branch_id, forked_from_message_id, created_at, updated_at FROM branches WHERE conversation_id = ? ORDER BY position").all(id) as BranchRow[];
   const messageRows = db.prepare(`
     SELECT bm.branch_id, m.id, m.revision_group_id, m.role, m.content, m.reasoning, m.reasoning_duration_seconds,
-           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.prompt_processing_seconds, m.total_duration_seconds, m.model_name, m.routed_model, m.agent_kind, m.context_prefix, m.context_tokens, m.tool_definition_tokens, m.tool_events, m.steps, m.created_at
+           m.input_tokens, m.output_tokens, m.reasoning_tokens, m.total_tokens, m.completion_duration_seconds, m.time_to_first_token_seconds, m.prompt_processing_seconds, m.total_duration_seconds, m.model_name, m.routed_model, m.agent_kind, m.context_prefix, m.agent_run_id, m.context_calibration, m.context_tokens, m.tool_definition_tokens, m.tool_events, m.steps, m.created_at
     FROM branch_messages bm
     JOIN messages m ON m.id = bm.message_id
     JOIN branches b ON b.id = bm.branch_id
@@ -423,6 +429,8 @@ async function readConversationRecord(id: string, userId: string, includeDeleted
       modelName: row.model_name ?? undefined,
       agentKind: row.agent_kind === "notice" || row.agent_kind === "context" ? row.agent_kind : undefined,
       contextPrefix: row.context_prefix ?? undefined,
+      agentRunId: row.agent_run_id ?? undefined,
+      contextCalibration: parseCalibration(row.context_calibration),
       routedModel: row.routed_model ?? undefined,
       toolEvents: row.tool_events ? JSON.parse(row.tool_events) : undefined,
       steps: row.steps ? JSON.parse(row.steps) : undefined,
@@ -553,4 +561,13 @@ export async function searchConversations(userId: string, query: string) {
     WHERE c.user_id = ? AND c.temporary = 0 AND c.deleted_at IS NULL AND c.id NOT IN (SELECT conversation_id FROM agent_conversations) ORDER BY c.updated_at DESC, b.position, bm.position`).all(userId) as Array<{id:string;title:string;activeBranchId:string;branchId:string;branchName:string;content:string}>;
   const seen = new Set<string>();
   return rows.filter(row => { const key = row.id + ":" + row.branchId; if (seen.has(key) || !(row.content.toLocaleLowerCase().includes(needle) || row.title.toLocaleLowerCase().includes(needle))) return false; seen.add(key); return true; }).slice(0, 100).map(row => { const at = row.content.toLocaleLowerCase().indexOf(needle); return {...row, content: row.content.slice(Math.max(0, at - 60), Math.max(0, at - 60) + 240), otherBranch: row.branchId !== row.activeBranchId}; });
+}
+
+function parseCalibration(value: string | null) {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as { real?: unknown; estimated?: unknown; counted?: unknown };
+    const real = Number(parsed.real), estimated = Number(parsed.estimated), counted = Number(parsed.counted);
+    return [real, estimated, counted].every(item => Number.isFinite(item) && item >= 0) ? { real, estimated, counted } : undefined;
+  } catch { return undefined; }
 }

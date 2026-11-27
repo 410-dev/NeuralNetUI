@@ -302,6 +302,41 @@ function readTokenUsage(payload: Record<string, unknown>): TokenUsage | undefine
   };
 }
 
+type ThreadAnchor = { id: string; offset: number };
+
+/** The first message (by the given id attribute) still visible at the top of the scroll box, and how far it sits from the top. */
+function threadAnchor(element: HTMLElement, attribute: "data-message-id" | "data-context-message-id"): ThreadAnchor | undefined {
+  const top = element.getBoundingClientRect().top;
+  for (const node of element.querySelectorAll<HTMLElement>(`[${attribute}]`)) {
+    const rect = node.getBoundingClientRect();
+    if (rect.bottom > top + 1) return { id: node.getAttribute(attribute) || "", offset: rect.top - top };
+  }
+  return undefined;
+}
+
+/**
+ * Scrolls so the message with this id sits where the anchor says; false when the view has no such message. Rows
+ * skipped by content-visibility take their real height only once they are drawn, which moves the target again, so
+ * the alignment is repeated for a few frames until it holds.
+ */
+function alignThreadAnchor(element: HTMLElement, attribute: "data-message-id" | "data-context-message-id", anchor: ThreadAnchor | undefined) {
+  if (!anchor?.id) return false;
+  const selector = `[${attribute}="${CSS.escape(anchor.id)}"]`;
+  const align = () => {
+    const target = element.querySelector<HTMLElement>(selector);
+    if (!target) return 0;
+    const delta = target.getBoundingClientRect().top - element.getBoundingClientRect().top - anchor.offset;
+    if (Math.abs(delta) > 1) element.scrollTop += delta;
+    return Math.abs(delta);
+  };
+  if (!element.querySelector(selector)) return false;
+  align();
+  let frames = 0;
+  const settle = () => { if (!element.isConnected || ++frames > 12) return; if (align() > 1 || frames < 3) requestAnimationFrame(settle); };
+  requestAnimationFrame(settle);
+  return true;
+}
+
 function formatTokens(value: number, locale: Locale) {
   return new Intl.NumberFormat(locale === "ko" ? "ko-KR" : "en-US").format(value);
 }
@@ -392,7 +427,24 @@ export default function Home() {
   const [pendingWait, setPendingWait] = useState<{ messageId: string; phase: ChatWaitPhase; progress?: number; startedAt?: number } | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [contextViewOpen, setContextViewOpen] = useState(false);
+  const [contextViewOpen, setContextViewOpenState] = useState(false);
+  // The chat and the context view share one scroll box. Switching between them keeps the reader on the same message:
+  // the message at the top of the view being left is put at the top of the other one; leaving the context view at a
+  // place the chat does not show (a summary, a hidden message) returns to where the chat was last read.
+  const viewSwitchRef = useRef<{ toContext: boolean; anchor?: ThreadAnchor; chat?: ThreadAnchor & { atBottom: boolean; scrollTop: number } } | undefined>(undefined);
+  const chatPlaceRef = useRef<ThreadAnchor & { atBottom: boolean; scrollTop: number } | undefined>(undefined);
+  const contextViewOpenRef = useRef(false);
+  const setContextViewOpen = (next: boolean | ((value: boolean) => boolean)) => {
+    const value = typeof next === "function" ? next(contextViewOpenRef.current) : next;
+    if (value === contextViewOpenRef.current) return;
+    const element = threadRef.current;
+    if (element) {
+      if (value) chatPlaceRef.current = { ...(threadAnchor(element, "data-message-id") ?? { id: "", offset: 0 }), atBottom: isNearScrollBottom(element), scrollTop: element.scrollTop };
+      viewSwitchRef.current = { toContext: value, anchor: threadAnchor(element, value ? "data-message-id" : "data-context-message-id"), chat: chatPlaceRef.current };
+    }
+    contextViewOpenRef.current = value;
+    setContextViewOpenState(value);
+  };
   /**
    * Where the new-chat composer sat when the user left that screen (first send, or opening a chat), so the
    * docked composer can glide down from it. Returning to a new chat docks at once; only the glow rolls up.
@@ -853,7 +905,26 @@ export default function Home() {
   };
   useEffect(() => { if (contextKey && !isGenerating) void refreshContextState(); }, [contextKey, isGenerating]);
   // The context view belongs to one branch; another chat or branch starts on its transcript.
-  useEffect(() => { setContextViewOpen(false); setContextSummaryEditing(false); }, [contextKey]);
+  // Another chat or branch: its own scroll handling takes over, nothing is restored.
+  useEffect(() => { contextViewOpenRef.current = false; viewSwitchRef.current = undefined; setContextViewOpenState(false); setContextSummaryEditing(false); }, [contextKey]);
+  useLayoutEffect(() => {
+    const change = viewSwitchRef.current, element = threadRef.current;
+    viewSwitchRef.current = undefined;
+    if (!change || !element || change.toContext !== contextViewOpen) return;
+    if (change.toContext) {
+      if (!alignThreadAnchor(element, "data-context-message-id", change.anchor)) element.scrollTop = 0;
+      return;
+    }
+    // Back in the chat: the message read last in the context view, else the place the chat was left.
+    const place = change.chat;
+    if (!alignThreadAnchor(element, "data-message-id", change.anchor)) {
+      if (!place || place.atBottom) element.scrollTop = element.scrollHeight;
+      else if (!alignThreadAnchor(element, "data-message-id", place)) element.scrollTop = place.scrollTop;
+    }
+    const following = isNearScrollBottom(element);
+    autoFollowThreadRef.current = following;
+    setThreadAutoFollow(following);
+  }, [contextViewOpen]);
   const saveContextState = async (state: ContextState) => {
     if (!conversation || !activeBranch) return false;
     const key = `${conversation.id}:${activeBranch.id}`;
@@ -882,6 +953,19 @@ export default function Home() {
   }, [overheadKey, isGenerating, config.preferences.language]);
   // A stale estimate (other tools or chat) is not shown; the last reply's own record stands in until the new one comes.
   const overhead = requestOverhead && requestOverhead.key === overheadKey ? requestOverhead.value : undefined;
+  // Agent chat: the subagent run behind each notice (its own link) and behind each reply the agent wrote on its own
+  // (the subagent result it answered, which the chat does not show).
+  const agentRunOf = useMemo(() => {
+    const runs = new Map<string, string>();
+    if (!agentOpen) return runs;
+    let pending: string | undefined;
+    for (const message of messages) {
+      if (message.role === "user") pending = message.agentKind === "context" ? message.agentRunId ?? pending : undefined;
+      else if (message.agentKind === "notice") { if (message.agentRunId) runs.set(message.id, message.agentRunId); }
+      else { if (pending) runs.set(message.id, pending); pending = undefined; }
+    }
+    return runs;
+  }, [agentOpen, messages]);
   const contextBreakdown = useMemo(() => contextUsage(messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length, branchContext, overhead), [messages, rememberReasoning, draft, selectedSystemPrompt, draftAttachments.length, branchContext, overhead]);
   const messageRevisions = useMemo(() => {
     const groups = new Map<string, Map<string, MessageRevision>>();
@@ -1794,7 +1878,7 @@ export default function Home() {
                 {contextViewOpen ? <ContextView ko={locale === "ko"} messages={messages} state={branchContext} includeReasoning={rememberReasoning} systemPrompt={selectedSystemPrompt} summaryEditing={contextSummaryEditing} setSummaryEditing={setContextSummaryEditing} onSave={saveContextState} confirm={askConfirm} onClose={() => setContextViewOpen(false)} /> : <>
                 {agentOpen && !visibleTranscript.length && <div className="agent-empty welcome"><h1>{locale === "ko" ? "무엇을 맡길까요?" : "What should I take care of?"}</h1><p>{locale === "ko" ? "일정·메일 확인, 알림 예약, 사이트·채널 추적처럼 계속 돌봐야 하는 일을 맡겨 보세요." : "Hand over ongoing work: checking schedules and mail, reminders, watching sites and channels."}</p></div>}
                 {hiddenMessageCount > 0 && <button className="load-earlier" onClick={loadEarlierMessages}>{c.loadEarlier} · {hiddenMessageCount}</button>}
-                {renderedMessages.map((message) => <Message onToolInput={submitToolInput} agentMode={agentOpen} c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} waitStartedAt={pendingWait?.messageId === message.id ? pendingWait.startedAt : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={editUserRequest} onEditAssistant={editAssistantResponse} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
+                {renderedMessages.map((message) => <Message onToolInput={submitToolInput} agentMode={agentOpen} agentRunId={agentRunOf.get(message.id)} c={c} locale={locale} key={message.id} message={message} waitProgress={pendingWait?.messageId === message.id ? pendingWait.progress : undefined} waitPhase={isGenerating && pendingWait?.messageId === message.id ? pendingWait.phase : undefined} waitStartedAt={pendingWait?.messageId === message.id ? pendingWait.startedAt : undefined} renderStrikethrough={config.preferences.renderStrikethrough !== false} appearance={appearance} pending={isGenerating && message.id === messages[messages.length - 1]?.id} revisions={messageRevisions.get(message.revisionGroupId || message.id) || []} onFork={editUserRequest} onEditAssistant={editAssistantResponse} onEditArtifact={(eventId,artifact)=>void editArtifact(message.id,eventId,artifact)} onRegenerate={regenerateAssistantMessage} onRegenerateUser={regenerateUserMessage} onDeleteUser={deleteUserMessage} onRevision={(branchId) => void switchBranch(branchId)} />)}
                 {manualCompaction && manualCompaction.key === `${conversation?.id}:${activeBranch?.id}` && <div className="message-row assistant-message manual-compaction"><CompactionStep c={c} locale={locale} step={manualCompaction.step} live={manualCompaction.live} /></div>}
                 </>}
               </div>
@@ -1856,7 +1940,7 @@ function ContextWindowIndicator({ c, locale, model, models, usage, includeReason
   const maximum = contextUsageDisplayLimitTokens(model, models, harnessSettings);
   const percentage = maximum ? usage.total / maximum * 100 : 0;
   const percentageLabel = percentage > 0 && percentage < .1 ? "<0.1%" : `${percentage.toFixed(1)}%`;
-  const estimateLabel = locale === "ko" ? "컨텍스트 사용량 추정" : "Estimated context usage";
+  const estimateLabel = usage.calibration ? (locale === "ko" ? "컨텍스트 사용량" : "Context usage") : (locale === "ko" ? "컨텍스트 사용량 추정" : "Estimated context usage");
   const detail = maximum ? `${estimateLabel}: ${formatTokens(usage.total, locale)} / ${formatTokens(maximum, locale)} · ${percentageLabel}` : `${estimateLabel}: ${formatTokens(usage.total, locale)} · ${c.contextUnavailable}`;
   return <div className={`context-indicator ${open ? "open" : ""}`}>
     <button type="button" className="context-trigger" aria-label={detail} aria-expanded={open} onClick={() => { if (!open) onOpen?.(); setOpen(!open); }} onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }} onBlur={() => setOpen(false)}>
@@ -1872,7 +1956,7 @@ function ContextWindowIndicator({ c, locale, model, models, usage, includeReason
         [locale === "ko" ? "도구" : "Tools", usage.tools],
         ...(usage.definitions ? [[locale === "ko" ? "도구 정의" : "Tool definitions", usage.definitions] as const] : []),
         ...(usage.summary ? [[locale === "ko" ? "압축 요약" : "Compacted", usage.summary] as const] : []),
-      ] as const).map(([label, value]) => <span key={label}><span>{label}</span><b>{formatTokens(value, locale)}</b></span>)}<small>{locale === "ko" ? `대화·작성 중 입력 기준 추정치 · 추론 ${includeReasoning ? "포함" : "제외"}. ${usage.summary ? "압축된 요약이 이전 대화를 대신하고 있습니다." : "실제 전송 시 컨텍스트 정리가 적용될 수 있습니다."}` : `History and draft estimate · reasoning ${includeReasoning ? "included" : "excluded"}. ${usage.summary ? "A compacted summary now stands in for the earlier turns." : "Context handling may reduce the actual request."}`}</small></span>}
+      ] as const).map(([label, value]) => <span key={label}><span>{label}</span><b>{formatTokens(value, locale)}</b></span>)}<small>{locale === "ko" ? `${usage.calibration ? "마지막 응답의 실제 토큰 수로 보정한 값" : "대화·작성 중 입력 기준 추정치"} · 추론 ${includeReasoning ? "포함" : "제외"}. ${usage.summary ? "압축된 요약이 이전 대화를 대신하고 있습니다." : "실제 전송 시 컨텍스트 정리가 적용될 수 있습니다."}` : `${usage.calibration ? "Calibrated with the last reply's real token count" : "History and draft estimate"} · reasoning ${includeReasoning ? "included" : "excluded"}. ${usage.summary ? "A compacted summary now stands in for the earlier turns." : "Context handling may reduce the actual request."}`}</small></span>}
       {open && cache && <span className="context-cache" aria-live="polite"><span><span>{locale === "ko" ? "캐시 유지 시간" : "Prompt cache"}</span><b>{cacheLeftMs <= 0 ? (locale === "ko" ? "만료됨" : "Expired") : cacheMinutes <= 1 && cacheLeftMs < 60_000 ? (locale === "ko" ? "1분 미만" : "Under 1 min") : (locale === "ko" ? `${cacheMinutes}분 남음` : `${cacheMinutes} min left`)}</b></span><small>{cacheLeftMs <= 0 ? (locale === "ko" ? `${cache.label}의 캐시가 만료되었습니다. 다음 요청은 캐시 없이 처리되거나 다른 공급자로 갈 수 있습니다.` : `The cache on ${cache.label} has expired. The next request may run without it or go to another provider.`) : (locale === "ko" ? `${cache.label} · 캐시 TTL ${cache.totalSeconds ? Math.round(cache.totalSeconds / 60) + "분" : "알 수 없음"} · 요청마다 처음부터 다시 셉니다` : `${cache.label} · cache TTL ${cache.totalSeconds ? Math.round(cache.totalSeconds / 60) + " min" : "unknown"} · restarts with each request`)}</small></span>}
     </span>
   </div>;
@@ -2183,6 +2267,57 @@ function responseTimings(message: StoredMessage) {
   return { prompt: message.promptProcessingSeconds || 0, reasoning, tools, total: message.totalDurationSeconds || 0 };
 }
 
+/** When an agent message reached the person: a reply when it finished, a notice when it was posted. */
+function AgentMessageTime({ locale, message }: { locale: Locale; message: StoredMessage }) {
+  const started = Date.parse(message.createdAt);
+  if (!Number.isFinite(started)) return null;
+  const at = new Date(started + (message.agentKind === "notice" ? 0 : (message.totalDurationSeconds || 0) * 1000));
+  const today = new Date().toDateString() === at.toDateString();
+  const time = at.toLocaleTimeString(locale === "ko" ? "ko-KR" : "en-US", { hour: "numeric", minute: "2-digit" });
+  const label = today ? time : `${at.toLocaleDateString(locale === "ko" ? "ko-KR" : "en-US", { month: "short", day: "numeric" })} ${time}`;
+  return <time className="agent-message-time" dateTime={at.toISOString()} title={at.toLocaleString(locale === "ko" ? "ko-KR" : "en-US", { dateStyle: "full", timeStyle: "medium" })}>{label}</time>;
+}
+
+function runDuration(seconds: number, ko: boolean) {
+  if (seconds < 60) return ko ? `${Math.round(seconds)}초` : `${Math.round(seconds)} s`;
+  const minutes = Math.floor(seconds / 60), rest = Math.round(seconds % 60);
+  if (minutes < 60) return ko ? `${minutes}분 ${rest}초` : `${minutes} min ${rest} s`;
+  return ko ? `${Math.floor(minutes / 60)}시간 ${minutes % 60}분` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+}
+
+type AgentRunSummary = { title: string; status: string; modelName?: string; inputTokens?: number; outputTokens?: number; startedAt?: string; finishedAt?: string };
+const agentRunSummaries = new Map<string, Promise<AgentRunSummary | undefined>>();
+
+/** The subagent behind an agent message the person did not ask for: its model, how long it worked, its tokens. */
+function AgentRunStats({ locale, runId }: { locale: Locale; runId: string }) {
+  const [run, setRun] = useState<AgentRunSummary | null>();
+  const ko = locale === "ko";
+  const load = () => {
+    if (run) return;
+    // A run that is still going is asked again next time; a finished one is kept for the session.
+    let request = agentRunSummaries.get(runId);
+    if (!request) {
+      request = fetch(`/api/agent/runs/${encodeURIComponent(runId)}?summary=1`, { cache: "no-store" }).then(response => response.ok ? response.json() as Promise<{ run: AgentRunSummary }> : undefined).then(body => body?.run).catch(() => undefined);
+      agentRunSummaries.set(runId, request);
+    }
+    void request.then(value => { setRun(value ?? null); if (!value?.finishedAt) agentRunSummaries.delete(runId); });
+  };
+  const seconds = run?.startedAt ? ((run.finishedAt ? Date.parse(run.finishedAt) : Date.now()) - Date.parse(run.startedAt)) / 1000 : undefined;
+  const tokens = run && (run.inputTokens !== undefined || run.outputTokens !== undefined)
+    ? `${formatTokens((run.inputTokens || 0) + (run.outputTokens || 0), locale)} (${ko ? "입력" : "in"} ${formatTokens(run.inputTokens || 0, locale)} · ${ko ? "출력" : "out"} ${formatTokens(run.outputTokens || 0, locale)})` : undefined;
+  return <small className="message-token-stats agent-run-stats" onMouseEnter={load} onFocus={load}>
+    <span className="token-rate" tabIndex={0} aria-label={ko ? "서브에이전트 작업 내역" : "Subagent work"}><span><Bot size={12} /> {ko ? "서브에이전트" : "Subagent"}</span>
+      <span className="token-rate-tooltip" role="tooltip">
+        {run === undefined ? <small>{ko ? "불러오는 중…" : "Loading…"}</small> : run === null ? <small>{ko ? "작업 기록을 찾을 수 없습니다" : "The run could not be found"}</small> : <>
+          <strong>{run.title}</strong>
+          <small className="token-model"><span>{ko ? "모델" : "Model"}</span><b>{run.modelName || (ko ? "기록 없음" : "Not recorded")}</b></small>
+          <small><span>{ko ? "소요 시간" : "Time"}</span><b>{seconds !== undefined && Number.isFinite(seconds) ? `${runDuration(Math.max(0, seconds), ko)}${run.finishedAt ? "" : (ko ? " (진행 중)" : " (running)")}` : "—"}</b></small>
+          <small><span>{ko ? "토큰" : "Tokens"}</span><b>{tokens || (ko ? "기록 없음" : "Not recorded")}</b></small>
+        </>}
+      </span></span>
+  </small>;
+}
+
 function MessageTokenStats({ c, locale, message }: { c: CopySet; locale: Locale; message: StoredMessage }) {
   const rate = message.outputTokens !== undefined && message.completionDurationSeconds && message.completionDurationSeconds > 0
     ? message.outputTokens / message.completionDurationSeconds
@@ -2410,7 +2545,7 @@ function ChatMarkdown({ text, c, renderStrikethrough, onImagePreview, fadeDurati
   return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: true }], remarkMath]} rehypePlugins={[rehypeKatex]} components={components}>{text}</ReactMarkdown>;
 }
 
-function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, renderStrikethrough, appearance, pending, revisions, onFork, onEditAssistant,onEditArtifact, onRegenerate, onRegenerateUser, onDeleteUser, onRevision, onToolInput, agentMode = false }: { onToolInput?: (toolCallId: string, value: unknown) => Promise<boolean>; agentMode?: boolean; c: CopySet; locale: Locale; message: StoredMessage; waitPhase?: ChatWaitPhase; waitStartedAt?: number; waitProgress?: number; renderStrikethrough: boolean; appearance: AppearancePreferences; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void;onEditArtifact:(eventId:string,artifact:ArtifactDocument)=>void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
+function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, renderStrikethrough, appearance, pending, revisions, onFork, onEditAssistant,onEditArtifact, onRegenerate, onRegenerateUser, onDeleteUser, onRevision, onToolInput, agentMode = false, agentRunId }: { onToolInput?: (toolCallId: string, value: unknown) => Promise<boolean>; agentMode?: boolean; agentRunId?: string; c: CopySet; locale: Locale; message: StoredMessage; waitPhase?: ChatWaitPhase; waitStartedAt?: number; waitProgress?: number; renderStrikethrough: boolean; appearance: AppearancePreferences; pending: boolean; revisions: MessageRevision[]; onFork: (id: string, text: string) => void; onEditAssistant: (id: string, text: string) => void;onEditArtifact:(eventId:string,artifact:ArtifactDocument)=>void; onRegenerate: (id: string) => void; onRegenerateUser: (id: string) => void; onDeleteUser: (id: string) => void; onRevision: (branchId: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [imagePreview,setImagePreview]=useState<{src:string;alt:string}>();
@@ -2433,7 +2568,7 @@ function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, r
   const promptStageStartedAt = pending && waitPhase === "processing-prompt" && lastReasoningIndex >= 0 && !steps.slice(lastReasoningIndex + 1).some(step => step.kind === "content") ? waitStartedAt ?? Date.now() : undefined;
   const wholeReasoning = reasoningStepIsWhole(message);
   const waitStatus = pending && waitPhase ? <div className="chat-wait-status" role="status" aria-live="polite">{waitProgress !== undefined && ["donut", "both"].includes(appearance.lmStudioProgress) ? <svg className="status-donut" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" /><circle cx="10" cy="10" r="8" pathLength="100" strokeDasharray={`${waitProgress} 100`} /></svg> : <LoaderCircle className="spin" size={16} />}<span>{waitPhase === "processing-prompt" ? <PromptWaitLabel locale={locale} startedAt={waitStartedAt} /> : chatWaitLabel(waitPhase, locale)}{waitProgress !== undefined && ["percent", "both"].includes(appearance.lmStudioProgress) && <span className="status-percent"> {waitProgress}%</span>}</span></div> : null;
-  return <div className="message-row assistant-message long-press-target" {...longPress}>
+  return <div className="message-row assistant-message long-press-target" data-message-id={message.id} {...longPress}>
     {message.attachments?.length ? <AssistantAttachmentGallery attachments={message.attachments} /> : null}
     {steps.map((step, index) => {
       if (step.kind === "reasoning") return <ReasoningStep key={index} c={c} locale={locale} text={wholeReasoning ? displayedReasoning : step.text} seconds={step.seconds} startedAt={step.startedAt} promptSeconds={step.promptSeconds} promptStageStartedAt={index === lastReasoningIndex ? promptStageStartedAt : undefined} appearance={appearance} live={pending && Boolean(step.live)} />;
@@ -2455,7 +2590,7 @@ function Message({ c, locale, message, waitPhase, waitStartedAt, waitProgress, r
     {waitStatus}
     {!steps.length && (pending && !waitingForChoice && !waitPhase ? <div className="assistant-copy markdown-body"><span className="typing"><i /><i /><i /></span></div> : null)}
     {editing && <TextDialog ko={locale === "ko"} title={c.editResponse} value={message.content} multiline saveLabel={c.saveEdit} saveIcon={<Check size={14} />} cancelLabel={c.cancel} onClose={() => setEditing(false)} onSave={(value) => { onEditAssistant(message.id, value); setEditing(false); }} />}
-    {!pending && <div className="assistant-footer"><div className="assistant-actions">{agentMode && message.agentKind === "notice" && <span className="agent-notice-badge"><BellRing size={12} />{locale === "ko" ? "에이전트 알림" : "Agent notice"}</span>}{!agentMode && <button className="message-action-button" title={c.regenerate} aria-label={c.regenerate} onClick={() => onRegenerate(message.id)}><RefreshCw size={14} /></button>}{message.content && <button className="message-action-button" title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={14} /></button>}{!agentMode && <button className="message-action-button" title={c.editResponse} aria-label={c.editResponse} onClick={() => setEditing(true)}><Pencil size={14} /></button>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} /><MessageTokenStats c={c} locale={locale} message={message} /></div>}
+    {!pending && <div className="assistant-footer"><div className="assistant-actions">{agentMode && <AgentMessageTime locale={locale} message={message} />}{!agentMode && <button className="message-action-button" title={c.regenerate} aria-label={c.regenerate} onClick={() => onRegenerate(message.id)}><RefreshCw size={14} /></button>}{message.content && <button className="message-action-button" title={c.copy} aria-label={c.copy} onClick={() => void copyTextToClipboard(message.content)}><Copy size={14} /></button>}{!agentMode && <button className="message-action-button" title={c.editResponse} aria-label={c.editResponse} onClick={() => setEditing(true)}><Pencil size={14} /></button>}{agentMode && message.agentKind === "notice" && <span className="agent-notice-badge"><BellRing size={12} />{locale === "ko" ? "에이전트 알림" : "Agent notice"}</span>}</div><RevisionNavigator c={c} messageId={message.id} revisions={revisions} onRevision={onRevision} />{agentMode && agentRunId && <AgentRunStats locale={locale} runId={agentRunId} />}<MessageTokenStats c={c} locale={locale} message={message} /></div>}
     {actions}{imagePreview&&<ImageLightbox src={imagePreview.src} alt={imagePreview.alt} onClose={()=>setImagePreview(undefined)}/>}
   </div>;
 }

@@ -11,6 +11,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const user = requireUser(request); const { id } = await context.params;
     const run = getAgentRun(user.id, id);
     if (!run) return Response.json({ error: "Run not found." }, { status: 404 });
+    // The hover card on an agent message needs only the run's own record.
+    if (new URL(request.url).searchParams.get("summary") === "1") return Response.json({ run });
     const conversation = run.conversationId ? await readConversation(run.conversationId, user.id) : null;
     // Periodic runs can share one chat (and its LMF session); show only this run's part of it.
     if (conversation && run.startedAt) {

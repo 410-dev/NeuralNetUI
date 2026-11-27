@@ -165,7 +165,7 @@ const toolSource = agentToolSource({
     markAgentChanged(userId); void pumpRuns();
     return { id: run.id, status: run.status };
   },
-  notifyUser: async (userId, input) => { await postToMain(userId, { content: input.message.trim().slice(0, 20_000), kind: "notice" }); },
+  notifyUser: async (userId, input) => { await postToMain(userId, { content: input.message.trim().slice(0, 20_000), kind: "notice", runId: input.runId }); },
 });
 
 // ------------------------------------------------------------------ the main chat
@@ -183,9 +183,9 @@ function mainBusy(profile: AgentProfile) {
  * Adds to the main chat: a notice the person sees, or a context message only the model reads (which also starts a
  * turn so the agent can respond). While a reply is being written, additions wait and follow it.
  */
-export async function postToMain(userId: string, input: { content: string; kind: "notice" | "context" | "user"; attachments?: StoredMessage["attachments"]; prefix?: string }) {
+export async function postToMain(userId: string, input: { content: string; kind: "notice" | "context" | "user"; attachments?: StoredMessage["attachments"]; prefix?: string; runId?: string }) {
   if (!input.content.trim() && !input.attachments?.length) return;
-  const message: StoredMessage = { id: id("msg"), role: input.kind === "notice" ? "assistant" : "user", content: input.content, createdAt: nowIso(), ...(input.prefix ? { contextPrefix: input.prefix } : {}), ...(input.kind === "user" ? {} : { agentKind: input.kind }), ...(input.attachments?.length ? { attachments: input.attachments } : {}) };
+  const message: StoredMessage = { id: id("msg"), role: input.kind === "notice" ? "assistant" : "user", content: input.content, createdAt: nowIso(), ...(input.prefix ? { contextPrefix: input.prefix } : {}), ...(input.runId ? { agentRunId: input.runId } : {}), ...(input.kind === "user" ? {} : { agentKind: input.kind }), ...(input.attachments?.length ? { attachments: input.attachments } : {}) };
   const pending = state.pending.get(userId) ?? { messages: [], trigger: false, autonomous: true };
   pending.messages.push(message);
   if (input.kind !== "notice") pending.trigger = true;
@@ -208,9 +208,10 @@ export function flushMain(userId: string): Promise<void> {
     branch.updatedAt = conversation.updatedAt = nowIso();
     const saved = await writeConversation(conversation, userId);
     markAgentChanged(userId);
-    if (pending.trigger) await startMainTurn(profile, saved, pending.autonomous).catch(async error => {
+    if (pending.trigger) await startMainTurn(profile, saved, pending.autonomous).catch(error => {
       console.error("Agent turn failed to start", error);
-      await postToMain(userId, { content: `${ko(profile.settings) ? "에이전트가 응답을 시작하지 못했습니다" : "The agent could not start a reply"}: ${error instanceof Error ? error.message : String(error)}`, kind: "notice" });
+      // Not awaited: posting goes through this same queue, which is still busy with this step (awaiting it deadlocked).
+      void postToMain(userId, { content: `${ko(profile.settings) ? "에이전트가 응답을 시작하지 못했습니다" : "The agent could not start a reply"}: ${error instanceof Error ? error.message : String(error)}`, kind: "notice" });
     });
   });
 }
@@ -380,16 +381,17 @@ async function startRunJob(run: AgentRun, profile: AgentProfile, conversationId:
   }, userId, userRole(userId), { agent: options });
 }
 
-async function finishRun(run: AgentRun, result: { status: string; content: string; error?: string }) {
+async function finishRun(run: AgentRun, result: { status: string; content: string; error?: string; usage?: { input: number; output: number }; modelName?: string }) {
   const status = result.status === "completed" ? "completed" : result.status === "stopped" ? "cancelled" : "failed";
-  updateAgentRun(run.id, { status, result: result.content.slice(0, 40_000) || undefined, error: result.error, finishedAt: nowIso() });
+  updateAgentRun(run.id, { status, result: result.content.slice(0, 40_000) || undefined, error: result.error, finishedAt: nowIso(),
+    ...(result.modelName ? { modelName: result.modelName } : {}), ...(result.usage ? { inputTokens: result.usage.input, outputTokens: result.usage.output } : {}) });
   markAgentChanged(run.userId);
   const profile = readAgentProfile(run.userId);
   void settleRunSession(getAgentRun(run.userId, run.id) ?? run).catch(error => console.warn("Unable to settle a subagent session", error instanceof Error ? error.message : error));
   // Work the person asked for always comes back to the main agent; automatic runs speak through notify_user.
   if (profile && run.report === "always" && status !== "cancelled") {
     const label = ko(profile.settings) ? (status === "completed" ? "완료" : "실패") : status;
-    await postToMain(run.userId, { content: `[Subagent result · ${run.title} · ${label}]\n${(status === "completed" ? result.content : result.error || result.content || "").slice(0, 12_000)}`, kind: "context", prefix: clockLine(profile.settings, "returned") });
+    await postToMain(run.userId, { content: `[Subagent result · ${run.title} · ${label}]\n${(status === "completed" ? result.content : result.error || result.content || "").slice(0, 12_000)}`, kind: "context", prefix: clockLine(profile.settings, "returned"), runId: run.id });
   }
   void pumpRuns();
 }

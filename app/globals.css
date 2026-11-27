@@ -988,7 +988,9 @@ button.usage-lmf-name:hover { color:#fff; }
 .account-card .save-button { width: max-content; min-height: 38px; padding: 0 18px; }
 .sign-out-button { min-height: 40px; display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 0 17px; border: 1px solid var(--danger-line); border-radius: var(--radius-pill); color: var(--danger); background: var(--danger-soft); }
 .toggle:disabled, .preset-editor input:disabled, .preset-editor select:disabled, .preset-editor textarea:disabled { cursor: not-allowed; opacity: .5; }
-.thread .message-row { content-visibility: auto; contain-intrinsic-size: 120px; }
+/* "auto" keeps each row's last rendered height. Without it, a row switched back from content-visibility: visible (after
+   hovering its token stats) was laid out at the 120px placeholder for a moment and the thread jumped up by the difference. */
+.thread .message-row { content-visibility: auto; contain-intrinsic-size: auto 120px; }
 .thread .message-row:has(.token-rate:hover),
 .thread .message-row:has(.token-rate:focus-visible) { position: relative; z-index: 2; content-visibility: visible; }
 
@@ -2141,7 +2143,10 @@ select:focus-visible {
 .agent-empty { margin: auto 0; padding: 12vh 0 4vh; text-align: center; }
 .agent-reset-link { align-self: flex-start; margin-top: 6px; padding: 0 2px; background: none; color: var(--dim); font-size: 10.5px; text-decoration: underline; text-underline-offset: 2px; }
 .agent-reset-link:hover { color: var(--muted); }
-.agent-notice-badge { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; padding: 2px 8px; border-radius: var(--radius-pill); color: #e0a84a; background: rgba(224,168,74,.12); font-size: 10.5px; }
+.agent-message-time { margin-right: 4px; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.agent-run-stats .token-rate > span:first-child { display: inline-flex; align-items: center; gap: 4px; }
+.agent-run-stats + .message-token-stats { margin-left: 10px; }
+.agent-notice-badge { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; padding: 2px 8px; border-radius: var(--radius-pill); color: #e0a84a; background: rgba(224,168,74,.12); font-size: 10.5px; }
 .agent-dialog.wide { width: min(820px, 100%); }
 .agent-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .agent-dialog-title { display: flex; align-items: center; gap: 8px; }

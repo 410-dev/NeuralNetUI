@@ -2,7 +2,9 @@ import { estimateTokens } from "./harness.ts";
 import type { StoredMessage } from "./types.ts";
 import { applyContextState, type ContextState } from "./context-state.ts";
 
-export type ContextUsage = { input: number; response: number; reasoning: number; tools: number; summary: number; definitions: number; total: number };
+export type ContextUsage = { input: number; response: number; reasoning: number; tools: number; summary: number; definitions: number; total: number;
+  /** Set when the estimated parts were scaled by a reply's real context: the factor applied. */
+  calibration?: number };
 const count = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
 const estimate = (text: string | undefined) => text ? estimateTokens(text) : 0;
 
@@ -36,13 +38,34 @@ function compactionBoundary(messages: StoredMessage[]): { start: number; summary
  * Output counters include reasoning; upstream input counters already include history and must
  * never be summed across turns. Attachments/formatting and untokenized text are estimates.
  */
-export function contextUsage(messages: StoredMessage[], includeReasoning: boolean, draft = "", systemPrompt = "", draftAttachments = 0, state?: ContextState, overhead?: RequestOverhead): ContextUsage {
-  const usage = state ? stateUsage(messages, includeReasoning, draft, systemPrompt, draftAttachments, state) : historyUsage(messages, includeReasoning, draft, systemPrompt, draftAttachments);
-  if (!overhead) return usage;
-  // The server's estimate for the tools switched on now wins over what the last reply carried.
-  const definitions = overhead.definitions ?? usage.definitions;
-  const input = usage.input + (overhead.system || 0);
-  return { ...usage, input, definitions, total: input + usage.response + usage.reasoning + usage.tools + usage.summary + definitions };
+export function contextUsage(messages: StoredMessage[], includeReasoning: boolean, draft = "", systemPrompt = "", draftAttachments = 0, state?: ContextState, overhead?: RequestOverhead, calibrate = true): ContextUsage {
+  let usage = state ? stateUsage(messages, includeReasoning, draft, systemPrompt, draftAttachments, state) : historyUsage(messages, includeReasoning, draft, systemPrompt, draftAttachments);
+  if (overhead) {
+    // The server's estimate for the tools switched on now wins over what the last reply carried.
+    const definitions = overhead.definitions ?? usage.definitions;
+    const input = usage.input + (overhead.system || 0);
+    usage = { ...usage, input, definitions, total: input + usage.response + usage.reasoning + usage.tools + usage.summary + definitions };
+  }
+  return calibrate ? calibrated(usage, messages) : usage;
+}
+
+/** How far the factor may move the estimate: beyond this the record is more likely wrong than the estimate. */
+const CALIBRATION_RANGE = [0.4, 4] as const;
+
+/**
+ * After a reply, the server knows the conversation's real size; the donut's estimate of that same history is stored
+ * next to it (StoredMessage.contextCalibration). The ratio between them corrects what is estimated now: unchanged
+ * history reads the real figure, and later messages, the draft, compaction or context edits move it at the same rate.
+ * Token counters (answers, reasoning) are real already and stay as they are.
+ */
+export function calibrated(usage: ContextUsage, messages: StoredMessage[]): ContextUsage {
+  const record = messages.findLast(message => message.role === "assistant" && message.contextCalibration)?.contextCalibration;
+  if (!record || record.estimated <= 0) return usage;
+  const factor = (record.real - record.counted) / record.estimated;
+  if (!Number.isFinite(factor) || factor < CALIBRATION_RANGE[0] || factor > CALIBRATION_RANGE[1]) return usage;
+  const scale = (value: number) => Math.round(value * factor);
+  const input = scale(usage.input), tools = scale(usage.tools), summary = scale(usage.summary), definitions = scale(usage.definitions);
+  return { ...usage, input, tools, summary, definitions, total: input + usage.response + usage.reasoning + tools + summary + definitions, calibration: factor };
 }
 
 /** Sent with every request besides the conversation, as the server estimates it (see /api/chat/overhead). */

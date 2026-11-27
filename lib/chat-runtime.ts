@@ -109,13 +109,15 @@ export type AgentJobOptions = {
   /** A running tool call is cancelled after this long (time spent waiting for approval does not count). */
   toolTimeoutMs?: number;
   /** Called once when the reply ends, however it ends. `looped` means it was stopped for repeating itself and discarded. */
-  onSettled?: (result: { status: JobStatus; content: string; error?: string; looped?: boolean }) => void;
+  onSettled?: (result: { status: JobStatus; content: string; error?: string; looped?: boolean; usage?: { input: number; output: number }; modelName?: string }) => void;
 };
 
 type ChatJob = {
   agent?: AgentJobOptions;
   /** Set when an agent reply was stopped for repeating itself: it is dropped from the chat so it can be regenerated. */
   agentLoop?: RepetitionFinding;
+  /** Tokens every request of this reply used, as the server reported them (input includes cache reads). */
+  usageTotals?: { input: number; output: number };
   /** One controller per running tool call, so a single call can be cancelled without stopping the reply. */
   toolAborts?: Map<string, { controller: AbortController; reason?: string }>;
   /** Set for LMFuseFramework connections: the session this chat continues, created on the first turn. */
@@ -850,6 +852,7 @@ async function run(job: ChatJob) {
       }
       reasoningSeconds += result.reasoningDurationSeconds;
       recordTokenUsage(job.userId,chargeModelId,result.chargedUsage.inputTokens,result.chargedUsage.outputTokens);
+      job.usageTotals = { input: (job.usageTotals?.input || 0) + (result.usage.inputTokens || 0), output: (job.usageTotals?.output || 0) + (result.usage.outputTokens || 0) };
       // A routing model names the provider and model that actually answered this turn.
       if (job.lmf?.sessionId && base.routerModel) {
         const routed = await routedModelLabel(job.lmf.connection, headers, job.lmf.sessionId, base).catch(() => undefined);
@@ -897,6 +900,18 @@ async function run(job: ChatJob) {
         job.message = { ...job.message, ...(toolEvents ? { toolEvents } : {}), ...result.usage, contextTokens: (contextInput ?? estimateTokens(messages)) + (result.usage.outputTokens ?? estimateTokens(result.content)), reasoningDurationSeconds: job.message.reasoning ? Math.max(1, reasoningSeconds) : undefined,
           completionDurationSeconds: result.visibleDurationSeconds,
           timeToFirstTokenSeconds: Math.max(0, (performance.now() - requestStartedAt - (result.visibleDurationSeconds || 0) * 1000) / 1000) };
+        // The donut calibrates its estimate with this reply's real context (see StoredMessage.contextCalibration).
+        if (contextInput) {
+          try {
+            const reasoningDropped = job.input.sendReasoning ? 0 : result.usage.reasoningTokens || 0;
+            const real = contextInput + Math.max(0, (result.usage.outputTokens || 0) - reasoningDropped);
+            const stateNow = loadContextState(job.input.branchId);
+            const history = conversationWithMessage(job).branches.find(branch => branch.id === job.input.branchId)?.messages || [];
+            const estimate = contextUsage(history, job.input.sendReasoning === true, "", systemPrompt, 0, stateNow, { definitions: tools.length ? estimateTokens(tools) : 0 }, false);
+            const counted = estimate.response + estimate.reasoning;
+            if (estimate.total > counted) job.message = { ...job.message, contextCalibration: { real, estimated: estimate.total - counted, counted } };
+          } catch (error) { console.warn("Context calibration skipped:", error); }
+        }
         releaseModel?.(); releaseModel = undefined;
         if (harness.titleTiming === "after") await generateTitle();
         trackPhase(job); stampTotalDuration(job); job.waitPhase = undefined; job.waitProgress = undefined; job.status = "completed"; await persist(job); broadcast(job, true); finishSubscribers(job); return;
@@ -953,7 +968,7 @@ async function run(job: ChatJob) {
     await persist(job).catch(() => undefined); broadcast(job, true); finishSubscribers(job);
   } finally {
     if (!job.agent) releasePlanAdmission(job.userId);
-    try { job.agent?.onSettled?.({ status: job.status, content: job.message.content, error: job.error, looped: Boolean(job.agentLoop) }); }
+    try { job.agent?.onSettled?.({ status: job.status, content: job.message.content, error: job.error, looped: Boolean(job.agentLoop), usage: job.usageTotals, modelName: job.message.routedModel || job.message.modelName }); }
     catch (error) { console.error("Agent settle handler failed", error); }
     releaseModel?.();
     releaseRoute?.();

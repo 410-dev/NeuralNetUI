@@ -39,7 +39,9 @@ export type AgentItemKind = "todo" | "event" | "memory";
 export type AgentItem = { id: string; kind: AgentItemKind; title: string; body?: string; status?: string; startsAt?: string; endsAt?: string; createdAt: string; updatedAt: string };
 export type AgentSchedule = { id: string; kind: "once" | "recurring"; title: string; instructions: string; nextRunAt?: string; intervalMinutes?: number; enabled: boolean; lastRunAt?: string; createdAt: string; updatedAt: string };
 export type AgentRunStatus = "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled";
-export type AgentRun = { id: string; userId: string; conversationId?: string; kind: "task" | "heartbeat" | "schedule"; scheduleId?: string; title: string; instructions: string; report: "always" | "if_needed"; status: AgentRunStatus; result?: string; error?: string; createdAt: string; startedAt?: string; finishedAt?: string };
+export type AgentRun = { id: string; userId: string; conversationId?: string; kind: "task" | "heartbeat" | "schedule"; scheduleId?: string; title: string; instructions: string; report: "always" | "if_needed"; status: AgentRunStatus; result?: string; error?: string; createdAt: string; startedAt?: string; finishedAt?: string;
+  /** The model that did the work, and the tokens its requests used (input includes cache reads), once the run ends. */
+  modelName?: string; inputTokens?: number; outputTokens?: number };
 
 const now = () => new Date().toISOString();
 const optional = <T>(value: T | null | undefined) => value ?? undefined;
@@ -218,8 +220,8 @@ export function advanceAgentSchedule(id: string, at = Date.now()) {
 }
 
 // ---------------------------------------------------------------- subagent runs
-type RunRow = { id: string; user_id: string; conversation_id: string | null; kind: AgentRun["kind"]; schedule_id: string | null; title: string; instructions: string; report: AgentRun["report"]; status: AgentRunStatus; result: string | null; error: string | null; created_at: string; started_at: string | null; finished_at: string | null };
-const run = (row: RunRow): AgentRun => ({ id: row.id, userId: row.user_id, conversationId: optional(row.conversation_id), kind: row.kind, scheduleId: optional(row.schedule_id), title: row.title, instructions: row.instructions, report: row.report, status: row.status, result: optional(row.result), error: optional(row.error), createdAt: row.created_at, startedAt: optional(row.started_at), finishedAt: optional(row.finished_at) });
+type RunRow = { id: string; user_id: string; conversation_id: string | null; kind: AgentRun["kind"]; schedule_id: string | null; title: string; instructions: string; report: AgentRun["report"]; status: AgentRunStatus; result: string | null; error: string | null; created_at: string; started_at: string | null; finished_at: string | null; model_name?: string | null; input_tokens?: number | null; output_tokens?: number | null };
+const run = (row: RunRow): AgentRun => ({ id: row.id, userId: row.user_id, conversationId: optional(row.conversation_id), kind: row.kind, scheduleId: optional(row.schedule_id), title: row.title, instructions: row.instructions, report: row.report, status: row.status, result: optional(row.result), error: optional(row.error), createdAt: row.created_at, startedAt: optional(row.started_at), finishedAt: optional(row.finished_at), modelName: optional(row.model_name ?? null), inputTokens: optional(row.input_tokens ?? null), outputTokens: optional(row.output_tokens ?? null) });
 
 /** Runs an account started within the last hour, and runs not yet finished: limits against a model that keeps spawning work. */
 export function agentRunLoad(userId: string, at = Date.now()) {
@@ -276,8 +278,8 @@ export function runningAgentRunCount(userId: string) {
   return (db.prepare("SELECT COUNT(*) AS n FROM agent_runs WHERE user_id = ? AND status = 'running'").get(userId) as { n: number }).n;
 }
 
-export function updateAgentRun(id: string, patch: Partial<Pick<AgentRun, "status" | "result" | "error" | "conversationId" | "startedAt" | "finishedAt">>) {
-  const columns: Record<string, string> = { status: "status", result: "result", error: "error", conversationId: "conversation_id", startedAt: "started_at", finishedAt: "finished_at" };
+export function updateAgentRun(id: string, patch: Partial<Pick<AgentRun, "status" | "result" | "error" | "conversationId" | "startedAt" | "finishedAt" | "modelName" | "inputTokens" | "outputTokens">>) {
+  const columns: Record<string, string> = { status: "status", result: "result", error: "error", conversationId: "conversation_id", startedAt: "started_at", finishedAt: "finished_at", modelName: "model_name", inputTokens: "input_tokens", outputTokens: "output_tokens" };
   const entries = Object.entries(patch).filter(([key]) => key in columns);
   if (!entries.length) return;
   db.prepare(`UPDATE agent_runs SET ${entries.map(([key]) => `${columns[key]} = ?`).join(", ")} WHERE id = ?`).run(...entries.map(([, value]) => value ?? null), id);

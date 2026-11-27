@@ -134,3 +134,22 @@ test("the agent chat's time line counts as input", () => {
   const stamped = contextUsage([{ id: "u", role: "user", content: "Hi", contextPrefix: "현재 시각: 2026-11-27 03:45:12 PM (Asia/Seoul)", createdAt: "" }], false).input;
   assert.ok(stamped > plain);
 });
+
+test("a reply's real context calibrates the estimate: unchanged history reads the real figure", () => {
+  const history: StoredMessage[] = [
+    { id: "u", role: "user", content: "x".repeat(4000), createdAt: "" },
+    { id: "a", role: "assistant", content: "Answer", outputTokens: 50, createdAt: "" },
+  ];
+  const raw = contextUsage(history, false, "", "", 0, undefined, { definitions: 2000 }, false);
+  const counted = raw.response + raw.reasoning;
+  const real = Math.round((raw.total - counted) * 1.5) + counted;
+  history[1] = { ...history[1], contextCalibration: { real, estimated: raw.total - counted, counted } };
+  const now = contextUsage(history, false, "", "", 0, undefined, { definitions: 2000 });
+  assert.ok(Math.abs(now.total - real) <= 2);
+  assert.equal(now.response, raw.response);
+  assert.ok(Math.abs((now.calibration ?? 0) - 1.5) < 0.01);
+  // A draft is scaled the same way; a record far off is ignored.
+  assert.ok(contextUsage(history, false, "y".repeat(400), "", 0, undefined, { definitions: 2000 }).total > now.total);
+  history[1] = { ...history[1], contextCalibration: { real: 10, estimated: 100000, counted: 0 } };
+  assert.equal(contextUsage(history, false, "", "", 0, undefined, { definitions: 2000 }).calibration, undefined);
+});

@@ -413,6 +413,14 @@ export interface StoredMessage {
   /** Agent chat only: a line the system puts in front of the content for the model (the time it was sent or a subagent
    * returned). The chat does not show it; the context view does. */
   contextPrefix?: string;
+  /** Agent chat only: the subagent run a notice or a subagent result came from. */
+  agentRunId?: string;
+  /**
+   * The reply's real context next to the donut's estimate of the same history when it ended: `real` is the next
+   * request's input as the server measured it, `counted` the part the estimate took from token counters (answers,
+   * reasoning) and `estimated` the rest. The donut scales its estimated parts by (real - counted) / estimated.
+   */
+  contextCalibration?: { real: number; estimated: number; counted: number };
   /** Absent on messages written before the sequential transcript existed. */
   steps?: MessageStep[];
   toolEvents?: ToolEvent[];

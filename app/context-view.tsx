@@ -82,14 +82,14 @@ export function ContextView({ ko, messages, state, includeReasoning, systemPromp
       if (index <= summaryIndex) return null;
       const override = current.overrides[message.id];
       const divider = index === droppedIndex ? <div className="context-divider" key={`${message.id}-dropped`}><Eraser size={13} /><span>{t("이 지점까지 도구 세부 내용과 추론을 버림", "Tool details and reasoning are dropped up to here")}</span><button type="button" onClick={() => { const { droppedThroughMessageId: _dropped, ...rest } = current; void onSave(rest); }}><Undo2 size={12} />{t("되돌리기", "Undo")}</button></div> : null;
-      if (override?.removed) return <div key={message.id}>
+      if (override?.removed) return <div key={message.id} data-context-message-id={message.id}>
         <article className={`context-message ${message.role} excluded`}><p className="context-text">{message.content || t("(내용 없음)", "(no text)")}</p>
           <footer><span className="context-badge"><EyeOff size={12} />{t("모델에 보내지 않음", "Not sent")}</span><button type="button" onClick={() => patchOverride(message.id, value => ({ ...value, removed: undefined }))}><RotateCcw size={12} />{t("다시 포함", "Include")}</button></footer></article>{divider}</div>;
       const entry = entries.get(message.id);
       if (!entry) return divider;
       const shown = entry.message;
       const reasoning = includeReasoning ? shown.reasoning : undefined;
-      return <div key={message.id}>
+      return <div key={message.id} data-context-message-id={message.id}>
         <article className={`context-message ${message.role}`}>
           {reasoning && <details className="context-reasoning"><summary><Brain size={13} />{t("추론", "Reasoning")}</summary><p className="context-text">{reasoning}</p>
             <div className="context-actions"><button type="button" onClick={() => setTextEdit({ kind: "reasoning", messageId: message.id, value: reasoning, original: message.reasoning || "" })}><Pencil size={12} />{t("편집", "Edit")}</button><button type="button" onClick={() => patchOverride(message.id, value => ({ ...value, reasoning: undefined, removeReasoning: true }))}><EyeOff size={12} />{t("빼기", "Remove")}</button></div></details>}
