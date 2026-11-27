@@ -1,6 +1,6 @@
 "use client";
 
-import { Cable, ChevronDown, CirclePlus, Copy, Info, LoaderCircle, Monitor, Pencil, PlugZap, Settings, ShieldCheck, Trash2, X } from "lucide-react";
+import { Cable, ChevronDown, CirclePlus, Cookie, Copy, Info, LoaderCircle, Monitor, Pencil, PlugZap, Save, Settings, ShieldCheck, Trash2, X } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { McpAuthType, McpConnection, McpEntitlement, McpToolInfo, McpToolPolicy } from "@/lib/types";
@@ -79,6 +79,42 @@ const vmEndpoint = (value: string) => { const trimmed = value.trim().replace(/\/
  * The account's virtual computer: one fixed entry above the other MCP servers, outside the plan's MCP allowance.
  * Shows how to install the server, takes its address and key, and once connected what the computer offers.
  */
+/**
+ * The account browser's cookies, as cookies.txt. They are kept on the virtual computer only: the dialog loads them
+ * from there and saves the edited text back; NeuralNetUI stores nothing.
+ */
+function VmCookiesDialog({ ko, onClose }: { ko: boolean; onClose: () => void }) {
+  const ref = useModalFocus(onClose);
+  const [text, setText] = useState(""), [loaded, setLoaded] = useState(false), [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState(""), [count, setCount] = useState<number>();
+  useEffect(() => {
+    let live = true;
+    void fetch("/api/vm/cookies", { cache: "no-store" }).then(response => readApiResponse<{ cookiesTxt: string; count: number }>(response, ko ? "ko" : "en"))
+      .then(body => { if (live) { setText(body.cookiesTxt); setCount(body.count); setLoaded(true); } })
+      .catch(error => live && setNotice(error instanceof Error ? error.message : String(error)));
+    return () => { live = false; };
+  }, [ko]);
+  async function save() {
+    setSaving(true); setNotice("");
+    try {
+      const body = await readApiResponse<{ cookiesTxt: string; count: number; problems?: string[] }>(await fetch("/api/vm/cookies", { method: "PUT", headers: { "Content-Type": "text/plain; charset=utf-8" }, body: text }), ko ? "ko" : "en");
+      setText(body.cookiesTxt); setCount(body.count);
+      setNotice(body.problems?.length ? (ko ? `쿠키 ${body.count}개를 적용했습니다. 읽지 못한 줄: ${body.problems.join(", ")}` : `Applied ${body.count} cookies. Lines skipped: ${body.problems.join(", ")}`) : (ko ? `쿠키 ${body.count}개를 가상 컴퓨터에 적용했습니다.` : `Applied ${body.count} cookies on the virtual computer.`));
+    } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); } finally { setSaving(false); }
+  }
+  return createPortal(<div ref={ref} tabIndex={-1} className="harness-modal-layer mcp-modal-layer" role="dialog" aria-modal="true" aria-label={ko ? "브라우저 쿠키" : "Browser cookies"}>
+    <button className="settings-backdrop" tabIndex={-1} onClick={onClose} />
+    <section className="harness-dialog vm-cookies-dialog">
+      <header><div><h2>{ko ? "브라우저 쿠키" : "Browser cookies"}</h2><p>{ko ? "이 계정의 모든 채팅과 에이전트가 가상 컴퓨터에서 함께 쓰는 쿠키입니다. cookies.txt(Netscape 형식)를 붙여 넣고 적용하면 전체가 이 내용으로 바뀌며, 실행 중인 브라우저는 닫혔다가 다음 사용 때 새 쿠키로 열립니다. 쿠키는 가상 컴퓨터에만 저장되고 NeuralNetUI에는 남지 않습니다." : "Cookies every chat and the agent share in the virtual computer's browser. Paste a cookies.txt (Netscape format) and apply: it replaces the whole jar, and running browsers close and reopen with it next time. They are stored on the virtual computer only, never in NeuralNetUI."}</p></div><button onClick={onClose} aria-label={ko ? "닫기" : "Close"}><X size={20} /></button></header>
+      {!loaded && !notice ? <div className="mcp-tool-loading"><LoaderCircle className="spin" size={20} />{ko ? "가상 컴퓨터에서 불러오는 중" : "Loading from the virtual computer"}</div>
+        : <textarea className="vm-cookies-text" spellCheck={false} value={text} disabled={!loaded || saving} onChange={event => setText(event.target.value)} placeholder={"# Netscape HTTP Cookie File\n.example.com\tTRUE\t/\tTRUE\t1830000000\tname\tvalue"} aria-label="cookies.txt" />}
+      {loaded && count !== undefined && <small className="vm-cookies-count">{ko ? `저장된 쿠키 ${count}개` : `${count} cookies stored`}</small>}
+      {notice && <p className="settings-notice" role="alert">{notice}</p>}
+      <footer className="mcp-dialog-actions"><button className="secondary-button" onClick={onClose}>{ko ? "닫기" : "Close"}</button><button className="save-button" disabled={!loaded || saving} onClick={() => void save()}>{saving ? <LoaderCircle className="spin" size={15} /> : <Save size={15} />} {ko ? "가상 컴퓨터에 적용" : "Apply on the virtual computer"}</button></footer>
+    </section>
+  </div>, document.body);
+}
+
 function VirtualComputerCard({ ko, connection, onChanged, onPermissions, onRemove }: { ko: boolean; connection?: McpConnection; onChanged: () => void; onPermissions: (connection: McpConnection) => void; onRemove: (connection: McpConnection) => void }) {
   const [editing, setEditing] = useState(!connection);
   // Folded by default: only the title, description and switch show until it is opened.
@@ -86,6 +122,7 @@ function VirtualComputerCard({ ko, connection, onChanged, onPermissions, onRemov
   const [url, setUrl] = useState(connection?.url || ""), [key, setKey] = useState("");
   const [busy, setBusy] = useState(false), [notice, setNotice] = useState(""), [copied, setCopied] = useState(false);
   const [info, setInfo] = useState<{ info: VmInfo | null; error?: string }>();
+  const [cookies, setCookies] = useState(false);
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   const command = `curl -fsSL ${origin}/api/vm/install | sudo bash -s -- --tunnel-token '<${ko ? "Cloudflare 터널 토큰 또는 명령어" : "Cloudflare tunnel token or command"}>'`;
   useEffect(() => { if (!connection || !open) return; setInfo(undefined); fetch("/api/vm/info", { cache: "no-store" }).then(response => response.json()).then(setInfo).catch(error => setInfo({ info: null, error: String(error) })); }, [connection, open]);
@@ -119,8 +156,9 @@ function VirtualComputerCard({ ko, connection, onChanged, onPermissions, onRemov
         <span>{detail.gui?.available ? (detail.gui.control ? (ko ? "GUI: 화면·마우스·키보드 사용 가능" : "GUI: screen, mouse and keyboard") : (ko ? "GUI: 화면 캡처만" : "GUI: screenshots only")) : (ko ? "GUI 없음 (셸·파일·브라우저만)" : "No GUI (shell, files, browser)")}</span>
         <span>{detail.browser?.version ? `${detail.browser.version}${detail.browser.stealth ? " · stealth" : ""}` : (ko ? "브라우저 없음" : "No browser")}</span>
       </span> : <span className="vm-info error">{info.error || (ko ? "연결할 수 없습니다." : "Not reachable.")}</span>}
-      <span className="vm-actions"><button type="button" className="subtle-action" onClick={() => onPermissions(connection)}><ShieldCheck size={14} />{ko ? "도구 권한" : "Tool permissions"}</button><button type="button" className="subtle-action" onClick={() => setEditing(true)}><Pencil size={14} />{ko ? "수정" : "Edit"}</button><button type="button" className="subtle-action danger" onClick={() => onRemove(connection)}><Trash2 size={14} />{ko ? "삭제" : "Delete"}</button></span>
+      <span className="vm-actions"><button type="button" className="subtle-action" onClick={() => onPermissions(connection)}><ShieldCheck size={14} />{ko ? "도구 권한" : "Tool permissions"}</button><button type="button" className="subtle-action" onClick={() => setCookies(true)}><Cookie size={14} />Cookies</button><button type="button" className="subtle-action" onClick={() => setEditing(true)}><Pencil size={14} />{ko ? "수정" : "Edit"}</button><button type="button" className="subtle-action danger" onClick={() => onRemove(connection)}><Trash2 size={14} />{ko ? "삭제" : "Delete"}</button></span>
     </div>}
+    {cookies && <VmCookiesDialog ko={ko} onClose={() => setCookies(false)} />}
     {open && editing && <form className="vm-form" onSubmit={save}>
       <div className="vm-install"><span>{ko ? "1. 가상 컴퓨터로 쓸 리눅스(LXC·Docker·실제 컴퓨터)나 macOS에서 설치합니다. 끝나면 주소와 키가 출력됩니다." : "1. Install on the Linux machine (LXC, Docker or bare metal) or Mac you want to use. It prints an address and a key."}</span>
         <code>{command}</code>

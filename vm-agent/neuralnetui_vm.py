@@ -7,7 +7,8 @@ One file, Python 3.9+ standard library only. It turns a Linux machine (LXC, Dock
 
   POST /mcp                     MCP (Streamable HTTP): computer info, shell, background jobs, screen and input
   POST /browser/<session>       MCP proxy to an Obscura headless browser, one process per session
-  GET  /browser-download        a file fetched by Obscura with that session's cookies
+  GET  /browser-download        a file fetched by Obscura with the account's cookies
+  GET|PUT /browser-cookies      the account browser's cookies as cookies.txt (Netscape format); kept only here
   GET|PUT /files?path=...       file transfer with the caller's workspace
 
 Every request needs "Authorization: Bearer <key>". NeuralNetUI also sends "X-NNUI-User", an opaque id: each id
@@ -45,7 +46,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 MAX_OUTPUT = 100_000
 SYSTEM = platform.system()  # "Linux" or "Darwin"
@@ -456,17 +457,139 @@ def call_tool(ws, name, args, progress):
 
 # ------------------------------------------------------------------------------------------------ Obscura browser sessions
 
+# The account's browser profile is shared by all its conversations: one cookie jar in
+# ~/.neuralnetui/browser/account/cookies.json, kept here on the virtual computer only (NeuralNetUI reads and
+# writes it through /browser-cookies but keeps no copy). Each browser session works in its own folder under
+# browser/sessions/: it starts with a copy of the account profile, and when it closes, the cookies it added,
+# changed or removed are merged back into the account jar (a three-way merge against the copy it started with, so
+# sessions running side by side, or an edit made meanwhile, are not overwritten), then the folder is deleted.
+
+def _safe(name):
+    return re.sub(r"[^A-Za-z0-9_-]", "_", name)[:80] or "_"
+
+
+def browser_root(ws):
+    return os.path.join(ws.home, ".neuralnetui", "browser")
+
+
+def account_profile(ws):
+    return os.path.join(browser_root(ws), "account")
+
+
+def session_profile(ws, key):
+    return os.path.join(browser_root(ws), "sessions", _safe(key))
+
+
+_jar_locks = {}
+_jar_locks_lock = threading.Lock()
+
+
+def jar_lock(ws):
+    with _jar_locks_lock:
+        return _jar_locks.setdefault(ws.home, threading.Lock())
+
+
+def _own_tree(ws, path):
+    if not ws.account: return
+    stop = os.path.dirname(ws.home)
+    current = path
+    while current.startswith(ws.home) and current != stop:
+        ws.own(current); current = os.path.dirname(current)
+
+
+def read_cookies(folder):
+    try:
+        with open(os.path.join(folder, "cookies.json"), encoding="utf-8") as handle: data = json.load(handle)
+        return [c for c in data if isinstance(c, dict) and c.get("name")] if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def write_cookies(ws, folder, cookies):
+    os.makedirs(folder, exist_ok=True)
+    target = os.path.join(folder, "cookies.json")
+    temp = target + ".tmp"
+    with open(temp, "w", encoding="utf-8") as handle: json.dump(cookies, handle, ensure_ascii=False)
+    os.replace(temp, target)
+    for path in (folder, target): _own_tree(ws, path)
+
+
+def cookie_key(cookie):
+    return (str(cookie.get("domain") or "").lstrip(".").lower(), cookie.get("path") or "/", cookie.get("name"))
+
+
+def merge_cookies(account, seed, final):
+    """The account jar after a session that started from `seed` ended with `final`: what the session added or changed
+    wins, what it removed goes (unless the account changed it meanwhile), everything else stays as the account has it."""
+    merged = {cookie_key(c): c for c in account}
+    before = {cookie_key(c): c for c in seed}
+    after = {cookie_key(c): c for c in final}
+    for key, cookie in after.items():
+        if before.get(key) != cookie: merged[key] = cookie
+    for key, cookie in before.items():
+        if key not in after and merged.get(key) == cookie: merged.pop(key, None)
+    return list(merged.values())
+
+
+def cookies_to_netscape(cookies):
+    lines = ["# Netscape HTTP Cookie File", "# Cookies of this account's browser on the NeuralNetUI virtual computer.", ""]
+    for c in sorted(cookies, key=lambda c: (cookie_key(c)[0], cookie_key(c)[1], str(c.get("name")))):
+        domain = str(c.get("domain") or "").lstrip(".")
+        sub = not c.get("hostOnly", False)
+        expires = c.get("expires")
+        lines.append("\t".join([("#HttpOnly_" if c.get("httpOnly") else "") + ("." if sub else "") + domain, "TRUE" if sub else "FALSE",
+                                c.get("path") or "/", "TRUE" if c.get("secure") else "FALSE",
+                                str(int(expires)) if isinstance(expires, (int, float)) and expires > 0 else "0", str(c.get("name")), str(c.get("value") or "")]))
+    return "\n".join(lines) + "\n"
+
+
+def netscape_to_cookies(text, previous=()):
+    """Cookies from a cookies.txt (Netscape format, as browser extensions export it). SameSite is not part of the
+    format: a cookie that already existed keeps its setting, a new one gets Lax."""
+    known = {cookie_key(c): c for c in previous}
+    cookies, problems = {}, []
+    for number, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip("\r\n")
+        http_only = line.startswith("#HttpOnly_")
+        if http_only: line = line[len("#HttpOnly_"):]
+        elif not line.strip() or line.lstrip().startswith("#"): continue
+        fields = line.split("\t")
+        if len(fields) < 7: fields = line.split(None, 6)
+        if len(fields) < 6:
+            problems.append(f"line {number}: expected 7 tab-separated fields"); continue
+        if len(fields) == 6: fields.append("")
+        domain, include, path, secure, expires, name, value = fields[:7]
+        if not domain or not name:
+            problems.append(f"line {number}: missing domain or name"); continue
+        try: expiry = int(float(expires))
+        except ValueError:
+            problems.append(f"line {number}: expiry is not a number"); continue
+        cookie = {"name": name, "value": value, "domain": domain.lstrip(".").lower(), "path": path or "/",
+                  "secure": secure.upper() == "TRUE", "httpOnly": http_only,
+                  "sameSite": "Lax", "expires": expiry if expiry > 0 else None,
+                  "hostOnly": not (domain.startswith(".") or include.upper() == "TRUE")}
+        cookie["sameSite"] = (known.get(cookie_key(cookie)) or {}).get("sameSite") or "Lax"
+        cookies[cookie_key(cookie)] = cookie
+    return list(cookies.values()), problems
+
+
 class BrowserSession:
-    """One `obscura mcp` process speaking MCP over stdio, with its own profile folder."""
+    """One `obscura mcp` process speaking MCP over stdio, in its own working copy of the account profile."""
 
     def __init__(self, ws, key):
         if not CONFIG.obscura:
             raise RuntimeError("Obscura is not installed on this computer.")
-        self.key = key
-        self.profile = os.path.join(ws.home if not ws.account else ws.home, ".neuralnetui", "browser", re.sub(r"[^A-Za-z0-9_-]", "_", key)[:80])
-        os.makedirs(self.profile, exist_ok=True)
-        if ws.account:
-            for path in (os.path.join(ws.home, ".neuralnetui"), os.path.join(ws.home, ".neuralnetui", "browser"), self.profile): ws.own(path)
+        self.ws, self.key = ws, key
+        self.profile = session_profile(ws, key)
+        if os.path.isdir(self.profile): shutil.rmtree(self.profile, ignore_errors=True)
+        with jar_lock(ws):
+            source = account_profile(ws)
+            if os.path.isdir(source): shutil.copytree(source, self.profile)
+            else: os.makedirs(self.profile)
+            self.seed = read_cookies(self.profile)
+        for root, dirs, files in os.walk(self.profile):
+            for name in dirs + files: _own_tree(ws, os.path.join(root, name))
+        _own_tree(ws, self.profile)
         argv = [CONFIG.obscura] + (["--stealth"] if CONFIG.stealth else []) + ["mcp"]
         if ws.account: argv = [ws.runuser, "-u", ws.account, "--", "env", f"OBSCURA_STORAGE_DIR={self.profile}", "RUST_LOG=error"] + argv
         env = {**ws.env(), "OBSCURA_STORAGE_DIR": self.profile, "RUST_LOG": "error"}
@@ -474,6 +597,7 @@ class BrowserSession:
         self.lock = threading.Lock()
         self.pending = {}
         self.last = time.time()
+        self.closed = False
         threading.Thread(target=self.read, daemon=True).start()
 
     def read(self):
@@ -500,9 +624,38 @@ class BrowserSession:
             self.pending.pop(message["id"], None)
             return {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32001, "message": "The browser did not answer in time."}}
 
-    def close(self):
-        try: os.killpg(self.proc.pid, signal.SIGTERM)
+    def close(self, keep=True):
+        """Ends the browser: closing stdin lets Obscura write its cookies before it exits (a stuck one is killed after
+        a few seconds and reaped). With keep, the session's cookie changes are merged into the account jar; then the
+        working folder is deleted."""
+        if self.closed: return
+        self.closed = True
+        try: self.proc.stdin.close()
         except Exception: pass
+        try: self.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try: os.killpg(self.proc.pid, signal.SIGTERM)
+            except Exception: pass
+            try: self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try: os.killpg(self.proc.pid, signal.SIGKILL)
+                except Exception: pass
+                try: self.proc.wait(timeout=5)
+                except Exception: pass
+        try:
+            if keep:
+                with jar_lock(self.ws):
+                    account = account_profile(self.ws)
+                    write_cookies(self.ws, account, merge_cookies(read_cookies(account), self.seed, read_cookies(self.profile)))
+                    # Site storage (localStorage) is taken over as the session left it.
+                    storage = os.path.join(self.profile, "localStorage")
+                    if os.path.isdir(storage):
+                        shutil.copytree(storage, os.path.join(account, "localStorage"), dirs_exist_ok=True)
+                        for root, dirs, files in os.walk(os.path.join(account, "localStorage")):
+                            for name in dirs + files: _own_tree(self.ws, os.path.join(root, name))
+        except Exception as error:
+            log("browser profile merge failed:", repr(error))
+        shutil.rmtree(self.profile, ignore_errors=True)
 
 
 class Browsers:
@@ -513,32 +666,71 @@ class Browsers:
 
     def get(self, ws, session):
         key = f"{ws.caller}:{session}"
+        stale = None
         with self.lock:
             item = self.items.get(key)
-            if item and not item.alive(): item = None
+            if item and not item.alive(): stale, item = item, None
             if not item:
                 item = BrowserSession(ws, session); self.items[key] = item
-            return item
+        if stale: threading.Thread(target=stale.close, daemon=True).start()
+        return item
+
+    def session_profile(self, ws, session):
+        """The working folder of a running session, for downloads with its current cookies."""
+        with self.lock:
+            item = self.items.get(f"{ws.caller}:{session}")
+            return item.profile if item and item.alive() else None
+
+    def close_account(self, ws, keep):
+        with self.lock:
+            items = [(key, item) for key, item in self.items.items() if key.startswith(f"{ws.caller}:")]
+            for key, _ in items: del self.items[key]
+        for _, item in items: item.close(keep=keep)
+
+    def close_all(self):
+        with self.lock:
+            items = list(self.items.values()); self.items.clear()
+        for item in items: item.close()
 
     def reap(self):
         while True:
             time.sleep(60)
             cutoff = time.time() - CONFIG.idle_minutes * 60
             with self.lock:
-                for key, item in list(self.items.items()):
-                    if item.last < cutoff or not item.alive():
-                        item.close(); del self.items[key]
+                done = [(key, item) for key, item in self.items.items() if item.last < cutoff or not item.alive()]
+                for key, _ in done: del self.items[key]
+            for _, item in done: item.close()
 
 
 BROWSERS = None
 
 
+def cleanup_browser_profiles():
+    """At start: working folders left by a stop, and the per-conversation profiles of older versions, are deleted."""
+    roots = [os.path.join(CONFIG.home, "workspaces")]
+    if IS_ROOT and SYSTEM == "Linux": roots.append("/home")
+    removed = 0
+    for base in roots:
+        if not os.path.isdir(base): continue
+        for entry in os.listdir(base):
+            browser = os.path.join(base, entry, ".neuralnetui", "browser")
+            if not os.path.isdir(browser): continue
+            for name in os.listdir(browser):
+                if name == "account": continue
+                shutil.rmtree(os.path.join(browser, name), ignore_errors=True); removed += 1
+    if removed: log(f"removed {removed} old browser profile folder(s)")
+
+
 def browser_download(ws, session, url, out):
-    """Streams a file Obscura fetches with the session's cookies into `out`; returns the byte count."""
+    """Streams a file Obscura fetches with the account's cookies (and a running session's newer ones) into `out`."""
     if not CONFIG.obscura: raise RuntimeError("Obscura is not installed on this computer.")
-    profile = os.path.join(ws.home, ".neuralnetui", "browser", re.sub(r"[^A-Za-z0-9_-]", "_", session)[:80])
     with tempfile.TemporaryDirectory() as copy:
-        if os.path.isdir(profile): shutil.copytree(profile, copy, dirs_exist_ok=True)
+        with jar_lock(ws):
+            if os.path.isdir(account_profile(ws)): shutil.copytree(account_profile(ws), copy, dirs_exist_ok=True)
+        running = BROWSERS.session_profile(ws, session) if BROWSERS else None
+        if running and os.path.isfile(os.path.join(running, "cookies.json")):
+            write_cookies(ws, copy, merge_cookies(read_cookies(copy), [], read_cookies(running)))
+        if ws.account: shutil.chown(copy, user=ws.account, group=ws.account)
         argv = [CONFIG.obscura] + (["--stealth"] if CONFIG.stealth else []) + ["fetch", url, "--dump", "original", "--quiet", "--storage-dir", copy, "--timeout", "120"]
         proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env={**ws.env(), "RUST_LOG": "error"})
         total = 0
@@ -607,6 +799,9 @@ class Handler(BaseHTTPRequestHandler):
                 with open(target, "rb") as handle: shutil.copyfileobj(handle, self.wfile, 1 << 16)
             except PermissionError as error: self.reply(403, {"error": str(error)})
             return
+        if url.path == "/browser-cookies":
+            with jar_lock(ws): cookies = read_cookies(account_profile(ws))
+            return self.reply(200, {"cookiesTxt": cookies_to_netscape(cookies), "count": len(cookies)})
         if url.path == "/browser-download":
             session, target = query.get("session", [""])[0], query.get("url", [""])[0]
             if not re.match(r"^https?://", target): return self.reply(400, {"error": "An http(s) url is required."})
@@ -629,6 +824,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized(): return
         ws = self.workspace()
         if not ws: return
+        if url.path == "/browser-cookies": return self.put_cookies(ws)
         if url.path != "/files": return self.reply(404, {"error": "Not found."})
         try:
             target = ws.resolve(parse_qs(url.query).get("path", [""])[0])
@@ -642,6 +838,20 @@ class Handler(BaseHTTPRequestHandler):
             ws.own(target)
             self.reply(200, {"path": target, "size": os.path.getsize(target)})
         except PermissionError as error: self.reply(403, {"error": str(error)})
+
+    def put_cookies(self, ws):
+        """Replaces the account's cookie jar with a cookies.txt. Running browsers are closed without merging their
+        changes back, so the edit is what every next session starts from."""
+        raw = self.body()
+        if len(raw) > 4 << 20: return self.reply(413, {"error": "cookies.txt is larger than 4 MB."})
+        text = raw.decode("utf-8", "replace")
+        with jar_lock(ws): previous = read_cookies(account_profile(ws))
+        cookies, problems = netscape_to_cookies(text, previous)
+        if problems and not cookies and text.strip():
+            return self.reply(400, {"error": "No cookie could be read from it.", "problems": problems[:20]})
+        BROWSERS.close_account(ws, keep=False)
+        with jar_lock(ws): write_cookies(ws, account_profile(ws), cookies)
+        self.reply(200, {"count": len(cookies), "problems": problems[:20], "cookiesTxt": cookies_to_netscape(cookies)})
 
     def do_DELETE(self):
         if not self.authorized(): return
@@ -734,6 +944,8 @@ def main():
     if not CONFIG.key or len(CONFIG.key) < 16:
         sys.exit("An access key of at least 16 characters is required (NNUI_VM_KEY or \"key\" in the config file).")
     os.makedirs(CONFIG.home, mode=0o700, exist_ok=True)
+    try: cleanup_browser_profiles()
+    except Exception as error: log("browser profile cleanup failed:", repr(error))
     BROWSERS = Browsers()
     server = ThreadingHTTPServer((CONFIG.bind, CONFIG.port), Handler)
     server.daemon_threads = True
@@ -741,6 +953,7 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try: server.serve_forever()
     except (KeyboardInterrupt, SystemExit): pass
+    finally: BROWSERS.close_all()   # keeps the running sessions' cookies
 
 
 if __name__ == "__main__":
