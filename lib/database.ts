@@ -656,6 +656,9 @@ function openDatabase() {
         created_at TEXT NOT NULL,
         last_used_at TEXT
       );`);
+    // The Firebase project the app was built for, to tell a mismatch with the server's key.
+    const nativeColumns = connection.prepare("PRAGMA table_info(native_push_tokens)").all() as Array<{ name: string }>;
+    if (!nativeColumns.some(column => column.name === "project_id")) connection.exec("ALTER TABLE native_push_tokens ADD COLUMN project_id TEXT");
     const planColumns = connection.prepare("PRAGMA table_info(plans)").all() as Array<{ name: string }>;
     if (!planColumns.some(column => column.name === "agent_enabled")) connection.exec("ALTER TABLE plans ADD COLUMN agent_enabled INTEGER NOT NULL DEFAULT 0 CHECK (agent_enabled IN (0, 1));");
     if (!planColumns.some(column => column.name === "agent_min_interval_minutes")) connection.exec("ALTER TABLE plans ADD COLUMN agent_min_interval_minutes INTEGER NOT NULL DEFAULT 30 CHECK (agent_min_interval_minutes >= 1);");

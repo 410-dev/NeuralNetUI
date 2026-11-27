@@ -658,7 +658,7 @@ export default function Home() {
     if (!auth?.authenticated || !isNativeShell()) return;
     nativePush("status").then(reply => {
       if (!reply.enabled || reply.permission !== "granted" || !reply.token) return;
-      return fetch("/api/agent/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ native: { token: reply.token, platform: reply.platform } }) });
+      return fetch("/api/agent/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ native: { token: reply.token, platform: reply.platform, projectId: reply.projectId } }) });
     }).catch(() => undefined);
   }, [auth?.authenticated]);
 
@@ -2994,7 +2994,7 @@ ${c.detectFailedDetail}: ${failure.detail}` : ""}` });
           {tab==="tools"&&admin&&<><HarnessSettingsPanel draft={draft} setDraft={setDraft}/><div className="harness-settings"><BrowserHarnessSection draft={draft} setDraft={setDraft}/><YoutubeHarnessSection draft={draft} setDraft={setDraft}/></div><ToolsSettings c={c} draft={draft} setDraft={setDraft}/><StorageSettingsPanel draft={draft} setDraft={setDraft}/></>}
           {tab==="models"&&<ModelSettings c={c} draft={draft} availableModels={availableDraftModels} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addAlias={addAlias} account={initial.account}/>}
           {tab==="reasoning"&&<ReasoningSettings c={c} draft={draft} availableModels={availableDraftModels} setDraft={setDraft} activeModelId={activeModelId} setActiveModelId={setActiveModelId} activeModel={activeModel} updateModel={updateModel} addPreset={addPreset} account={initial.account}/>}
-          {tab==="users"&&admin&&<UsersSettings c={c} draft={draft} setDraft={setDraft}/>} {tab==="plans"&&admin&&<PlanSettings models={draft.models} ko={draft.preferences.language==="ko"}/>} {tab==="data"&&admin&&<DataManagementSettings ko={draft.preferences.language==="ko"}/>} {tab==="account"&&<><AccountSettings c={c} account={initial.account} draft={draft} setDraft={setDraft} onLogout={onLogout}/><AccountBackupSettings ko={draft.preferences.language==="ko"}/></>}
+          {tab==="users"&&admin&&<UsersSettings c={c} draft={draft} setDraft={setDraft}/>} {tab==="plans"&&admin&&<PlanSettings models={draft.models} ko={draft.preferences.language==="ko"}/>} {tab==="data"&&admin&&<DataManagementSettings ko={draft.preferences.language==="ko"} superadmin={initial.account?.role==="superadmin"}/>} {tab==="account"&&<><AccountSettings c={c} account={initial.account} draft={draft} setDraft={setDraft} onLogout={onLogout}/><AccountBackupSettings ko={draft.preferences.language==="ko"}/></>}
         </div>
       </div>
       </SettingsDetailContext.Provider>
