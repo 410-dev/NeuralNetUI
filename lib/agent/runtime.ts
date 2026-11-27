@@ -11,7 +11,7 @@ import type { ToolGate } from "../tools/types";
 import type { Conversation, ModelConfig, StoredMessage, UserRole } from "../types";
 import { AGENT_PROVIDER_ID, decideAgentCall, isReadOnlyCall } from "./policy";
 import { agentToolSource } from "./tools";
-import { agentClockLine, defaultAgentInstructions, defaultAgentMainPrompt } from "./defaults";
+import { agentClockLine, applySubagentTemplate, defaultAgentInstructions, defaultAgentMainPrompt } from "./defaults";
 import { isViewingAgent } from "./presence";
 import {
   advanceAgentSchedule, agentRunLoad, AGENT_RUN_LIMITS, createAgentProfile, createAgentRun, dueAgentSchedules, failInterruptedAgentRuns, getAgentRun, listAgentItems,
@@ -24,6 +24,8 @@ type Pending = { messages: StoredMessage[]; trigger: boolean; autonomous: boolea
 type RuntimeState = { pending: Map<string, Pending>; locks: Map<string, Promise<unknown>>; changed: Map<string, number>; timer?: ReturnType<typeof setInterval>; started: boolean; ticking?: Promise<void> };
 declare global { var neuralAgentRuntime: RuntimeState | undefined; }
 const state: RuntimeState = globalThis.neuralAgentRuntime ??= { pending: new Map(), locks: new Map(), changed: new Map(), started: false };
+/** Runs a subagent declared failed (report_failure), with the reason; read when the run ends. */
+const reportedFailures: Map<string, string> = (globalThis as { neuralAgentFailures?: Map<string, string> }).neuralAgentFailures ??= new Map();
 
 const TICK_MS = 20_000;
 /** A reply that keeps repeating itself is regenerated this many times before it is reported as an error. */
@@ -165,6 +167,7 @@ const toolSource = agentToolSource({
     markAgentChanged(userId); void pumpRuns();
     return { id: run.id, status: run.status };
   },
+  reportFailure: (_userId, input) => { reportedFailures.set(input.runId, input.reason); },
   notifyUser: async (userId, input) => { await postToMain(userId, { content: input.message.trim().slice(0, 20_000), kind: "notice", runId: input.runId }); },
 });
 
@@ -337,7 +340,9 @@ async function startRun(run: AgentRun) {
   const stamp = nowIso();
   const instructions = run.kind === "heartbeat" ? heartbeatInstructions(userId, settings) : run.instructions;
   // The time goes with the request, not the system prompt: a changing system prompt would restart the LMF session.
-  const first: StoredMessage = { id: id("msg"), role: "user", content: `[${clock(settings)}]\n${instructions}`, createdAt: stamp };
+  // The settings' task template wraps the instructions ({task}); by default it tells the subagent to report a task its
+  // tools cannot do as failed instead of working around it.
+  const first: StoredMessage = { id: id("msg"), role: "user", content: `[${clock(settings)}]\n${applySubagentTemplate(settings.subagentTemplate, instructions, ko(settings) ? "ko" : "en")}`, createdAt: stamp };
   const interval = seriesIntervalMinutes(run);
   const reused = interval !== undefined ? await reusableSeriesConversation(run, interval).catch(() => undefined) : undefined;
   let conversationId: string, branchId: string, history: StoredMessage[];
@@ -382,6 +387,9 @@ async function startRunJob(run: AgentRun, profile: AgentProfile, conversationId:
 }
 
 async function finishRun(run: AgentRun, result: { status: string; content: string; error?: string; usage?: { input: number; output: number }; modelName?: string }) {
+  // A subagent that called report_failure ends failed with its reason, however its reply ended.
+  const reported = reportedFailures.get(run.id); reportedFailures.delete(run.id);
+  if (reported && result.status !== "stopped") result = { ...result, status: "error", error: `${ko(readAgentProfile(run.userId)?.settings ?? DEFAULT_AGENT_SETTINGS) ? "서브에이전트가 작업 실패를 보고했습니다" : "The subagent reported the task as failed"}: ${reported}` };
   const status = result.status === "completed" ? "completed" : result.status === "stopped" ? "cancelled" : "failed";
   updateAgentRun(run.id, { status, result: result.content.slice(0, 40_000) || undefined, error: result.error, finishedAt: nowIso(),
     ...(result.modelName ? { modelName: result.modelName } : {}), ...(result.usage ? { inputTokens: result.usage.input, outputTokens: result.usage.output } : {}) });
@@ -389,7 +397,8 @@ async function finishRun(run: AgentRun, result: { status: string; content: strin
   const profile = readAgentProfile(run.userId);
   void settleRunSession(getAgentRun(run.userId, run.id) ?? run).catch(error => console.warn("Unable to settle a subagent session", error instanceof Error ? error.message : error));
   // Work the person asked for always comes back to the main agent; automatic runs speak through notify_user.
-  if (profile && run.report === "always" && status !== "cancelled") {
+  // A reported failure always reaches the main agent, even for automatic runs that otherwise speak only when needed.
+  if (profile && (run.report === "always" || reported) && status !== "cancelled") {
     const label = ko(profile.settings) ? (status === "completed" ? "완료" : "실패") : status;
     await postToMain(run.userId, { content: `[Subagent result · ${run.title} · ${label}]\n${(status === "completed" ? result.content : result.error || result.content || "").slice(0, 12_000)}`, kind: "context", prefix: clockLine(profile.settings, "returned"), runId: run.id });
   }

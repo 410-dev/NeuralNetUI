@@ -4,14 +4,15 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { createPortal } from "react-dom";
 import { Bell, BellOff, Braces, Brain, Cable, CalendarClock, Check, ChevronLeft, ChevronRight, Clock, Clock3, Code2, Cog, Globe2, HardDrive, History, Layers, Link2, ListChecks, ListTodo, LoaderCircle, MapPin, Monitor, Plus, Repeat, Settings, Square, Timer, Trash2, Video, Wrench, X } from "lucide-react";
 import type { ToolIcon } from "@/lib/tools/catalog";
-import { defaultAgentInstructions, defaultAgentMainPrompt } from "@/lib/agent/defaults";
+import { defaultAgentInstructions, defaultAgentMainPrompt, defaultSubagentTemplate, SUBAGENT_TASK_PLACEHOLDER } from "@/lib/agent/defaults";
+import type { ToolState } from "@/lib/tools/state";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { BUILTIN_TOOL_PROVIDERS } from "@/lib/tools/catalog";
 import type { ModelConfig, StoredMessage } from "@/lib/types";
 
 export type AgentDecision = "allow" | "ask";
 export type AgentToolRule = { read?: AgentDecision; write?: AgentDecision; tools?: Record<string, AgentDecision> };
-export type AgentClientSettings = { enabled: boolean; modelId?: string; subagentModelId?: string; heartbeatMinutes: number; instructions: string; mainPrompt?: string; compactPercent: number; toolTimeoutMinutes: number; toolRules: Record<string, AgentToolRule> };
+export type AgentClientSettings = { enabled: boolean; modelId?: string; subagentModelId?: string; heartbeatMinutes: number; instructions: string; mainPrompt?: string; subagentTemplate?: string; toolState?: ToolState; compactPercent: number; toolTimeoutMinutes: number; toolRules: Record<string, AgentToolRule> };
 const RULE_ICONS: Record<ToolIcon, typeof Wrench> = { search: Globe2, link: Link2, braces: Braces, clock: Clock3, "map-pin": MapPin, "hard-drive": HardDrive, "list-checks": ListChecks, code: Code2, cable: Cable, wrench: Wrench, globe: Globe2, video: Video, monitor: Monitor };
 
 export type AgentRunView = { id: string; kind: "task" | "heartbeat" | "schedule"; title: string; instructions: string; status: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"; result?: string; error?: string; conversationId?: string; createdAt: string; startedAt?: string; finishedAt?: string };
@@ -173,9 +174,10 @@ function ItemEditor({ ko, item, onSave, onCancel }: { ko: boolean; item: AgentIt
 /** The agent's own settings: automatic runs, standing instructions, models, compaction and what it may do unasked. */
 export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { ko: boolean; state: AgentState; models: ModelConfig[]; onClose: () => void; onSaved: () => void }) {
   const initial = state.settings!;
-  // The main prompt is edited in full; saved as empty while it equals the default, so later default updates apply.
-  const defaultPrompt = defaultAgentMainPrompt(ko ? "ko" : "en");
-  const [value, setValue] = useState<AgentClientSettings>({ ...initial, mainPrompt: initial.mainPrompt || defaultPrompt });
+  const [value, setValue] = useState<AgentClientSettings>(initial);
+  // The prompts open in their own editor; a prompt saved equal to its default is stored empty, so later default
+  // updates still apply.
+  const [promptEditor, setPromptEditor] = useState<AgentPromptKind>();
   const [mcp, setMcp] = useState<Array<{ id: string; name: string; kind?: "user" | "vm" }>>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -201,10 +203,14 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
     ...mcp.map(item => item.kind === "vm" ? { id: `mcp:${item.id}`, name: ko ? "가상 컴퓨터" : "Virtual computer", icon: "monitor" as ToolIcon } : { id: `mcp:${item.id}`, name: `MCP · ${item.name}`, icon: "cable" as ToolIcon }),
   ], [mcp, ko]);
   const rule = (id: string) => value.toolRules[id] || {};
+  // The agent's own tool switches: what its main chat and subagents may use. Separate from the chat's tool menu.
+  const toolOn = (id: string) => value.toolState?.providers?.[id]?.enabled === true;
+  const setToolOn = (id: string, enabled: boolean) => setValue(current => ({ ...current, toolState: { version: 2, ...(current.toolState || {}), providers: { ...(current.toolState?.providers || {}), [id]: { ...(current.toolState?.providers?.[id] || {}), enabled } } } as ToolState }));
+  const hasComputer = mcp.some(item => item.kind === "vm");
   const setRule = (id: string, patch: AgentToolRule) => setValue(current => ({ ...current, toolRules: { ...current.toolRules, [id]: { ...current.toolRules[id], ...patch } } }));
   const save = async () => {
     setBusy(true); setError("");
-    try { await api("/api/agent", { method: "PATCH", body: JSON.stringify({ ...value, subagentModelId: value.subagentModelId || "", mainPrompt: value.mainPrompt?.trim() === defaultPrompt.trim() ? "" : value.mainPrompt || "" }) }); onSaved(); onClose(); }
+    try { await api("/api/agent", { method: "PATCH", body: JSON.stringify({ ...value, subagentModelId: value.subagentModelId || "", mainPrompt: value.mainPrompt || "", subagentTemplate: value.subagentTemplate || "" }) }); onSaved(); onClose(); }
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); setBusy(false); }
   };
   const togglePush = async () => {
@@ -238,22 +244,62 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
   return <Dialog ko={ko} title={ko ? "에이전트 설정" : "Agent settings"} onClose={onClose} wide footer={<>{error && <p className="settings-notice">{error}</p>}<button type="button" className="secondary-button" onClick={onClose}>{ko ? "취소" : "Cancel"}</button><button type="button" className="save-button" disabled={busy} onClick={() => void save()}>{busy ? (ko ? "저장 중…" : "Saving…") : (ko ? "저장" : "Save")}</button></>}>
     <div className="model-visibility-row"><div><strong>{ko ? "자동 실행" : "Automatic runs"}</strong><small>{ko ? "주기 점검과 예약된 작업을 실행합니다. 끄면 채팅으로 요청할 때만 움직입니다." : "Runs the periodic check and scheduled work. When off, the agent acts only when you message it."}</small></div><button type="button" role="switch" aria-checked={value.enabled} aria-label={ko ? "자동 실행" : "Automatic runs"} className={`toggle ${value.enabled ? "on" : ""}`} onClick={() => setValue({ ...value, enabled: !value.enabled })}><i /></button></div>
     <label className="field"><span>{ko ? "주기 점검 간격 (분)" : "Periodic check interval (minutes)"}</span><input type="number" min={state.access.minIntervalMinutes} max={10080} value={value.heartbeatMinutes} onChange={event => setValue({ ...value, heartbeatMinutes: Math.max(1, Math.round(Number(event.target.value) || 0)) })} /><small>{ko ? `플랜이 허용하는 최소 간격은 ${state.access.minIntervalMinutes}분입니다. 더 짧게 정하면 최소 간격으로 실행합니다.` : `Your plan allows at least ${state.access.minIntervalMinutes} minutes; shorter values run at that minimum.`}</small></label>
-    <label className="field"><span>{ko ? "작업 지침" : "Standing instructions"}</span><textarea rows={6} value={value.instructions} onChange={event => setValue({ ...value, instructions: event.target.value })} placeholder={ko ? "예: 받은편지함에서 중요한 메일을 요약해 알려 줘. 캘린더 일정이 겹치면 알려 줘." : "e.g. Summarize important new email. Tell me when calendar events overlap."} /><button type="button" className="agent-reset-link" onClick={() => setValue({ ...value, instructions: defaultAgentInstructions(ko ? "ko" : "en") })}>{ko ? "기본 값으로 되돌리기" : "Restore the default"}</button><small>{ko ? "주기 점검마다 서브에이전트가 이 지침과 워크보드를 보고 일하며, 알릴 것이 있을 때만 메시지를 보냅니다." : "Each periodic check, a subagent works from these instructions and the workboard, and messages you only when something needs attention."}</small></label>
-    <label className="field"><span>{ko ? "메인 채팅 시스템 프롬프트" : "Main chat system prompt"}</span><textarea rows={10} value={value.mainPrompt || ""} onChange={event => setValue({ ...value, mainPrompt: event.target.value })} /><button type="button" className="agent-reset-link" onClick={() => setValue({ ...value, mainPrompt: defaultPrompt })}>{ko ? "기본 값으로 되돌리기" : "Restore the default"}</button><small>{ko ? "에이전트 메인 채팅에서만 쓰는 시스템 프롬프트입니다(모델에 설정된 시스템 프롬프트 뒤에 붙음). 현재 시각은 여기에 넣지 않고, 시스템이 보내는 메시지와 서브에이전트 결과 앞에 모델만 보도록 붙입니다. 비우면 기본 값을 씁니다." : "Used only in the agent's main chat, after the model's own system prompt. The time is not part of it: the system puts it in front of your messages and subagent results for the model only. Empty uses the default."}</small></label>
+    <div className="field"><span>{ko ? "프롬프트" : "Prompts"}</span><div className="agent-prompt-buttons">
+      {AGENT_PROMPTS.map(kind => <button key={kind} type="button" className="agent-prompt-button" onClick={() => setPromptEditor(kind)}>
+        <span><strong>{promptLabel(kind, ko)}</strong><small>{promptHint(kind, ko)}</small></span>
+        <em>{(kind === "instructions" ? value.instructions.trim() && value.instructions.trim() !== promptDefault(kind, ko).trim() : value[kind]) ? (ko ? "사용자 지정" : "Custom") : (ko ? "기본값" : "Default")}</em><ChevronRight size={15} />
+      </button>)}
+    </div></div>
+    {promptEditor && <AgentPromptDialog ko={ko} kind={promptEditor} value={promptEditor === "instructions" ? value.instructions : value[promptEditor] || promptDefault(promptEditor, ko)} onClose={() => setPromptEditor(undefined)}
+      onSave={async text => {
+        const stored = promptEditor !== "instructions" && text.trim() === promptDefault(promptEditor, ko).trim() ? "" : text;
+        await api("/api/agent", { method: "PATCH", body: JSON.stringify({ [promptEditor]: stored }) });
+        setValue(current => ({ ...current, [promptEditor]: stored || (promptEditor === "instructions" ? "" : undefined) }));
+        onSaved(); setPromptEditor(undefined);
+      }} />}
     <div className="form-grid">
       <label className="field"><span>{ko ? "서브에이전트·자동 실행 모델" : "Subagent and automatic-run model"}</span><select value={value.subagentModelId || ""} onChange={event => setValue({ ...value, subagentModelId: event.target.value || undefined })}><option value="">{ko ? "메인 채팅과 같은 모델" : "Same as the main chat"}</option>{models.filter(model => model.visible !== false && !model.imageGeneration).map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label>
       <label className="field"><span>{ko ? "압축 기준 (컨텍스트의 %)" : "Compact at (% of context)"}</span><input type="number" min={10} max={95} value={value.compactPercent} onChange={event => setValue({ ...value, compactPercent: Math.min(95, Math.max(10, Math.round(Number(event.target.value) || 50))) })} /><small>{ko ? "메인 채팅과 모든 서브에이전트가 이 비율을 넘으면 압축합니다. 하네스 설정과 별개입니다." : "The main chat and every subagent compact past this share; separate from harness settings."}</small></label>
     </div>
     <label className="field"><span>{ko ? "도구 실행 제한 시간 (분)" : "Tool time limit (minutes)"}</span><input type="number" min={0} max={1440} value={value.toolTimeoutMinutes ?? 10} onChange={event => setValue({ ...value, toolTimeoutMinutes: Math.min(1440, Math.max(0, Math.round(Number(event.target.value) || 0))) })} /><small>{ko ? "에이전트의 도구 호출이 이 시간을 넘기면 취소하고, 모델은 결과 없이 이어서 작업합니다. 승인을 기다리는 시간은 넣지 않습니다. 0은 제한 없음입니다. 실행 중인 도구는 언제든 '도구 취소'로 직접 멈출 수 있습니다." : "An agent tool call running longer than this is cancelled and the model carries on without its result. Time waiting for approval does not count. 0 means no limit. You can also cancel a running tool any time."}</small></label>
     <div className="field"><span>{ko ? "이 기기 푸시 알림" : "Push notifications on this device"}</span><div className="agent-push-row"><button type="button" className="subtle-action" disabled={pushState === "unsupported" || pushState === "working"} onClick={() => void togglePush()}>{pushState === "working" ? <LoaderCircle size={14} className="spin" /> : pushState === "on" ? <BellOff size={14} /> : <Bell size={14} />}{pushState === "on" ? (ko ? "이 기기 알림 끄기" : "Turn off on this device") : (ko ? "이 기기에서 알림 받기" : "Notify this device")}</button>{pushDevices > 0 && <button type="button" className="subtle-action" onClick={() => void testPush()}>{ko ? "테스트 알림 보내기" : "Send a test"}</button>}<small>{ko ? `등록된 기기 ${pushDevices}대 · 에이전트 화면을 보고 있지 않을 때만 보내고, 한 기기에서 확인하면 다른 기기 알림도 지웁니다.` : `${pushDevices} device(s) · sent only while you are not viewing the agent; seeing one clears the others.`}</small></div>{pushNotice && <p className={`agent-push-notice ${pushNotice.error ? "error" : ""}`} role="status">{pushNotice.text}</p>}</div>
-    <div className="field agent-rules"><span>{ko ? "자동 실행 중 도구 사용" : "Tools during automatic runs"}</span><small>{ko ? "사람이 없을 때(서브에이전트, 예약 작업, 에이전트가 스스로 시작한 응답) 승인 없이 쓸 수 있는 범위입니다. '물어보기'인 호출을 만나면 그 작업은 멈추고 알림을 보냅니다. MCP 도구는 서버가 읽기 전용이라고 밝힌 것만 읽기로 봅니다. 코드 실행은 가상 컴퓨터 MCP가 생기기 전까지 쓸 수 없습니다." : "What the agent may do without asking when you are not there (subagents, scheduled work, replies it starts itself). A call set to Ask pauses that work and notifies you. MCP tools count as reads only when the server marks them read-only. Code execution stays off until a virtual computer MCP exists."}</small>
+    <div className="field agent-rules"><span>{ko ? "도구" : "Tools"}</span><small>{ko ? "스위치는 에이전트(메인 채팅과 서브에이전트)가 쓸 수 있는 도구입니다. 일반 채팅의 도구 메뉴와는 따로 저장됩니다. 읽기·쓰기는 사람이 없을 때(서브에이전트, 예약 작업, 에이전트가 스스로 시작한 응답) 승인 없이 쓸 수 있는 범위입니다. '물어보기'인 호출을 만나면 그 작업은 멈추고 알림을 보냅니다. MCP 도구는 서버가 읽기 전용이라고 밝힌 것만 읽기로 봅니다. 코드 실행은 가상 컴퓨터 MCP가 생기기 전까지 쓸 수 없습니다." : "Switches: the tools the agent (its main chat and subagents) may use, saved apart from the chat's tool menu. Read and Write: what it may do without asking when you are not there (subagents, scheduled work, replies it starts itself). A call set to Ask pauses that work and notifies you. MCP tools count as reads only when the server marks them read-only. Code execution stays off until a virtual computer MCP exists."}</small>
       {providers.map(provider => { const current = rule(provider.id); const exceptions = Object.entries(current.tools || {}); return <div key={provider.id} className="agent-rule-row">
-        <strong>{(() => { const Icon = RULE_ICONS[provider.icon] || Wrench; return <Icon size={15} />; })()}{provider.name}</strong>
+        <div className="agent-rule-head"><strong>{(() => { const Icon = RULE_ICONS[provider.icon] || Wrench; return <Icon size={15} />; })()}{provider.name}</strong>
+          <button type="button" role="switch" aria-checked={toolOn(provider.id)} aria-label={ko ? `${provider.name} 사용` : `Use ${provider.name}`} className={`toggle small ${toolOn(provider.id) ? "on" : ""}`} onClick={() => setToolOn(provider.id, !toolOn(provider.id))}><i /></button></div>
+        {provider.id === "browser" && hasComputer && <small className="agent-rule-note">{ko ? "가상 컴퓨터가 등록되어 있으면 브라우저 도구는 가상 컴퓨터 도구로 제공됩니다. 가상 컴퓨터를 켜 주세요." : "With a virtual computer registered, the browser tools come with it: switch the virtual computer on."}</small>}
         <span className="agent-rule-controls">{decisionSelect(current.read, "allow", read => setRule(provider.id, { read }), ko ? "읽기" : "Read")}{decisionSelect(current.write, "ask", write => setRule(provider.id, { write }), ko ? "쓰기" : "Write")}</span>
         {exceptions.length > 0 && <ul className="agent-rule-exceptions">{exceptions.map(([name, decision]) => <li key={name}><code>{name}</code>{decisionSelect(decision, "ask", next => setRule(provider.id, { tools: { ...current.tools, [name]: next } }), "")}<button type="button" className="agent-panel-icon" aria-label={ko ? "예외 삭제" : "Remove exception"} onClick={() => { const tools = { ...current.tools }; delete tools[name]; setRule(provider.id, { tools }); }}><X size={12} /></button></li>)}</ul>}
         <ExceptionAdder ko={ko} onAdd={name => setRule(provider.id, { tools: { ...current.tools, [name]: "allow" } })} />
       </div>; })}
     </div>
+  </Dialog>;
+}
+
+type AgentPromptKind = "instructions" | "mainPrompt" | "subagentTemplate";
+const AGENT_PROMPTS: AgentPromptKind[] = ["instructions", "mainPrompt", "subagentTemplate"];
+const promptLabel = (kind: AgentPromptKind, ko: boolean) => ({ instructions: ko ? "주기 점검 작업 지침" : "Periodic check instructions", mainPrompt: ko ? "메인 채팅 시스템 프롬프트" : "Main chat system prompt", subagentTemplate: ko ? "서브에이전트 작업 템플릿" : "Subagent task template" })[kind];
+const promptHint = (kind: AgentPromptKind, ko: boolean) => ({
+  instructions: ko ? "주기 점검마다 서브에이전트가 따르는 지침" : "What every periodic check does",
+  mainPrompt: ko ? "에이전트 메인 채팅에만 쓰는 시스템 프롬프트" : "System prompt of the agent's main chat",
+  subagentTemplate: ko ? "서브에이전트가 받는 메시지, {task}에 작업 내용이 들어감" : "The message a subagent starts from; {task} is its instructions",
+})[kind];
+const promptDefault = (kind: AgentPromptKind, ko: boolean) => kind === "instructions" ? defaultAgentInstructions(ko ? "ko" : "en") : kind === "mainPrompt" ? defaultAgentMainPrompt(ko ? "ko" : "en") : defaultSubagentTemplate(ko ? "ko" : "en");
+
+/** One agent prompt in its own editor: restore the default, close, or save it right away. */
+function AgentPromptDialog({ ko, kind, value, onClose, onSave }: { ko: boolean; kind: AgentPromptKind; value: string; onClose: () => void; onSave: (text: string) => Promise<void> }) {
+  const [text, setText] = useState(value);
+  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const missingTask = kind === "subagentTemplate" && !text.includes(SUBAGENT_TASK_PLACEHOLDER);
+  const save = async () => { setBusy(true); setError(""); try { await onSave(text); } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); setBusy(false); } };
+  return <Dialog ko={ko} title={promptLabel(kind, ko)} subtitle={promptHint(kind, ko)} onClose={onClose} wide footer={<>
+    {error && <p className="settings-notice">{error}</p>}
+    <span className="agent-prompt-actions"><button type="button" className="secondary-button" onClick={() => setText(promptDefault(kind, ko))}>{ko ? "기본으로 되돌리기" : "Restore default"}</button><button type="button" className="secondary-button" onClick={onClose}>{ko ? "닫기" : "Close"}</button><button type="button" className="save-button" disabled={busy} onClick={() => void save()}>{busy ? (ko ? "저장 중…" : "Saving…") : (ko ? "저장하기" : "Save")}</button></span>
+  </>}>
+    <textarea className="agent-prompt-text" value={text} onChange={event => setText(event.target.value)} spellCheck={false} />
+    {kind === "subagentTemplate" && <small className={missingTask ? "agent-prompt-warning" : "agent-prompt-note"}>{missingTask
+      ? (ko ? "{task}가 없습니다. 이대로 저장하면 작업 내용이 템플릿 맨 앞에 붙습니다." : "There is no {task}. Saved like this, the instructions go in front of the template.")
+      : (ko ? "{task} 자리에 메인 에이전트(또는 예약 작업)가 보낸 작업 지침이 들어갑니다. 기본 템플릿은 필요한 도구가 없으면 다른 방법으로 대신하지 말고 report_failure로 실패를 알리게 합니다." : "{task} is replaced by the instructions from the main agent or the schedule. The default template makes a subagent report a task its tools cannot do with report_failure instead of working around it.")}</small>}
   </Dialog>;
 }
 

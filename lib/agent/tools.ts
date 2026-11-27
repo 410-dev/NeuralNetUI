@@ -10,6 +10,8 @@ export type AgentToolHandlers = {
   minIntervalMinutes(userId: string): number;
   spawnSubagent(userId: string, input: { title: string; instructions: string }): Promise<{ id: string; status: string }>;
   notifyUser(userId: string, input: { message: string; runId?: string }): Promise<void>;
+  /** Marks the subagent's run failed with a reason; the run ends as failed and the main agent is told. */
+  reportFailure(userId: string, input: { runId: string; reason: string }): void;
 };
 
 const manifest = (functions: string[]): ToolProviderManifest => ({
@@ -33,7 +35,7 @@ function specs(mode: "main" | "sub"): ToolSpec[] {
     { name: "cancel_wakeup", description: "Delete a scheduled wakeup or recurring work by id.", inputSchema: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string" } } } },
   ];
   if (mode === "main") list.push({ name: "spawn_subagent", description: "Hand a task to a subagent that works in its own session with the same tools, so this chat stays short. Use it for anything needing several tool calls, reading long material or waiting. The subagent's result comes back to you as a message; tell the person what matters then. Give complete, self-contained instructions.", inputSchema: { type: "object", additionalProperties: false, required: ["title", "instructions"], properties: { title: { type: "string", description: "A few words naming the task." }, instructions: { type: "string" } } } });
-  else list.push({ name: "notify_user", description: "Send the person a message in the agent chat (and a push notification when they are away). Use it only for something worth their attention: a reminder they asked for, an important email, a conflict, a change they are tracking. Keep it short and specific.", inputSchema: { type: "object", additionalProperties: false, required: ["message"], properties: { message: { type: "string" } } } });
+  else list.push({ name: "report_failure", readOnly: true, description: "End this task as FAILED. Call it when the task cannot be done as instructed: a tool it needs is not in your tool list, a required step is impossible with the tools you have, or access is refused. Give the reason (which tool or step is missing). Do not substitute a different method instead. After calling it, end your reply with one short line.", inputSchema: { type: "object", additionalProperties: false, required: ["reason"], properties: { reason: { type: "string", description: "What is missing or impossible, e.g. 'browser_navigate is not available'." } } } }, { name: "notify_user", description: "Send the person a message in the agent chat (and a push notification when they are away). Use it only for something worth their attention: a reminder they asked for, an important email, a conflict, a change they are tracking. Keep it short and specific.", inputSchema: { type: "object", additionalProperties: false, required: ["message"], properties: { message: { type: "string" } } } });
   return list;
 }
 
@@ -74,6 +76,11 @@ export function agentToolSource(handlers: AgentToolHandlers): ToolProviderSource
           }
           if (name === "cancel_wakeup") { const id = String(args.id || ""); const removed = removeAgentSchedule(userId, id); handlers.releaseSchedule?.(userId, id); return { result: { removed } }; }
           if (name === "spawn_subagent") return { result: await handlers.spawnSubagent(userId, { title: String(args.title || ""), instructions: String(args.instructions || "") }) };
+          if (name === "report_failure") {
+            if (!agent.runId) return { result: { error: "Only a subagent can report a failed task." } };
+            handlers.reportFailure(userId, { runId: agent.runId, reason: String(args.reason || "").trim().slice(0, 2000) || "No reason given." });
+            return { result: { recorded: true, note: "The task is marked failed. End your reply now with one short line; do not try another method." } };
+          }
           if (name === "notify_user") { await handlers.notifyUser(userId, { message: String(args.message || ""), runId: agent.runId }); return { result: { delivered: true } }; }
           throw new Error(`Unknown agent tool ${name}.`);
         },

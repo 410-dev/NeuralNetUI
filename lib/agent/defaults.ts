@@ -49,3 +49,30 @@ export function agentClockLine(kind: "sent" | "returned", date: Date, settings: 
   if (settings.language === "en") return kind === "sent" ? `Current time: ${time}` : `Subagent finished and returned at: ${time}`;
   return kind === "sent" ? `현재 시각: ${time}` : `서브에이전트 종료 및 반환 시각: ${time}`;
 }
+
+/** Where the main agent's instructions go in the subagent task template. */
+export const SUBAGENT_TASK_PLACEHOLDER = "{task}";
+
+/**
+ * The message a subagent starts from: the main agent's (or the schedule's) instructions in place of {task}, and the
+ * rule that a task its tools cannot do ends as failed instead of being worked around. Editable in the agent settings.
+ */
+export function defaultSubagentTemplate(language: "ko" | "en" | undefined) {
+  return language === "en" ? [
+    "{task}",
+    "",
+    "---",
+    "Before you start, check that the tools this task needs are in your tool list. A tool listed by name with a one-line summary is available: read its definition with get_tool_details before calling it. If a tool the instructions name or need is not in the list at all, or a required step cannot be done with the tools you have, do not switch to another method and do not guess: call report_failure saying what is missing, then stop.",
+  ].join("\n") : [
+    "{task}",
+    "",
+    "---",
+    "시작하기 전에 이 작업에 필요한 도구가 도구 목록에 있는지 확인하세요. 이름과 한 줄 설명만 있는 도구도 쓸 수 있으며, 부르기 전에 get_tool_details로 정의를 받으세요. 지침에 나온 도구나 꼭 필요한 도구가 목록에 아예 없거나, 필요한 단계를 가진 도구로 할 수 없으면 다른 방법으로 대신하거나 추측하지 말고 report_failure로 무엇이 없는지 알린 뒤 멈추세요.",
+  ].join("\n");
+}
+
+/** The template with the task put in; a template without {task} gets the task in front. */
+export function applySubagentTemplate(template: string | undefined, task: string, language: "ko" | "en" | undefined) {
+  const source = template?.trim() || defaultSubagentTemplate(language);
+  return source.includes(SUBAGENT_TASK_PLACEHOLDER) ? source.split(SUBAGENT_TASK_PLACEHOLDER).join(task) : `${task}\n\n${source}`;
+}

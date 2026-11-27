@@ -16,3 +16,12 @@ test("the default main prompt holds no clock, so it is the same every turn", () 
   assert.ok(!/\d{4}-\d{2}-\d{2}/.test(prompt) && prompt.includes("Reply in Korean"));
   assert.equal(prompt, defaultAgentMainPrompt("ko"));
 });
+
+test("the subagent template puts the task in place of {task}, in front when the template has none", async () => {
+  const { applySubagentTemplate, defaultSubagentTemplate } = await import("./defaults.ts");
+  assert.equal(applySubagentTemplate("Do this:\n{task}\nThen stop.", "check mail", "ko"), "Do this:\ncheck mail\nThen stop.");
+  assert.equal(applySubagentTemplate("Rules only", "check mail", "ko"), "check mail\n\nRules only");
+  const filled = applySubagentTemplate(undefined, "check mail", "ko");
+  assert.ok(filled.startsWith("check mail") && filled.includes("report_failure"));
+  assert.ok(defaultSubagentTemplate("en").includes("{task}") && defaultSubagentTemplate("en").includes("report_failure"));
+});

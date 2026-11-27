@@ -2193,6 +2193,22 @@ select:focus-visible {
 .agent-rules { display: flex; flex-direction: column; gap: 8px; }
 .agent-rule-row { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--radius-md); background: rgba(255,255,255,.035); }
 .agent-rule-row > strong { font-size: 12.5px; }
+.agent-rule-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.agent-rule-head > strong { display: flex; align-items: center; gap: 7px; font-size: 12.5px; }
+.agent-rule-head > strong svg { color: var(--muted); flex: none; }
+.agent-rule-note { color: #e0a84a; font-size: 10.5px; }
+.agent-prompt-buttons { display: flex; flex-direction: column; gap: 6px; }
+.agent-prompt-button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: var(--radius-md); background: rgba(255,255,255,.035); color: var(--text); text-align: left; }
+.agent-prompt-button:hover { background: rgba(255,255,255,.06); }
+.agent-prompt-button > span { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.agent-prompt-button strong { font-size: 12.5px; font-weight: 600; }
+.agent-prompt-button small { color: var(--dim); font-size: 10.5px; }
+.agent-prompt-button em { color: var(--dim); font-size: 10.5px; font-style: normal; }
+.agent-prompt-button svg { color: var(--dim); flex: none; }
+.agent-prompt-text { width: 100%; min-height: min(56dvh, 520px); resize: vertical; font: 12.5px/1.55 var(--font-mono, ui-monospace, monospace); }
+.agent-prompt-note, .agent-prompt-warning { display: block; margin-top: 8px; color: var(--dim); font-size: 10.5px; }
+.agent-prompt-warning { color: #e0a84a; }
+.agent-prompt-actions { display: flex; gap: 8px; margin-left: auto; }
 .agent-rule-controls { display: flex; gap: 14px; }
 .agent-rule-select { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11.5px; }
 .agent-rule-select > span { flex: none; white-space: nowrap; }
