@@ -17,7 +17,7 @@ const WebView = WebViewBase as unknown as React.ComponentType<WebViewProps & { r
 const BACKGROUND = "#0a0a0c";
 const SERVER_KEY = "nnui.server";
 /** The page recognises the app by this token and lets it drive the keyboard layout. */
-const USER_AGENT_TOKEN = "NeuralNetUIApp/0.2.1";
+const USER_AGENT_TOKEN = "NeuralNetUIApp/0.2.2";
 
 export default function App() {
   return <SafeAreaProvider>
@@ -108,15 +108,21 @@ function Shell({ server, onChangeServer }: { server: string; onChangeServer: () 
   // The keyboard overlaps the WebView (the provider keeps the window from resizing). As soon as it
   // starts to move, the page is told where it will end and how long it takes, so the layout follows
   // it instead of catching up after a resize. The bottom safe-area padding already sits under it.
+  // Once the keyboard is fully up, the WebView itself shrinks by its height too: screens the page does not animate
+  // (sign-in, dialogs sized to the viewport) then fit above it and the focused field is scrolled into view. The
+  // page keeps its animated shell at the same height, so the chat screen does not move again. Going down, the
+  // WebView grows back at once and the page's shell follows the keyboard.
+  const [keyboardPad, setKeyboardPad] = useState(0);
   const bottomInset = insets.bottom;
   useEffect(() => {
+    const inset = (height: number) => Math.max(0, Math.round(height - bottomInset));
     const send = (height: number, duration: number) => {
-      const inset = Math.max(0, Math.round(height - bottomInset));
-      web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent("nnui-native-keyboard",{detail:{height:${inset},duration:${Math.round(duration) || 0}}}));true;`);
+      web.current?.injectJavaScript(`window.dispatchEvent(new CustomEvent("nnui-native-keyboard",{detail:{height:${inset(height)},duration:${Math.round(duration) || 0}}}));true;`);
     };
     const subscriptions = [
       KeyboardEvents.addListener("keyboardWillShow", event => send(event.height, event.duration)),
-      KeyboardEvents.addListener("keyboardWillHide", event => send(0, event.duration)),
+      KeyboardEvents.addListener("keyboardDidShow", event => setKeyboardPad(inset(event.height))),
+      KeyboardEvents.addListener("keyboardWillHide", event => { setKeyboardPad(0); send(0, event.duration); }),
     ];
     return () => subscriptions.forEach(subscription => subscription.remove());
   }, [bottomInset]);
@@ -153,7 +159,7 @@ function Shell({ server, onChangeServer }: { server: string; onChangeServer: () 
     <Pressable style={({ pressed }) => [styles.secondary, pressed && styles.pressed]} onPress={onChangeServer}><Text style={styles.secondaryText}>서버 주소 변경</Text></Pressable>
   </View>;
 
-  return <View style={[styles.fill, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }]}>
+  return <View style={[styles.fill, { paddingTop: insets.top, paddingBottom: insets.bottom + keyboardPad, paddingLeft: insets.left, paddingRight: insets.right }]}>
     <WebView
       ref={web}
       source={{ uri: startUrl }}
