@@ -13,6 +13,7 @@
     "start": "node scripts/start-server.mjs start"
   },
   "dependencies": {
+    "@a2ui/agent": "^0.2.1",
     "@anthropic-ai/sdk": "^1.11.0",
     "@lmstudio/sdk": "^2.0.0",
     "@modelcontextprotocol/client": "^2.0.0",

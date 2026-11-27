@@ -29,8 +29,8 @@ function serviceAccount(): ServiceAccount | undefined {
   if (account.value || Date.now() - account.checked < 60_000) return account.value;
   account = { checked: Date.now() };
   for (const [file, source] of [[uploadedPath(), "upload"], [hostPath(), "file"]] as const) {
-    if (!existsSync(file)) continue;
-    try { account = { value: parseAccount(readFileSync(file, "utf8")), source, checked: Date.now() }; break; }
+    if (!existsSync(/* turbopackIgnore: true */ file)) continue;
+    try { account = { value: parseAccount(readFileSync(/* turbopackIgnore: true */ file, "utf8")), source, checked: Date.now() }; break; }
     catch (error) { console.warn(`Firebase credentials in ${file} could not be used`, error instanceof Error ? error.message : error); }
   }
   return account.value;
@@ -40,7 +40,7 @@ function forget() { account = { checked: 0 }; token = undefined; }
 export type FirebaseStatus = { configured: boolean; source?: "upload" | "file"; projectId?: string; clientEmail?: string; hostFile: boolean };
 export function firebaseStatus(): FirebaseStatus {
   const sa = serviceAccount();
-  return { configured: Boolean(sa), source: account.source, projectId: sa?.project_id, clientEmail: sa?.client_email, hostFile: existsSync(hostPath()) };
+  return { configured: Boolean(sa), source: account.source, projectId: sa?.project_id, clientEmail: sa?.client_email, hostFile: existsSync(/* turbopackIgnore: true */ hostPath()) };
 }
 export function firebaseProjectId() { return serviceAccount()?.project_id; }
 
@@ -49,15 +49,15 @@ export async function saveFirebaseCredentials(text: string) {
   const candidate = parseAccount(text);
   try { await signIn(candidate); } catch (error) { throw Object.assign(new Error(`이 키로 Firebase에 로그인하지 못했습니다: ${error instanceof Error ? error.message : String(error)}`), { status: 400 }); }
   const file = uploadedPath();
-  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  chmodSync(path.dirname(file), 0o700);
-  writeFileSync(`${file}.tmp`, text, { mode: 0o600 });
-  renameSync(`${file}.tmp`, file);
+  mkdirSync(/* turbopackIgnore: true */ path.dirname(file), { recursive: true, mode: 0o700 });
+  chmodSync(/* turbopackIgnore: true */ path.dirname(file), 0o700);
+  writeFileSync(/* turbopackIgnore: true */ `${file}.tmp`, text, { mode: 0o600 });
+  renameSync(/* turbopackIgnore: true */ `${file}.tmp`, file);
   forget();
   return firebaseStatus();
 }
 
-export function removeUploadedFirebaseCredentials() { rmSync(uploadedPath(), { force: true }); forget(); return firebaseStatus(); }
+export function removeUploadedFirebaseCredentials() { rmSync(/* turbopackIgnore: true */ uploadedPath(), { force: true }); forget(); return firebaseStatus(); }
 
 export function fcmConfigured() { return Boolean(serviceAccount()); }
 

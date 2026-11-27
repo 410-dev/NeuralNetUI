@@ -12,7 +12,8 @@ import { specFromModelTool } from "./registry";
 import type { ToolContext, ToolProvider, ToolProviderSource, ToolSpec } from "./types";
 import type { ModelContentPart } from "../document-processing";
 import { a2uiInstructions, RENDER_UI_TOOL } from "../a2ui/prompt";
-import { a2uiSurfaces } from "../a2ui/runtime";
+import { a2uiBatches, a2uiSurfaces } from "../a2ui/runtime";
+import { compileExpress, expressInstructions, RENDER_UI_EXPRESS_TOOL } from "../a2ui/express";
 import { validateMessages } from "../a2ui/validate";
 
 /**
@@ -282,6 +283,21 @@ const a2ui: ToolProvider = {
   },
 };
 
-export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, browserProvider, youtube, time, location, storage, codeRunner, multipleChoice, artifact, a2ui];
+/** The same UI from A2UI Express, compiled by the official SDK and then checked like render_ui. */
+const a2uiExpress: ToolProvider = {
+  manifest: manifest("a2ui-express"),
+  instructions: () => expressInstructions(),
+  tools: () => [RENDER_UI_EXPRESS_TOOL],
+  async execute(_name, args, ctx) {
+    const history = ctx.history().filter(event => event.id !== ctx.callId);
+    const compiled = compileExpress(String(args.ui ?? ""), a2uiBatches(history).map(batch => batch.messages));
+    if ("error" in compiled) return { result: { ok: false, errors: [compiled.error], hint: "Nothing was shown. Fix the program and call render_ui_express again." } };
+    const outcome = validateMessages(compiled.messages, a2uiSurfaces(history));
+    if (outcome.errors.length) return { result: { ok: false, errors: outcome.errors, hint: "Nothing was shown. Fix the program and call render_ui_express again." } };
+    return { result: { ok: true, surfaces: outcome.touched, messages: compiled.messages }, content: [{ type: "text", text: JSON.stringify({ ok: true, surfaces: outcome.touched, note: "Shown to the person. Their button presses arrive as <a2ui-action> in their next message." }) }] };
+  },
+};
+
+export const BUILTIN_PROVIDERS: readonly ToolProvider[] = [webSearch, pageVisit, browserProvider, youtube, time, location, storage, codeRunner, multipleChoice, artifact, a2ui, a2uiExpress];
 
 export const builtinSource: ToolProviderSource = { id: "builtin", providers: () => [...BUILTIN_PROVIDERS] };

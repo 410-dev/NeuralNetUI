@@ -122,12 +122,23 @@ export function messagesOf(args: unknown): AgentMessage[] {
 /** Surfaces the conversation's accepted render_ui calls left on screen, in order (rejected calls changed nothing). */
 export function a2uiSurfaces(events: ToolEvent[]): Record<string, SurfaceState> {
   let surfaces: Record<string, SurfaceState> = {};
-  for (const event of events) {
-    if (event.name !== "render_ui" || event.status !== "completed") continue;
-    const result = event.result && typeof event.result === "object" ? event.result as { ok?: unknown } : {};
-    if (result.ok === true) surfaces = applyMessages(surfaces, messagesOf(event.arguments), event.id);
-  }
+  for (const batch of a2uiBatches(events)) surfaces = applyMessages(surfaces, batch.messages, batch.eventId);
   return surfaces;
+}
+
+/**
+ * The v1.0 messages of every accepted UI call, in order: render_ui carries them as its arguments, render_ui_express
+ * as the compiled result (its arguments are the Express source).
+ */
+export function a2uiBatches(events: ToolEvent[]): Array<{ eventId: string; messages: AgentMessage[] }> {
+  const batches: Array<{ eventId: string; messages: AgentMessage[] }> = [];
+  for (const event of events) {
+    if ((event.name !== "render_ui" && event.name !== "render_ui_express") || event.status !== "completed") continue;
+    const result = event.result && typeof event.result === "object" ? event.result as { ok?: unknown; messages?: unknown } : {};
+    if (result.ok !== true) continue;
+    batches.push({ eventId: event.id, messages: event.name === "render_ui" ? messagesOf(event.arguments) : messagesOf(result) });
+  }
+  return batches;
 }
 
 // ---------------------------------------------------------------- evaluation
