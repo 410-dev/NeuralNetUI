@@ -13,10 +13,13 @@ services:
       HOSTNAME: 0.0.0.0
       PORT: 3000
       NEURAL_CHAT_DATA_DIR: /app/data
+      NEURAL_CHAT_SECRETS_DIR: /app/secrets
     ports:
       - "${NEURAL_CHAT_PORT:-3000}:3000"
     volumes:
       - "${NEURAL_CHAT_DATA_PATH:-./data}:/app/data"
+      # Keys kept out of data backups, e.g. firebase-admin.json for the mobile app's notifications.
+      - "${NEURAL_CHAT_SECRETS_PATH:-./secrets}:/app/secrets:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

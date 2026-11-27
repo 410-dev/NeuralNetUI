@@ -8,6 +8,7 @@ import { defaultAgentInstructions, defaultAgentMainPrompt, defaultSubagentTempla
 import type { ToolState } from "@/lib/tools/state";
 import { useModalFocus } from "@/lib/use-modal-focus";
 import { SelectMenu } from "./select-menu";
+import { isNativeShell, nativePush } from "@/lib/native-bridge";
 import { BUILTIN_TOOL_PROVIDERS } from "@/lib/tools/catalog";
 import type { ModelConfig, StoredMessage } from "@/lib/types";
 
@@ -189,6 +190,17 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
   useEffect(() => {
     // "On" means this browser holds a subscription the server also has; anything else offers to register again.
     void (async () => {
+      if (isNativeShell()) {
+        // In the mobile app "on" means the app has notifications on and the server holds its current token.
+        const reply = await nativePush("status").catch(() => undefined);
+        if (!reply) { setPushState("unsupported"); setPushNotice({ text: ko ? "앱이 알림 상태를 알려주지 않습니다. 앱을 최신 버전으로 업데이트해 주세요." : "The app did not report its notification state. Update the app." }); return; }
+        if (reply.permission === "denied") { setPushState("denied"); return; }
+        const known = await api<{ registered?: boolean; devices: number; nativeAvailable?: boolean }>(`/api/agent/push${reply.token ? `?nativeToken=${encodeURIComponent(reply.token)}` : ""}`).catch(() => undefined);
+        if (known) setPushDevices(known.devices);
+        if (known && !known.nativeAvailable) setPushNotice({ text: ko ? "서버에 Firebase 서비스 계정 키가 없어 앱으로 알림을 보낼 수 없습니다." : "The server has no Firebase service account key, so it cannot notify the app.", error: true });
+        setPushState(reply.enabled && known?.registered ? "on" : "off");
+        return;
+      }
       const support = pushSupport(ko);
       if (support) { setPushState("unsupported"); setPushNotice({ text: support }); return; }
       if (Notification.permission === "denied") { setPushState("denied"); return; }
@@ -217,6 +229,20 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
   const togglePush = async () => {
     const enable = pushState !== "on";
     setPushState("working"); setPushNotice(undefined);
+    if (isNativeShell()) {
+      try {
+        const reply = await nativePush(enable ? "enable" : "disable", 120_000);
+        if (enable && reply.permission !== "granted") { setPushState("denied"); setPushNotice({ text: ko ? "알림 권한이 허용되지 않았습니다. 휴대폰 설정 > 앱 > NeuralNetUI > 알림에서 허용해 주세요." : "Notification permission was not granted. Allow it in the phone's settings for NeuralNetUI.", error: true }); return; }
+        if (enable && !reply.token) throw new Error(ko ? "앱이 알림 토큰을 받지 못했습니다." : "The app got no notification token.");
+        const body = enable
+          ? await api<{ devices: number }>("/api/agent/push", { method: "POST", body: JSON.stringify({ native: { token: reply.token, platform: reply.platform } }) })
+          : reply.token ? await api<{ devices: number }>("/api/agent/push", { method: "DELETE", body: JSON.stringify({ nativeToken: reply.token }) }) : await api<{ devices: number }>("/api/agent/push");
+        setPushDevices(body.devices); setPushState(enable ? "on" : "off");
+        setPushNotice({ text: enable ? (ko ? `이 휴대폰을 등록했습니다. 등록된 기기 ${body.devices}대. 긴급 알림만 소리와 함께 화면 위에 뜨고, 나머지는 조용히 알림창에 쌓입니다.` : `This phone is registered (${body.devices} in total). Only urgent notifications ring and pop up; the rest arrive silently.`) : (ko ? "이 휴대폰의 알림을 껐습니다." : "Notifications are off on this phone.") });
+        onSaved();
+      } catch (caught) { setPushState("off"); setPushNotice({ text: `${ko ? "등록하지 못했습니다" : "Could not register"}: ${caught instanceof Error ? caught.message : String(caught)}`, error: true }); }
+      return;
+    }
     try {
       // The permission prompt is asked first, while the tap still counts as the person's own action.
       if (enable && Notification.permission !== "granted" && await Notification.requestPermission() !== "granted") { setPushState("denied"); setPushNotice({ text: ko ? "알림 권한이 허용되지 않았습니다. 브라우저(또는 앱) 설정에서 이 사이트의 알림을 허용해 주세요." : "Notification permission was not granted. Allow notifications for this site in the browser or app settings.", error: true }); return; }
@@ -229,10 +255,10 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
       setPushNotice({ text: `${ko ? "등록하지 못했습니다" : "Could not register"}: ${caught instanceof Error ? caught.message : String(caught)}`, error: true });
     }
   };
-  const testPush = async () => {
+  const testPush = async (urgent = false) => {
     setPushNotice({ text: ko ? "보내는 중…" : "Sending…" });
     try {
-      const body = await api<{ results: Array<{ endpoint: string; ok: boolean; status?: number; error?: string }>; devices: number }>("/api/agent/push", { method: "POST", body: JSON.stringify({ test: true, ko }) });
+      const body = await api<{ results: Array<{ endpoint: string; ok: boolean; status?: number; error?: string }>; devices: number }>("/api/agent/push", { method: "POST", body: JSON.stringify({ test: true, ko, urgent }) });
       setPushDevices(body.devices);
       const failed = body.results.filter(item => !item.ok);
       setPushNotice({ error: failed.length > 0, text: !body.results.length ? (ko ? "등록된 기기가 없습니다." : "No device is registered.")
@@ -263,7 +289,7 @@ export function AgentSettingsDialog({ ko, state, models, onClose, onSaved }: { k
       <label className="field"><span>{ko ? "압축 기준 (컨텍스트의 %)" : "Compact at (% of context)"}</span><input type="number" min={10} max={95} value={value.compactPercent} onChange={event => setValue({ ...value, compactPercent: Math.min(95, Math.max(10, Math.round(Number(event.target.value) || 50))) })} /><small>{ko ? "메인 채팅과 모든 서브에이전트가 이 비율을 넘으면 압축합니다. 하네스 설정과 별개입니다." : "The main chat and every subagent compact past this share; separate from harness settings."}</small></label>
     </div>
     <label className="field"><span>{ko ? "도구 실행 제한 시간 (분)" : "Tool time limit (minutes)"}</span><input type="number" min={0} max={1440} value={value.toolTimeoutMinutes ?? 10} onChange={event => setValue({ ...value, toolTimeoutMinutes: Math.min(1440, Math.max(0, Math.round(Number(event.target.value) || 0))) })} /><small>{ko ? "에이전트의 도구 호출이 이 시간을 넘기면 취소하고, 모델은 결과 없이 이어서 작업합니다. 승인을 기다리는 시간은 넣지 않습니다. 0은 제한 없음입니다. 실행 중인 도구는 언제든 '도구 취소'로 직접 멈출 수 있습니다." : "An agent tool call running longer than this is cancelled and the model carries on without its result. Time waiting for approval does not count. 0 means no limit. You can also cancel a running tool any time."}</small></label>
-    <div className="field"><span>{ko ? "이 기기 푸시 알림" : "Push notifications on this device"}</span><div className="agent-push-row"><button type="button" className="subtle-action" disabled={pushState === "unsupported" || pushState === "working"} onClick={() => void togglePush()}>{pushState === "working" ? <LoaderCircle size={14} className="spin" /> : pushState === "on" ? <BellOff size={14} /> : <Bell size={14} />}{pushState === "on" ? (ko ? "이 기기 알림 끄기" : "Turn off on this device") : (ko ? "이 기기에서 알림 받기" : "Notify this device")}</button>{pushDevices > 0 && <button type="button" className="subtle-action" onClick={() => void testPush()}>{ko ? "테스트 알림 보내기" : "Send a test"}</button>}<small>{ko ? `등록된 기기 ${pushDevices}대 · 에이전트 화면을 보고 있지 않을 때만 보내고, 한 기기에서 확인하면 다른 기기 알림도 지웁니다.` : `${pushDevices} device(s) · sent only while you are not viewing the agent; seeing one clears the others.`}</small></div>{pushNotice && <p className={`agent-push-notice ${pushNotice.error ? "error" : ""}`} role="status">{pushNotice.text}</p>}</div>
+    <div className="field"><span>{ko ? "이 기기 푸시 알림" : "Push notifications on this device"}</span><div className="agent-push-row"><button type="button" className="subtle-action" disabled={pushState === "unsupported" || pushState === "working"} onClick={() => void togglePush()}>{pushState === "working" ? <LoaderCircle size={14} className="spin" /> : pushState === "on" ? <BellOff size={14} /> : <Bell size={14} />}{pushState === "on" ? (ko ? "이 기기 알림 끄기" : "Turn off on this device") : (ko ? "이 기기에서 알림 받기" : "Notify this device")}</button>{pushDevices > 0 && <><button type="button" className="subtle-action" onClick={() => void testPush()}>{ko ? "테스트 알림 보내기" : "Send a test"}</button><button type="button" className="subtle-action" onClick={() => void testPush(true)}>{ko ? "긴급 알림 테스트" : "Test an urgent one"}</button></>}<small>{ko ? `등록된 기기 ${pushDevices}대 · 에이전트 화면을 보고 있지 않을 때만 보내고, 한 기기에서 확인하면 다른 기기 알림도 지웁니다.` : `${pushDevices} device(s) · sent only while you are not viewing the agent; seeing one clears the others.`}</small></div>{pushNotice && <p className={`agent-push-notice ${pushNotice.error ? "error" : ""}`} role="status">{pushNotice.text}</p>}</div>
     <div className="field agent-rules"><span>{ko ? "도구" : "Tools"}</span><small>{ko ? "스위치는 에이전트(메인 채팅과 서브에이전트)가 쓸 수 있는 도구입니다. 일반 채팅의 도구 메뉴와는 따로 저장됩니다. 읽기·쓰기는 사람이 없을 때(서브에이전트, 예약 작업, 에이전트가 스스로 시작한 응답) 승인 없이 쓸 수 있는 범위입니다. '물어보기'인 호출을 만나면 그 작업은 멈추고 알림을 보냅니다. MCP 도구는 서버가 읽기 전용이라고 밝힌 것만 읽기로 봅니다. 코드 실행은 가상 컴퓨터 MCP가 생기기 전까지 쓸 수 없습니다." : "Switches: the tools the agent (its main chat and subagents) may use, saved apart from the chat's tool menu. Read and Write: what it may do without asking when you are not there (subagents, scheduled work, replies it starts itself). A call set to Ask pauses that work and notifies you. MCP tools count as reads only when the server marks them read-only. Code execution stays off until a virtual computer MCP exists."}</small>
       {providers.map(provider => { const current = rule(provider.id); const exceptions = Object.entries(current.tools || {}); return <div key={provider.id} className="agent-rule-row">
         <div className="agent-rule-head"><strong>{(() => { const Icon = RULE_ICONS[provider.icon] || Wrench; return <Icon size={15} />; })()}{provider.name}</strong>

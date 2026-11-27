@@ -1,5 +1,6 @@
 import webpush from "web-push";
 import { db } from "../database";
+import { sendFcm } from "./fcm";
 
 /**
  * Web Push for the agent. The server's VAPID key pair is created once and kept in the database. A message goes to
@@ -39,21 +40,51 @@ export function removePushSubscription(userId: string, endpoint: string) {
   db.prepare("DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?").run(endpoint, userId);
 }
 
-export function pushDeviceCount(userId: string) {
-  return (db.prepare("SELECT COUNT(*) AS n FROM push_subscriptions WHERE user_id = ?").get(userId) as { n: number }).n;
+/** The mobile app registers its FCM token (Android, and iOS later) through the page it hosts. */
+export function saveNativePushToken(userId: string, input: { token?: unknown; platform?: unknown }, userAgent?: string) {
+  const token = typeof input.token === "string" ? input.token.trim() : "";
+  const platform = input.platform === "ios" ? "ios" : input.platform === "android" ? "android" : "";
+  if (!token || token.length > 4096 || !platform) throw Object.assign(new Error("Invalid device token."), { status: 400 });
+  db.prepare(`INSERT INTO native_push_tokens(token, user_id, platform, user_agent, created_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, platform = excluded.platform, user_agent = excluded.user_agent`)
+    .run(token, userId, platform, userAgent?.slice(0, 300) ?? null, new Date().toISOString());
 }
 
-type Payload = { title: string; body: string; tag?: string; url?: string; close?: boolean };
+export function removeNativePushToken(userId: string, token: string) {
+  db.prepare("DELETE FROM native_push_tokens WHERE token = ? AND user_id = ?").run(token, userId);
+}
+
+export function hasNativePushToken(userId: string, token: string) {
+  return Boolean(db.prepare("SELECT 1 FROM native_push_tokens WHERE user_id = ? AND token = ?").get(userId, token));
+}
+
+export function pushDeviceCount(userId: string) {
+  const web = (db.prepare("SELECT COUNT(*) AS n FROM push_subscriptions WHERE user_id = ?").get(userId) as { n: number }).n;
+  const native = (db.prepare("SELECT COUNT(*) AS n FROM native_push_tokens WHERE user_id = ?").get(userId) as { n: number }).n;
+  return web + native;
+}
+
+/** `urgent` interrupts the person (sound, heads-up); otherwise the notification waits quietly where they will see it. */
+type Payload = { title: string; body: string; tag?: string; url?: string; close?: boolean; urgent?: boolean };
 
 export type PushResult = { endpoint: string; ok: boolean; status?: number; error?: string };
 
 /** Sends to every device; subscriptions the push service reports as gone are removed. */
 export async function pushToUser(userId: string, payload: Payload): Promise<PushResult[]> {
   const rows = db.prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?").all(userId) as Array<{ endpoint: string; p256dh: string; auth: string }>;
-  if (!rows.length) return [];
+  // A "close" push only tidies browsers; the app clears its own notifications when opened.
+  const native = payload.close ? [] : db.prepare("SELECT token, platform FROM native_push_tokens WHERE user_id = ?").all(userId) as Array<{ token: string; platform: string }>;
+  if (!rows.length && !native.length) return [];
   const keys = vapidKeys();
   const body = JSON.stringify({ tag: "neuralnetui-agent", url: "/?agent=1", ...payload });
-  return Promise.all(rows.map(async (row): Promise<PushResult> => {
+  const nativeResults = native.map(async (row): Promise<PushResult> => {
+    const sent = await sendFcm(row.token, { title: payload.title, body: payload.body, urgent: payload.urgent === true, url: payload.url || "/?agent=1" });
+    if (sent.ok) db.prepare("UPDATE native_push_tokens SET last_used_at = ? WHERE token = ?").run(new Date().toISOString(), row.token);
+    else if (sent.gone) db.prepare("DELETE FROM native_push_tokens WHERE token = ?").run(row.token);
+    else console.warn("App push delivery failed", sent.status, sent.error);
+    return { endpoint: `${row.platform} app`, ok: sent.ok, status: sent.status, error: sent.error };
+  });
+  const webResults = rows.map(async (row): Promise<PushResult> => {
     try {
       const sent = await webpush.sendNotification({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, body, { vapidDetails: { subject: pushSubject(), publicKey: keys.publicKey, privateKey: keys.privateKey }, TTL: 3600, urgency: "high" });
       db.prepare("UPDATE push_subscriptions SET last_used_at = ? WHERE endpoint = ?").run(new Date().toISOString(), row.endpoint);
@@ -67,7 +98,8 @@ export async function pushToUser(userId: string, payload: Payload): Promise<Push
       else console.warn("Push delivery failed", status, detail);
       return { endpoint: new URL(row.endpoint).host, ok: false, status, error: detail };
     }
-  }));
+  });
+  return Promise.all([...webResults, ...nativeResults]);
 }
 
 declare global { var neuralPushPending: Set<string> | undefined; }
