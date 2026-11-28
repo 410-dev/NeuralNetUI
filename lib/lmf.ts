@@ -152,21 +152,42 @@ export type LmfQuotaWindow = { name: string; usedPercent: number; thresholdPerce
 /** A routing target with its remaining provider quota; `windows` is empty when the provider reports none. */
 export type LmfQuotaTarget = { key: string; label: string; position?: number; available: boolean; windows: LmfQuotaWindow[] };
 
+/** Route windows (`/v1/lmf/route` providers[].windows, `/v1/lmf/route/agy-quota` targets[].windows) in display shape. */
+function quotaWindows(value: unknown): LmfQuotaWindow[] {
+  return (Array.isArray(value) ? value : []).flatMap(raw => {
+    const w = record(raw); const used = w?.used;
+    if (!w || typeof used !== "number" || !Number.isFinite(used)) return [];
+    const threshold = typeof w.threshold === "number" ? w.threshold : undefined;
+    const observed = typeof w.observed_at === "number" && w.observed_at > 0 ? new Date(w.observed_at * 1000).toISOString() : undefined;
+    return [{ name: text(w.name) || "", usedPercent: Math.round(used * 1000) / 10, thresholdPercent: threshold === undefined ? undefined : Math.round(threshold * 1000) / 10,
+      windowSeconds: typeof w.window_seconds === "number" && w.window_seconds > 0 ? w.window_seconds : undefined, resetsAt: text(w.resets_at), observedAt: observed,
+      source: w.source === "config" ? "config" as const : "provider" as const }];
+  });
+}
+
+/** Identifies one routing target across `/v1/lmf/route` and `/v1/lmf/route/agy-quota`. */
+export function quotaTargetKey(entry: LmfRouteEntry) {
+  return `${entry.position ?? ""}:${lmfRouteKey(entry)}:${entry.effort ?? ""}`;
+}
+
 /** The routing targets of `/v1/lmf/route` with their usage windows, in routing order. */
 export function quotaTargets(payload: unknown, model: Pick<ModelConfig, "routeDisplayNames">): LmfQuotaTarget[] {
   const providers = record(payload)?.providers;
   return (Array.isArray(providers) ? providers : []).flatMap(item => {
     const entry = routeEntry(item); const value = record(item);
     if (!entry || !value) return [];
-    const windows = (Array.isArray(value.windows) ? value.windows : []).flatMap(raw => {
-      const w = record(raw); const used = w?.used;
-      if (!w || typeof used !== "number" || !Number.isFinite(used)) return [];
-      const threshold = typeof w.threshold === "number" ? w.threshold : undefined;
-      const observed = typeof w.observed_at === "number" && w.observed_at > 0 ? new Date(w.observed_at * 1000).toISOString() : undefined;
-      return [{ name: text(w.name) || "", usedPercent: Math.round(used * 1000) / 10, thresholdPercent: threshold === undefined ? undefined : Math.round(threshold * 1000) / 10,
-        windowSeconds: typeof w.window_seconds === "number" && w.window_seconds > 0 ? w.window_seconds : undefined, resetsAt: text(w.resets_at), observedAt: observed,
-        source: w.source === "config" ? "config" as const : "provider" as const }];
-    });
-    return [{ key: `${entry.position ?? ""}:${lmfRouteKey(entry)}:${entry.effort ?? ""}`, label: lmfRouteLabel(model, entry), position: entry.position, available: value.available !== false, windows }];
+    return [{ key: quotaTargetKey(entry), label: lmfRouteLabel(model, entry), position: entry.position, available: value.available !== false, windows: quotaWindows(value.windows) }];
+  });
+}
+
+/** Antigravity quota of one routing target, read by LMF from the CLI's TUI (`/v1/lmf/route/agy-quota`, LMF 0.3.12+). */
+export type LmfAgyQuota = { key: string; windows: LmfQuotaWindow[]; group?: string; error?: string };
+
+export function agyQuotaTargets(payload: unknown): LmfAgyQuota[] {
+  const targets = record(payload)?.targets;
+  return (Array.isArray(targets) ? targets : []).flatMap(item => {
+    const entry = routeEntry(item); const value = record(item);
+    if (!entry || !value) return [];
+    return [{ key: quotaTargetKey(entry), windows: quotaWindows(value.windows), group: text(value.group), error: text(value.error) }];
   });
 }

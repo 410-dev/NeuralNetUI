@@ -45,6 +45,7 @@ const appearanceSchema = z.object({
   thinkingIncludesPromptTime: z.boolean().default(true),
   thinkingShowsPromptTime: z.boolean().default(true),
   chatBackgroundGlow: z.boolean().default(true),
+  lmfShowAllWindows: z.boolean().default(false),
   greetings: z.object({
     ko: z.partialRecord(z.enum(["earlyDawn", "morning", "midday", "afternoon", "evening", "night", "lateNight"]), z.array(z.string().max(200)).max(5)).optional(),
     en: z.partialRecord(z.enum(["earlyDawn", "morning", "midday", "afternoon", "evening", "night", "lateNight"]), z.array(z.string().max(200)).max(5)).optional(),

@@ -32,6 +32,8 @@ export interface AppearancePreferences {
   thinkingShowsPromptTime: boolean;
   /** Carry the accent glow into an open chat as a dim wash along the bottom of the thread. */
   chatBackgroundGlow: boolean;
+  /** Usage popover: list every window of each LMF routing target instead of only the one closest to its limit. */
+  lmfShowAllWindows: boolean;
   /** Per-effort description overrides. An absent key falls back to the built-in wording. */
   reasoningNotes: Record<string, string>;
   greetings: GreetingOverrides;

@@ -109,3 +109,17 @@ test("quota targets: provider windows in routing order, none for a provider with
   assert.equal(targets[2].available, false);
   assert.equal(targets[2].windows.length, 0);
 });
+
+test("antigravity quota targets share keys with the route targets they fill in", () => {
+  const route = lmf.quotaTargets({ providers: [{ provider: "gemini", model: "gemini-4-hydrogen-high", position: 2, windows: [] }] }, {});
+  const agy = lmf.agyQuotaTargets({ object: "lmf.route.agy_quota", targets: [
+    { provider: "gemini", model: "gemini-4-hydrogen-high", position: 2, group: "Gemini Models", windows: [
+      { name: "weekly", label: "Weekly", source: "provider", used: 0.0733, threshold: 0.7, window_seconds: 604800, resets_at: "2026-12-03T15:04:35+00:00", observed_at: 1795867656 },
+      { name: "five_hour", source: "provider", used: 0.0194, threshold: 0.75, window_seconds: 18000 }] },
+    { provider: "gemini2", position: 4, windows: [], error: "could not read the Antigravity quota: not signed in" }] });
+  assert.equal(agy[0].key, route[0].key);
+  assert.equal(agy[0].group, "Gemini Models");
+  assert.deepEqual(agy[0].windows.map(item => [item.name, item.windowSeconds, item.usedPercent, item.thresholdPercent]), [["weekly", 604800, 7.3, 70], ["five_hour", 18000, 1.9, 75]]);
+  assert.match(agy[1].error || "", /not signed in/);
+  assert.deepEqual(lmf.agyQuotaTargets({ error: "x" }), []);
+});

@@ -21,6 +21,7 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   thinkingIncludesPromptTime: true,
   thinkingShowsPromptTime: true,
   chatBackgroundGlow: true,
+  lmfShowAllWindows: false,
   reasoningNotes: {},
   greetings: {},
 };
@@ -147,6 +148,7 @@ export function normalizeAppearance(input: Partial<AppearancePreferences> | unde
     thinkingIncludesPromptTime: input?.thinkingIncludesPromptTime !== false,
     thinkingShowsPromptTime: input?.thinkingShowsPromptTime !== false,
     chatBackgroundGlow: input?.chatBackgroundGlow !== false,
+    lmfShowAllWindows: input?.lmfShowAllWindows === true,
     reasoningNotes: normalizeReasoningNotes(input?.reasoningNotes),
     greetings: normalizeGreetings(input?.greetings),
   };

@@ -48,7 +48,7 @@ test("stored notes keep only known keys and trim them", () => {
 });
 
 test("appearance preferences fall back to defaults and clamp the per-fragment fade duration", () => {
-  assert.deepEqual(normalizeAppearance(undefined), { lmStudioProgress: "both", accentPalette: "blue", accentColor: "#4d7fd8", streamReveal: "instant", streamFadeDurationMs: 240, showReasoningNotes: true, thinkingIncludesPromptTime: true, thinkingShowsPromptTime: true, chatBackgroundGlow: true, reasoningNotes: {}, greetings: {} });
+  assert.deepEqual(normalizeAppearance(undefined), { lmStudioProgress: "both", accentPalette: "blue", accentColor: "#4d7fd8", streamReveal: "instant", streamFadeDurationMs: 240, showReasoningNotes: true, thinkingIncludesPromptTime: true, thinkingShowsPromptTime: true, chatBackgroundGlow: true, lmfShowAllWindows: false, reasoningNotes: {}, greetings: {} });
   const normalized = normalizeAppearance({ accentPalette: "nope" as never, streamReveal: "fade", streamFadeDurationMs: 999 });
   assert.equal(normalized.accentPalette, "blue");
   assert.equal(normalized.streamFadeDurationMs, 800);
